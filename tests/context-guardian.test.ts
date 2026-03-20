@@ -68,4 +68,23 @@ describe("ContextGuardian", () => {
     const status = guardian.parseStatusLine("some random output");
     expect(status).toBeNull();
   });
+
+  it("parses TUI status bar format", () => {
+    const status = guardian.parseStatusLine(
+      " Opus 4.6 1M | 󰉋 blog | 󰊢 main ● |  15.1% · 151.5k tokens"
+    );
+    expect(status).toEqual({
+      used_percentage: 15.1,
+      remaining_percentage: 84.9,
+      context_window_size: 200000,
+    });
+  });
+
+  it("parses TUI status bar with high usage", () => {
+    const status = guardian.parseStatusLine("82.3% · 164.6k tokens");
+    expect(status).not.toBeNull();
+    expect(status!.used_percentage).toBe(82.3);
+    expect(status!.remaining_percentage).toBeCloseTo(17.7);
+    expect(status!.context_window_size).toBe(200000);
+  });
 });

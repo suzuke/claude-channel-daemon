@@ -27,15 +27,26 @@ export class ContextGuardian extends EventEmitter {
   }
 
   parseStatusLine(line: string): ContextStatus | null {
+    // Try JSON format first (status line script output)
     try {
       const parsed = JSON.parse(line);
       if (parsed?.context_window) {
         return parsed.context_window as ContextStatus;
       }
-      return null;
-    } catch {
-      return null;
+    } catch {}
+
+    // Parse TUI status bar format: "15.1% · 151.5k tokens"
+    const pctMatch = line.match(/(\d+(?:\.\d+)?)%\s*·\s*([\d.]+)k?\s*tokens/);
+    if (pctMatch) {
+      const used = parseFloat(pctMatch[1]);
+      return {
+        used_percentage: used,
+        remaining_percentage: 100 - used,
+        context_window_size: 200000, // default assumption
+      };
     }
+
+    return null;
   }
 
   startTimer(): void {
