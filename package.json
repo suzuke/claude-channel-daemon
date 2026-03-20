@@ -1,0 +1,36 @@
+{
+  "name": "claude-channel-daemon",
+  "version": "0.1.0",
+  "description": "Reliable daemon wrapper for Claude Code Channels",
+  "type": "module",
+  "bin": {
+    "claude-channel-daemon": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "chokidar": "^5.0.0",
+    "commander": "^14.0.3",
+    "ejs": "^5.0.1",
+    "js-yaml": "^4.1.1",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/ejs": "^3.1.5",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
