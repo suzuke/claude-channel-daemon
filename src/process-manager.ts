@@ -116,6 +116,9 @@ export class ProcessManager extends EventEmitter {
     const claudeBin = this.resolveClaudeBin();
     const args: string[] = [];
 
+    // Channel mode: route Telegram messages as user prompts
+    args.push("--channels", `plugin:${this.config.channel_plugin}`);
+
     // Inject status line script via --settings
     const settings = {
       statusLine: {
