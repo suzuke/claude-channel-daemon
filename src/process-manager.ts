@@ -74,6 +74,13 @@ export class ProcessManager extends EventEmitter {
     });
   }
 
+  /** Clear saved session ID so next start creates a fresh session. */
+  clearSessionId(): void {
+    this.sessionId = null;
+    this.saveSessionId();
+    this.logger.info("Session ID cleared — next start will create a fresh session");
+  }
+
   sendInput(text: string): void {
     if (!this.term || !this.running) {
       this.logger.warn("Cannot send input: process not running");

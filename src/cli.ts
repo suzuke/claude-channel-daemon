@@ -167,45 +167,19 @@ program
     // Watch status line JSON file for context updates
     guardian.startWatching();
 
-    // Handle rotation
+    // Handle rotation — kill and respawn instead of /clear
     guardian.on("rotate", async (reason: string) => {
-      logger.info({ reason }, "🔄 Rotation triggered");
-      if (config.memory.auto_summarize) {
-        pm.sendInput(
-          "Please summarize the important context from this conversation and save it to your memory files. When done, respond with exactly: SUMMARIZE_DONE",
-        );
-        logger.info("Waiting for summarize to complete...");
-        // Watch transcript for SUMMARIZE_DONE signal, with timeout
-        const maxWait = 120000; // 2 minutes max
-        const pollInterval = 3000;
-        let elapsed = 0;
-        const waitForDone = setInterval(() => {
-          elapsed += pollInterval;
-          try {
-            if (transcriptPath && existsSync(transcriptPath)) {
-              const content = readFileSync(transcriptPath, "utf-8");
-              // Check last 2000 chars for the signal
-              const tail = content.slice(-2000);
-              if (tail.includes("SUMMARIZE_DONE")) {
-                clearInterval(waitForDone);
-                logger.info("Summarize completed, sending /clear");
-                pm.sendInput("/clear");
-                guardian.markRotationComplete();
-                return;
-              }
-            }
-          } catch {}
-          if (elapsed >= maxWait) {
-            clearInterval(waitForDone);
-            logger.warn("Summarize timed out after 2 minutes, forcing /clear");
-            pm.sendInput("/clear");
-            guardian.markRotationComplete();
-          }
-        }, pollInterval);
-      } else {
-        pm.sendInput("/clear");
-        guardian.markRotationComplete();
-      }
+      logger.info({ reason }, "🔄 Rotation triggered — restarting session");
+      // Reset transcript tracking for the new session
+      transcriptPath = null;
+      transcriptOffset = -1;
+      // Clear session ID so we get a fresh session (not resume the old one)
+      pm.clearSessionId();
+      // Stop and restart
+      await pm.stop();
+      logger.info("Session stopped, respawning fresh session");
+      await pm.start();
+      guardian.markRotationComplete();
     });
 
     guardian.startTimer();
