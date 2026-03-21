@@ -164,6 +164,73 @@ program
     // Poll transcript every 2 seconds
     const transcriptInterval = setInterval(pollTranscript, 2000);
 
+    // Handle PTY permission prompts that aren't auto-approved
+    pm.on("permission_prompt", async (promptText: string) => {
+      // Send to Telegram via direct bot API (approval server handles inline buttons)
+      try {
+        const envFile = join(homedir(), ".claude/channels/telegram/.env");
+        const envContent = readFileSync(envFile, "utf-8");
+        const tokenMatch = envContent.match(/TELEGRAM_BOT_TOKEN=(.+)/);
+        const accessFile = join(homedir(), ".claude/channels/telegram/access.json");
+        const access = JSON.parse(readFileSync(accessFile, "utf-8"));
+        const chatId = access.allowFrom?.[0];
+
+        if (tokenMatch && chatId) {
+          const token = tokenMatch[1].trim();
+          const text = `⚠️ PTY 權限請求:\n${promptText.slice(0, 500)}\n\n回覆 1 批准, 3 拒絕`;
+          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text,
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: "✅ 批准", callback_data: "pty_approve" },
+                  { text: "❌ 拒絕", callback_data: "pty_deny" },
+                ]],
+              },
+            }),
+          });
+          logger.info("Permission prompt forwarded to Telegram, waiting for response...");
+
+          // Wait for user response via transcript (callback comes as channel message)
+          const maxWait = 120000;
+          const poll = 2000;
+          let elapsed = 0;
+          const waitInterval = setInterval(() => {
+            elapsed += poll;
+            try {
+              if (transcriptPath && existsSync(transcriptPath)) {
+                const content = readFileSync(transcriptPath, "utf-8");
+                const tail = content.slice(-500);
+                if (tail.includes("pty_approve")) {
+                  clearInterval(waitInterval);
+                  logger.info("User approved via Telegram");
+                  pm.sendInput("1");
+                } else if (tail.includes("pty_deny")) {
+                  clearInterval(waitInterval);
+                  logger.info("User denied via Telegram");
+                  pm.sendInput("3");
+                }
+              }
+            } catch {}
+            if (elapsed >= maxWait) {
+              clearInterval(waitInterval);
+              logger.warn("Permission prompt timed out — auto-denying");
+              pm.sendInput("3");
+            }
+          }, poll);
+        } else {
+          logger.warn("Cannot forward permission prompt — no bot token or chat ID");
+          pm.sendInput("3"); // deny if can't forward
+        }
+      } catch (err) {
+        logger.error({ err }, "Failed to forward permission prompt");
+        pm.sendInput("3");
+      }
+    });
+
     // Watch status line JSON file for context updates
     guardian.startWatching();
 
