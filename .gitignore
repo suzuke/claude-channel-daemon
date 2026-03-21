@@ -1,5 +1,8 @@
 node_modules/
 dist/
 *.db
+*.db-shm
+*.db-wal
 .env
 .worktrees/
+test-perm-detect.ts
