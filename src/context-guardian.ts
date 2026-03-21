@@ -41,7 +41,14 @@ export class ContextGuardian extends EventEmitter {
           remaining_percentage: cw.remaining_percentage ?? (100 - cw.used_percentage),
           context_window_size: cw.context_window_size,
         };
-        this.emit("status_update", { ...status, rate_limits: data.rate_limits });
+        const rl = data.rate_limits;
+        this.logger.info({
+          context: `${cw.used_percentage}%`,
+          cost: `$${data.cost.total_cost_usd.toFixed(2)}`,
+          rate_5h: rl?.five_hour ? `${rl.five_hour.used_percentage}%` : "n/a",
+          rate_7d: rl?.seven_day ? `${rl.seven_day.used_percentage}%` : "n/a",
+        }, "Status update received");
+        this.emit("status_update", { ...status, rate_limits: rl });
         this.updateContextStatus(status);
       }
     } catch (err) {

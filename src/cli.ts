@@ -71,6 +71,15 @@ program
       }
     }
 
+    // Log Claude activity from PTY output
+    pm.on("stdout", (text: string) => {
+      // Look for channel messages (telegram plugin injects them)
+      if (text.includes("channel source=")) {
+        const userMatch = text.match(/user="([^"]+)"/);
+        logger.info({ from: userMatch?.[1] ?? "unknown" }, "Telegram message received");
+      }
+    });
+
     // Watch status line JSON file for context updates
     guardian.startWatching();
 
