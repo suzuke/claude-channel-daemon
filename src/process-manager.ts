@@ -212,20 +212,13 @@ fi
         this.logger.debug({ stdout: clean.trim().slice(0, 200) }, "claude stdout");
       }
 
-      // Handle PTY permission prompts for protected paths
+      // Handle PTY permission prompts (hard-coded path protection)
+      // These only fire for .git/, .claude/, .vscode/, .idea/ writes
+      // that bypass acceptEdits. PreToolUse hook already handles tool-level permissions.
       // Claude Code shows: "1.Yes  2.Yes,andallow...  3.No"
       if (clean.includes("1.Yes") && clean.includes("3.No")) {
-        // Safe paths: .claude/skills/, .claude/commands/, .claude/agents/, memory/
-        const safePatterns = [".claude/skills/", ".claude/commands/", ".claude/agents/", "/memory/"];
-        const isSafe = safePatterns.some(p => clean.includes(p));
-        if (isSafe) {
-          this.logger.info("Auto-approving safe protected path edit in PTY");
-          this.term?.write("1");
-        } else {
-          // Forward to Telegram via approval server for user decision
-          this.logger.warn("PTY permission prompt detected — forwarding to Telegram");
-          this.emit("permission_prompt", clean);
-        }
+        this.logger.warn("PTY permission prompt detected — forwarding to Telegram");
+        this.emit("permission_prompt", clean);
       }
 
       // Capture session ID from output (claude prints: claude --resume <uuid>)
