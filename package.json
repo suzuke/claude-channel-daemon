@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "postbuild": "cp -r src/plugin dist/ && cd dist/plugin/ccd-channel && ln -sf ../../channel/mcp-server.js server.js",
     "start": "tsx src/cli.ts start",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
@@ -19,6 +20,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^12.8.0",
     "chokidar": "^5.0.0",
     "commander": "^14.0.3",
