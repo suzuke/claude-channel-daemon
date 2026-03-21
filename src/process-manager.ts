@@ -84,11 +84,9 @@ export class ProcessManager extends EventEmitter {
 
   private ensureStatusLineScript(): void {
     // Tee stdin JSON to our file, then pipe to the user's original statusLine command.
-    // This way both the daemon and the user's status line (e.g., ccline) work.
     const script = `#!/bin/bash
 INPUT=$(cat)
 echo "$INPUT" > "${STATUSLINE_FILE}"
-# Forward to the original statusLine command if available
 if command -v ccline &>/dev/null; then
   echo "$INPUT" | ccline
 else
@@ -96,6 +94,17 @@ else
 fi
 `;
     writeFileSync(STATUSLINE_SCRIPT, script, { mode: 0o755 });
+
+    // Write a settings file (not CLI flag) so it doesn't conflict with
+    // other --settings injected by tools like cmux
+    const settingsFile = join(DATA_DIR, "claude-settings.json");
+    const settings = {
+      statusLine: {
+        type: "command",
+        command: STATUSLINE_SCRIPT,
+      },
+    };
+    writeFileSync(settingsFile, JSON.stringify(settings));
   }
 
   private ensureSpawnHelper(): void {
@@ -130,14 +139,9 @@ fi
     // Channel mode: route Telegram messages as user prompts
     args.push("--channels", `plugin:${this.config.channel_plugin}`);
 
-    // Inject status line script via --settings
-    const settings = {
-      statusLine: {
-        type: "command",
-        command: STATUSLINE_SCRIPT,
-      },
-    };
-    args.push("--settings", JSON.stringify(settings));
+    // Load statusLine config from file (avoids conflict with other --settings flags)
+    const settingsFile = join(DATA_DIR, "claude-settings.json");
+    args.push("--settings", settingsFile);
 
     // Resume previous session if available
     if (this.sessionId) {
