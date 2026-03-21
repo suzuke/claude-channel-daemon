@@ -180,6 +180,9 @@ fi
     // Channel mode: route Telegram messages as user prompts
     args.push("--channels", `plugin:${this.config.channel_plugin}`);
 
+    // Auto-approve edits to prevent hanging on protected paths (.claude/skills/ etc.)
+    args.push("--permission-mode", "acceptEdits");
+
     // Settings file has: permissions, PreToolUse hook (→ Telegram approval), statusLine
     const settingsFile = join(DATA_DIR, "claude-settings.json");
     args.push("--settings", settingsFile);
