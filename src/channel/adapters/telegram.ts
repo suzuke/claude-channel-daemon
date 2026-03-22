@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { createReadStream, mkdirSync } from "node:fs";
 import { join, extname } from "node:path";
-import { Bot, InputFile } from "grammy";
+import { Bot, GrammyError, InputFile } from "grammy";
 import type { Context, InlineKeyboard as InlineKeyboardType } from "grammy";
 import { InlineKeyboard } from "grammy";
 import type { ChannelAdapter, ApprovalHandle, SendOpts, SentMessage } from "../types.js";
@@ -217,41 +217,42 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   async start(): Promise<void> {
     this.queue.start();
-    // Steal the polling connection from any existing poller (e.g., official telegram plugin)
-    // by making a short getUpdates call first, then start normal polling with retry on 409
-    await this.startPollingWithRetry();
-  }
 
-  private async startPollingWithRetry(maxRetries = 5): Promise<void> {
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        // Short getUpdates to cancel any competing poller
-        await this.bot.api.getUpdates({ limit: 1, timeout: 0, offset: -1 });
-      } catch {
-        // Ignore — we just want to interrupt the other poller
-      }
+    // Grammy's default error handler calls bot.stop() on any throw — override
+    // to keep polling alive on handler errors
+    this.bot.catch((err) => {
+      const msg = err.error instanceof Error ? err.error.message : String(err.error);
+      process.stderr.write(`telegram adapter: handler error (polling continues): ${msg}\n`);
+    });
 
-      try {
-        this.bot.start({
-          drop_pending_updates: attempt === 0,
-          onStart: () => {},
-        }).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (msg.includes("409")) {
-            // Another poller appeared — restart after delay
-            setTimeout(() => this.startPollingWithRetry(maxRetries - attempt - 1), 3000);
-          } else {
-            this.emit("error", err);
+    // 409 Conflict = another getUpdates consumer is active (official plugin zombie,
+    // or second Claude Code instance). Retry with backoff until the slot frees up.
+    // Pattern from official telegram plugin.
+    void (async () => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await this.bot.start({
+            drop_pending_updates: attempt === 1,
+            onStart: (info) => {
+              process.stderr.write(`telegram adapter: polling as @${info.username}\n`);
+            },
+          });
+          return; // bot.stop() was called — clean exit
+        } catch (err) {
+          if (err instanceof GrammyError && err.error_code === 409) {
+            const delay = Math.min(1000 * attempt, 15000);
+            process.stderr.write(
+              `telegram adapter: 409 Conflict, retrying in ${delay / 1000}s\n`,
+            );
+            await new Promise(r => setTimeout(r, delay));
+            continue;
           }
-        });
-        // Wait a moment to see if 409 fires immediately
-        await new Promise<void>(r => setTimeout(r, 1000));
-        return; // started successfully
-      } catch {
-        // Failed to start, retry after delay
-        await new Promise<void>(r => setTimeout(r, 2000));
+          if (err instanceof Error && err.message === "Aborted delay") return;
+          this.emit("error", err);
+          return;
+        }
       }
-    }
+    })();
   }
 
   async stop(): Promise<void> {
