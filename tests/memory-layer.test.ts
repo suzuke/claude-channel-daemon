@@ -50,4 +50,18 @@ describe("MemoryLayer", () => {
     const rows = db.getByFilePath(join(memoryDir, "existing.md"));
     expect(rows.some((r) => r.content === "v2")).toBe(true);
   });
+
+  it("emits file_changed event when a file is added", async () => {
+    const changeSpy = vi.fn();
+    layer.on("file_changed", changeSpy);
+    await layer.start();
+
+    const testFile = join(memoryDir, "test.md");
+    writeFileSync(testFile, "hello");
+
+    // chokidar needs time to detect + stabilityThreshold (200ms)
+    await vi.waitFor(() => {
+      expect(changeSpy).toHaveBeenCalledWith(testFile);
+    }, { timeout: 3000 });
+  });
 });
