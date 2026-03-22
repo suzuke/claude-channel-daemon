@@ -645,6 +645,7 @@ export class FleetManager {
   private saveFleetConfig(): void {
     if (!this.fleetConfig || !this.configPath) return;
     const toSave: Record<string, unknown> = {};
+    if (this.fleetConfig.project_roots) toSave.project_roots = this.fleetConfig.project_roots;
     if (this.fleetConfig.channel) toSave.channel = this.fleetConfig.channel;
     if (Object.keys(this.fleetConfig.defaults).length > 0) toSave.defaults = this.fleetConfig.defaults;
     toSave.instances = {};
