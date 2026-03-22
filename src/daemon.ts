@@ -189,23 +189,8 @@ export class Daemon {
       const windowId = await this.tmux.createWindow(claudeCmd, this.config.working_directory);
       writeFileSync(windowIdFile, windowId);
 
-      // Auto-confirm the development channels safety prompt
-      // Poll tmux pane until we see the prompt, then press Enter
-      for (let i = 0; i < 30; i++) { // max 30s
-        await new Promise(r => setTimeout(r, 1000));
-        try {
-          const pane = await this.tmux.capturePane();
-          if (pane.includes("I am using this for local development")) {
-            await this.tmux.sendSpecialKey("Enter");
-            this.logger.info("Auto-confirmed development channels prompt");
-            break;
-          }
-          if (pane.includes("Listening for channel messages")) {
-            // Already past the prompt (no prompt shown)
-            break;
-          }
-        } catch {}
-      }
+      // Auto-confirm the development channels safety prompt (non-blocking)
+      this.autoConfirmDevChannels();
     }
 
     // 3. Pipe-pane for prompt detection
@@ -418,6 +403,27 @@ export class Daemon {
       default:
         respond(null, `Unknown tool: ${tool}`);
     }
+  }
+
+  /** Background polling to auto-confirm the dev channels safety prompt */
+  private async autoConfirmDevChannels(): Promise<void> {
+    if (!this.tmux) return;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const pane = await this.tmux.capturePane();
+        if (pane.includes("I am using this for local development")) {
+          await this.tmux.sendSpecialKey("Enter");
+          this.logger.info("Auto-confirmed development channels prompt");
+          return;
+        }
+        if (pane.includes("Listening for channel messages")) {
+          this.logger.info("Claude started without dev channels prompt");
+          return;
+        }
+      } catch {}
+    }
+    this.logger.warn(`Auto-confirm timed out — manually run: tmux send-keys -t ccd:${this.tmux.getWindowId()} Enter`);
   }
 
   private writeSettings(): void {
