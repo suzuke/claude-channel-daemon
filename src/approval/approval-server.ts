@@ -4,14 +4,16 @@ import type { MessageBus } from "../channel/message-bus.js";
 const SAFE_TOOLS = new Set([
   "Read", "Edit", "Write", "Glob", "Grep",
   "Bash(*)", "WebFetch", "WebSearch", "Agent", "Skill",
-  "mcp__plugin_ccd-channel_ccd-channel__reply",
-  "mcp__plugin_ccd-channel_ccd-channel__react",
-  "mcp__plugin_ccd-channel_ccd-channel__edit_message",
-  "mcp__plugin_ccd-channel_ccd-channel__download_attachment",
+  "ToolSearch", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
+  "NotebookEdit", "TodoRead", "TodoWrite",
+  "mcp__ccd-channel__reply",
+  "mcp__ccd-channel__react",
+  "mcp__ccd-channel__edit_message",
+  "mcp__ccd-channel__download_attachment",
 ]);
 
 const SAFE_PREFIXES = [
-  "mcp__plugin_ccd-channel_ccd-channel__",
+  "mcp__ccd-channel__",
 ];
 
 const DANGER_PATTERNS = [
@@ -25,11 +27,9 @@ const DANGER_PATTERNS = [
 ];
 
 function isSafeTool(toolName: string): boolean {
-  if (SAFE_TOOLS.has(toolName)) return true;
-  for (const prefix of SAFE_PREFIXES) {
-    if (toolName.startsWith(prefix)) return true;
-  }
-  return false;
+  // Bash commands need danger pattern checking — everything else is safe
+  if (toolName === "Bash" || toolName.startsWith("Bash(")) return false;
+  return true;
 }
 
 function isDangerousCommand(command: string): boolean {

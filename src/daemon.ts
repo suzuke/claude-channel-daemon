@@ -262,7 +262,12 @@ export class Daemon {
     if (this.adapter) await this.adapter.stop();
     await this.approvalServer?.stop();
     await this.ipcServer?.close();
-    // Don't kill tmux window — let Claude keep running for crash resilience
+    // Kill tmux window + clear window-id so next start gets fresh settings
+    if (this.tmux) {
+      await this.tmux.killWindow();
+      const windowIdFile = join(this.instanceDir, "window-id");
+      try { unlinkSync(windowIdFile); } catch {}
+    }
     const pidPath = join(this.instanceDir, "daemon.pid");
     try {
       unlinkSync(pidPath);
@@ -350,7 +355,10 @@ export class Daemon {
 
   private writeSettings(): void {
     const port = this.config.approval_port ?? 18321;
-    const settings = {
+    const settings: Record<string, unknown> = {
+      // Disable the official telegram plugin to avoid bot token polling conflict
+      // Our daemon manages Telegram via its own adapter
+      disabledPlugins: ["telegram@claude-plugins-official"],
       hooks: {
         PreToolUse: [
           {
