@@ -12,8 +12,17 @@ export function createLogger(level: string = "info") {
     level,
     transport: {
       targets: [
-        { target: "pino/file", options: { destination: 1 }, level },           // stdout
-        { target: "pino/file", options: { destination: LOG_FILE }, level },     // file
+        {
+          target: "pino-pretty",
+          options: {
+            destination: 1,
+            colorize: true,
+            translateTime: "HH:MM:ss",
+            ignore: "pid,hostname",
+          },
+          level,
+        },
+        { target: "pino/file", options: { destination: LOG_FILE }, level },
       ],
     },
   });
