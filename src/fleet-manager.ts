@@ -559,7 +559,7 @@ export class FleetManager {
     }
 
     // Create instance name from directory name
-    const instanceName = basename(dirPath).toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const instanceName = `${basename(dirPath).toLowerCase().replace(/[^a-z0-9-]/g, "-")}-t${threadId}`;
 
     this.logger.info({ instanceName, threadId, dirPath }, "Auto-binding topic to project");
 
@@ -672,7 +672,7 @@ export class FleetManager {
 
     // Bind it directly (not via handleDirectorySelection — no message to edit)
     this.pendingBindings.delete(threadId);
-    const instanceName = basename(projectDir).toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const instanceName = `${basename(projectDir).toLowerCase().replace(/[^a-z0-9-]/g, "-")}-t${threadId}`;
 
     if (this.fleetConfig) {
       this.fleetConfig.instances[instanceName] = {
