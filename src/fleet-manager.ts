@@ -138,8 +138,9 @@ export class FleetManager {
       await this.startInstance(name, config, ports[name], topicMode && !config.channel);
     }
 
-    // Topic mode: start shared adapter + routing
+    // Topic mode: auto-create topics for instances without topic_id, then start adapter
     if (topicMode && fleet.channel) {
+      await this.autoCreateTopics(fleet);
       this.routingTable = this.buildRoutingTable();
       this.logger.info({ routes: Object.fromEntries(this.routingTable) }, "Topic routing table");
 
@@ -307,6 +308,48 @@ export class FleetManager {
         break;
       default:
         respond(null, `Unknown tool: ${tool}`);
+    }
+  }
+
+  // ===================== Auto-create topics =====================
+
+  /** Create Telegram topics for instances that don't have topic_id */
+  private async autoCreateTopics(fleet: FleetConfig): Promise<void> {
+    if (!fleet.channel?.group_id) return;
+    const botToken = process.env[fleet.channel.bot_token_env];
+    if (!botToken) return;
+
+    let configChanged = false;
+    for (const [name, config] of Object.entries(fleet.instances)) {
+      if (config.topic_id != null) continue; // already has topic
+
+      try {
+        // Use Bot API directly (adapter may not be started yet)
+        const topicName = basename(config.working_directory);
+        const res = await fetch(
+          `https://api.telegram.org/bot${botToken}/createForumTopic`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: fleet.channel.group_id,
+              name: topicName,
+            }),
+          },
+        );
+        const data = await res.json() as { ok: boolean; result?: { message_thread_id: number } };
+        if (data.ok && data.result) {
+          config.topic_id = data.result.message_thread_id;
+          configChanged = true;
+          this.logger.info({ name, topicId: config.topic_id, topicName }, "Auto-created Telegram topic");
+        }
+      } catch (err) {
+        this.logger.warn({ name, err }, "Failed to auto-create topic");
+      }
+    }
+
+    if (configChanged) {
+      this.saveFleetConfig();
     }
   }
 
