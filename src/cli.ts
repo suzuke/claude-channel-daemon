@@ -149,6 +149,15 @@ fleet
       await fm.startAll(FLEET_CONFIG_PATH);
     }
     console.log("Fleet started");
+
+    // Keep process alive + clean shutdown on Ctrl+C
+    const shutdown = async () => {
+      console.log("\nStopping fleet...");
+      await fm.stopAll();
+      process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   });
 
 fleet
