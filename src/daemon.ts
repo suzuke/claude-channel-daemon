@@ -311,6 +311,22 @@ export class Daemon {
       const windowIdFile = join(this.instanceDir, "window-id");
       try { unlinkSync(windowIdFile); } catch {}
     }
+    // Clean up .mcp.json — remove ccd-channel entry (keep other MCP servers)
+    try {
+      const mcpConfigPath = join(this.config.working_directory, ".mcp.json");
+      if (existsSync(mcpConfigPath)) {
+        const mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
+        if (mcpConfig.mcpServers?.["ccd-channel"]) {
+          delete mcpConfig.mcpServers["ccd-channel"];
+          if (Object.keys(mcpConfig.mcpServers).length === 0) {
+            unlinkSync(mcpConfigPath);
+          } else {
+            writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
+          }
+        }
+      }
+    } catch {}
+
     const pidPath = join(this.instanceDir, "daemon.pid");
     try {
       unlinkSync(pidPath);
