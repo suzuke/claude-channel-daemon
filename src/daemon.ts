@@ -68,7 +68,7 @@ export class Daemon {
         // MCP server forwarding a Claude tool call (reply, react, edit, download)
         this.handleToolCall(msg, socket);
       } else if (msg.type === "mcp_ready") {
-        this.logger.info("MCP channel server connected and ready");
+        this.logger.debug("MCP channel server connected and ready");
       } else if (msg.type === "fleet_inbound") {
         // Fleet manager routed a message to us (topic mode)
         const meta = msg.meta as Record<string, string>;
@@ -162,13 +162,13 @@ export class Daemon {
 
     // 5. Wire transcript events (tool status in Telegram disabled for now)
     this.transcriptMonitor.on("tool_use", (name: string, _input: unknown) => {
-      this.logger.info({ tool: name }, "Tool use");
+      this.logger.debug({ tool: name }, "Tool use");
     });
     this.transcriptMonitor.on("tool_result", (_name: string, _output: unknown) => {
       // no-op
     });
     this.transcriptMonitor.on("assistant_text", (text: string) => {
-      this.logger.info({ text: text.slice(0, 200) }, "Claude response");
+      this.logger.debug({ text: text.slice(0, 200) }, "Claude response");
     });
     this.transcriptMonitor.startPolling();
 
@@ -437,7 +437,7 @@ export class Daemon {
       content,
       meta,
     });
-    this.logger.info({ user: meta.user, text: content.slice(0, 100) }, "Pushed channel message to Claude");
+    this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Pushed channel message to Claude");
   }
 
   /**
@@ -449,7 +449,7 @@ export class Daemon {
     const args = (msg.args ?? {}) as Record<string, unknown>;
     const requestId = msg.requestId as number;
 
-    this.logger.info({ tool, requestId }, "Tool call from MCP server");
+    this.logger.debug({ tool, requestId }, "Tool call from MCP server");
 
     // For now, log and respond. Full adapter routing will be wired in fleet manager.
     const respond = (result: unknown, error?: string) => {
@@ -514,18 +514,18 @@ export class Daemon {
         // Dev channels safety prompt
         if (pane.includes("I am using this for local development")) {
           await this.tmux.sendSpecialKey("Enter");
-          this.logger.info("Auto-confirmed development channels prompt");
+          this.logger.debug("Auto-confirmed development channels prompt");
           continue; // may have more prompts after this
         }
         // MCP server trust prompt (first time in a project)
         if (pane.includes("New MCP server found") || pane.includes("Use this and all future MCP servers")) {
           await this.tmux.sendSpecialKey("Enter");
-          this.logger.info("Auto-confirmed MCP server trust prompt");
+          this.logger.debug("Auto-confirmed MCP server trust prompt");
           continue;
         }
         // Successfully started
         if (pane.includes("Listening for channel messages")) {
-          this.logger.info("Claude started and listening for channels");
+          this.logger.debug("Claude started and listening for channels");
           return;
         }
       } catch {}
@@ -543,10 +543,10 @@ export class Daemon {
       serverJs = join(__dirname, "..", "dist", "channel", "mcp-server.js");
     }
     let pluginDir = join(__dirname, "plugin");
-    this.logger.info({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir check");
+    this.logger.debug({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir check");
     if (!existsSync(join(pluginDir, "ccd-channel", "server.js"))) {
       pluginDir = join(__dirname, "..", "dist", "plugin");
-      this.logger.info({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir fallback");
+      this.logger.debug({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir fallback");
     }
 
     // Write .mcp.json
@@ -563,7 +563,7 @@ export class Daemon {
       env: { CCD_SOCKET_PATH: sockPath },
     };
     writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
-    this.logger.info({ mcpConfigPath }, "Wrote MCP server config");
+    this.logger.debug({ mcpConfigPath }, "Wrote MCP server config");
 
     // Build claude command
     const settingsPath = join(this.instanceDir, "claude-settings.json");

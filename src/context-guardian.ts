@@ -42,7 +42,7 @@ export class ContextGuardian extends EventEmitter {
           context_window_size: cw.context_window_size,
         };
         const rl = data.rate_limits;
-        this.logger.info({
+        this.logger.debug({
           context: `${cw.used_percentage}%`,
           cost: `$${data.cost.total_cost_usd.toFixed(2)}`,
           rate_5h: rl?.five_hour ? `${rl.five_hour.used_percentage}%` : "n/a",

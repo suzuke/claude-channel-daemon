@@ -248,7 +248,7 @@ export class FleetManager {
           }
         });
 
-        this.logger.info({ name }, "Connected to instance IPC");
+        this.logger.debug({ name }, "Connected to instance IPC");
       } catch (err) {
         this.logger.warn({ name, err }, "Failed to connect to instance IPC");
       }
@@ -364,7 +364,7 @@ export class FleetManager {
 
   /** Handle approval request from a daemon instance — forward to shared adapter */
   private handleApprovalFromInstance(instanceName: string, msg: Record<string, unknown>): void {
-    this.logger.info({ instanceName, approvalId: msg.approvalId }, "Received approval request from instance");
+    this.logger.debug({ instanceName, approvalId: msg.approvalId }, "Received approval request from instance");
     if (!this.adapter) {
       this.logger.warn({ instanceName }, "No adapter — denying approval");
       this.sendApprovalResponse(instanceName, msg.approvalId as string, "deny");
@@ -375,10 +375,10 @@ export class FleetManager {
     const approvalId = msg.approvalId as string;
     const instanceConfig = this.fleetConfig?.instances[instanceName];
     const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
-    this.logger.info({ instanceName, threadId, approvalId }, "Sending approval to Telegram");
+    this.logger.debug({ instanceName, threadId, approvalId }, "Sending approval to Telegram");
 
     this.adapter.sendApproval(prompt, (decision) => {
-      this.logger.info({ instanceName, approvalId, decision }, "Approval callback received");
+      this.logger.debug({ instanceName, approvalId, decision }, "Approval callback received");
       this.sendApprovalResponse(instanceName, approvalId, decision);
     }, undefined, threadId).catch((err) => {
       this.logger.warn({ instanceName, err: (err as Error).message }, "Failed to send approval to Telegram");
@@ -387,7 +387,7 @@ export class FleetManager {
   }
 
   private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "deny"): void {
-    this.logger.info({ instanceName, approvalId, decision }, "Sending approval response to daemon");
+    this.logger.debug({ instanceName, approvalId, decision }, "Sending approval response to daemon");
     const ipc = this.instanceIpcClients.get(instanceName);
     ipc?.send({ type: "fleet_approval_response", approvalId, decision });
   }
