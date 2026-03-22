@@ -33,6 +33,8 @@ export class Daemon {
   private guardian: ContextGuardian | null = null;
   private memoryLayer: MemoryLayer | null = null;
   private adapter: ChannelAdapter | null = null;
+  // Track the threadId from inbound messages for automatic outbound routing
+  private lastThreadId: string | undefined;
 
   constructor(
     private name: string,
@@ -65,10 +67,9 @@ export class Daemon {
         this.logger.info("MCP channel server connected and ready");
       } else if (msg.type === "fleet_inbound") {
         // Fleet manager routed a message to us (topic mode)
-        this.pushChannelMessage(
-          msg.content as string,
-          msg.meta as Record<string, string>,
-        );
+        const meta = msg.meta as Record<string, string>;
+        if (meta.thread_id) this.lastThreadId = meta.thread_id;
+        this.pushChannelMessage(msg.content as string, meta);
       }
     });
 
@@ -95,6 +96,7 @@ export class Daemon {
 
         // Wire inbound messages → push to Claude via IPC
         this.messageBus.on("message", (msg: InboundMessage) => {
+          if (msg.threadId) this.lastThreadId = msg.threadId;
           this.pushChannelMessage(msg.text, {
             chat_id: msg.chatId,
             message_id: msg.messageId,
@@ -368,7 +370,7 @@ export class Daemon {
     switch (tool) {
       case "reply":
         adapter.sendText(chatId, args.text as string ?? "", {
-          threadId: args.thread_id as string,
+          threadId: args.thread_id as string ?? this.lastThreadId,
           replyTo: args.reply_to as string,
         }).then(sent => respond(sent))
           .catch(e => respond(null, e.message));

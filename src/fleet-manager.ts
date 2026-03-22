@@ -234,10 +234,14 @@ export class FleetManager {
       ipc?.send({ type: "fleet_outbound_response", requestId, result, error });
     };
 
+    // Resolve threadId from instance → topic_id mapping
+    const instanceConfig = this.fleetConfig?.instances[instanceName];
+    const threadId = args.thread_id as string ?? (instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined);
+
     switch (tool) {
       case "reply":
         this.adapter.sendText(chatId, args.text as string ?? "", {
-          threadId: args.thread_id as string,
+          threadId,
           replyTo: args.reply_to as string,
         }).then(sent => respond(sent))
           .catch(e => respond(null, e.message));
