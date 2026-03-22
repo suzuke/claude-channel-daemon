@@ -324,7 +324,7 @@ export class FleetManager {
         ...(voiceAttachment ? { attachment_file_id: voiceAttachment.fileId } : {}),
       },
     });
-    this.logger.info({ instanceName, user: msg.username, text: (text ?? "").slice(0, 80) }, "Routed to instance");
+    this.logger.info(`← ${instanceName} ${msg.username.padEnd(14)}: ${(text ?? "").slice(0, 100)}`);
   }
 
   /** Handle outbound tool calls from a daemon instance */
@@ -346,7 +346,7 @@ export class FleetManager {
 
     switch (tool) {
       case "reply":
-        this.logger.info({ instance: instanceName, text: (args.text as string ?? "").slice(0, 100) }, "Reply");
+        this.logger.info(`→ ${instanceName} ${"claude".padEnd(14)}: ${(args.text as string ?? "").slice(0, 100)}`);
         this.adapter.sendText(chatId, args.text as string ?? "", {
           threadId,
           replyTo: args.reply_to as string,
