@@ -90,6 +90,12 @@ export class FleetManager {
   }
 
   async startInstance(name: string, config: InstanceConfig, port: number, topicMode: boolean): Promise<void> {
+    // Guard: already running
+    if (this.daemons.has(name)) {
+      this.logger.info({ name }, "Instance already running, skipping");
+      return;
+    }
+
     const instanceDir = this.getInstanceDir(name);
     mkdirSync(instanceDir, { recursive: true });
 
@@ -180,6 +186,8 @@ export class FleetManager {
 
       const instanceName = this.routingTable.get(threadId);
       if (!instanceName) {
+        // Check if auto-bind is already in progress for this topic
+        if (this.pendingBindings.has(threadId)) return;
         // Auto-bind: show directory browser
         this.handleUnboundTopic(msg, threadId);
         return;
@@ -299,6 +307,7 @@ export class FleetManager {
   /** Show directory browser when message arrives in unbound topic */
   private async handleUnboundTopic(msg: InboundMessage, threadId: number): Promise<void> {
     if (!this.adapter) return;
+    this.pendingBindings.set(threadId, "browsing");
 
     // List directories in common locations
     const dirs = this.listProjectDirectories();
@@ -344,7 +353,15 @@ export class FleetManager {
     const dirPath = parts.slice(2).join(":");
 
     if (dirPath === "cancel") {
+      this.pendingBindings.delete(threadId);
       await this.adapter?.editMessage(chatId, data.messageId, "Binding cancelled.");
+      return;
+    }
+
+    // Guard: already bound
+    if (this.routingTable.has(threadId)) {
+      this.pendingBindings.delete(threadId);
+      await this.adapter?.editMessage(chatId, data.messageId, "Already bound.");
       return;
     }
 
@@ -390,6 +407,7 @@ export class FleetManager {
         } catch {}
       }
 
+      this.pendingBindings.delete(threadId);
       await this.adapter?.editMessage(chatId, data.messageId,
         `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`);
       this.logger.info({ instanceName, threadId }, "Topic auto-bound successfully");
