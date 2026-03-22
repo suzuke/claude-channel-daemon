@@ -212,6 +212,9 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   // ── ChannelAdapter lifecycle ──────────────────────────────────────────────
 
+  /** Expose bot for fleet manager operations (topic existence checks etc.) */
+  getBot(): Bot { return this.bot; }
+
   async start(): Promise<void> {
     this.queue.start();
     // Start polling in the background (grammy handles the promise internally)

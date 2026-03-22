@@ -227,6 +227,9 @@ export class FleetManager {
 
     await this.adapter.start();
     this.logger.info("Shared Telegram adapter started");
+
+    // Periodically check for deleted topics (Telegram may not always send events)
+    this.startTopicCleanupPoller();
   }
 
   /** Connect IPC clients to each daemon instance's channel.sock */
@@ -498,7 +501,41 @@ export class FleetManager {
     this.logger.info({ path: this.configPath }, "Saved fleet config");
   }
 
+  private topicCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Periodically check if bound topics still exist */
+  private startTopicCleanupPoller(): void {
+    this.topicCleanupTimer = setInterval(async () => {
+      if (!this.fleetConfig?.channel?.group_id) return;
+      const tgAdapter = this.adapter as TelegramAdapter;
+      const groupId = this.fleetConfig.channel.group_id;
+
+      for (const [threadId, instanceName] of this.routingTable) {
+        try {
+          // Try to get the topic info by sending a dummy request
+          // If topic is deleted, Telegram returns 400 "Bad Request: message thread not found"
+          // We use getForumTopicIconStickers as a lightweight check — but it doesn't work per-topic
+          // Instead, try sending a chat action to the thread
+          const bot = tgAdapter.getBot();
+          await bot.api.sendChatAction(groupId, "typing", {
+            message_thread_id: threadId,
+          });
+        } catch (err: unknown) {
+          const errMsg = String(err);
+          if (errMsg.includes("thread not found") || errMsg.includes("TOPIC_DELETED") || errMsg.includes("TOPIC_CLOSED")) {
+            this.logger.info({ threadId, instanceName }, "Topic deleted — auto-unbinding");
+            await this.handleTopicDeleted(threadId);
+          }
+        }
+      }
+    }, 60_000); // Check every 60 seconds
+  }
+
   async stopAll(): Promise<void> {
+    if (this.topicCleanupTimer) {
+      clearInterval(this.topicCleanupTimer);
+      this.topicCleanupTimer = null;
+    }
     // Stop adapter
     if (this.adapter) {
       await this.adapter.stop();
