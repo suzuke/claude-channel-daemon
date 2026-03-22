@@ -14,6 +14,9 @@ import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import { ApprovalServer } from "./approval/approval-server.js";
 import { TmuxPromptDetector } from "./approval/tmux-prompt-detector.js";
+import { TelegramAdapter } from "./channel/adapters/telegram.js";
+import { AccessManager } from "./channel/access-manager.js";
+import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,6 +32,7 @@ export class Daemon {
   private promptDetector: TmuxPromptDetector | null = null;
   private guardian: ContextGuardian | null = null;
   private memoryLayer: MemoryLayer | null = null;
+  private adapter: ChannelAdapter | null = null;
 
   constructor(
     private name: string,
@@ -61,6 +65,46 @@ export class Daemon {
         this.logger.info("MCP channel server connected and ready");
       }
     });
+
+    // 1b. Create Telegram adapter (DM mode only — in topic mode, fleet manager owns the adapter)
+    if (!this.topicMode && this.config.channel) {
+      const channelConfig = this.config.channel;
+      const botToken = process.env[channelConfig.bot_token_env];
+      if (botToken) {
+        const accessDir = join(this.instanceDir, "access");
+        mkdirSync(accessDir, { recursive: true });
+        const accessManager = new AccessManager(
+          channelConfig.access,
+          join(accessDir, "access.json"),
+        );
+        const inboxDir = join(this.instanceDir, "inbox");
+        mkdirSync(inboxDir, { recursive: true });
+        this.adapter = new TelegramAdapter({
+          id: `tg-${this.name}`,
+          botToken,
+          accessManager,
+          inboxDir,
+        });
+        this.messageBus.register(this.adapter);
+
+        // Wire inbound messages → push to Claude via IPC
+        this.messageBus.on("message", (msg: InboundMessage) => {
+          this.pushChannelMessage(msg.text, {
+            chat_id: msg.chatId,
+            message_id: msg.messageId,
+            user: msg.username,
+            user_id: msg.userId,
+            ts: msg.timestamp.toISOString(),
+            ...(msg.threadId ? { thread_id: msg.threadId } : {}),
+          });
+        });
+
+        await this.adapter.start();
+        this.logger.info({ adapterId: this.adapter.id }, "Telegram adapter started");
+      } else {
+        this.logger.warn({ env: channelConfig.bot_token_env }, "Bot token env not set, skipping adapter");
+      }
+    }
 
     // 2. Tmux — ensure session, create window if not alive
     const sessionName = "ccd";
@@ -215,6 +259,7 @@ export class Daemon {
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.memoryLayer) await this.memoryLayer.stop();
+    if (this.adapter) await this.adapter.stop();
     await this.approvalServer?.stop();
     await this.ipcServer?.close();
     // Don't kill tmux window — let Claude keep running for crash resilience
