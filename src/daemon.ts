@@ -35,6 +35,10 @@ export class Daemon {
   private adapter: ChannelAdapter | null = null;
   // Track the threadId from inbound messages for automatic outbound routing
   private lastThreadId: string | undefined;
+  // Tool status tracking for Telegram
+  private toolStatusMessageId: string | null = null;
+  private toolStatusLines: string[] = [];
+  private toolStatusDebounce: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private name: string,
@@ -70,6 +74,9 @@ export class Daemon {
         const meta = msg.meta as Record<string, string>;
         if (meta.thread_id) this.lastThreadId = meta.thread_id;
         this.pushChannelMessage(msg.content as string, meta);
+      } else if (msg.type === "fleet_tool_status_ack") {
+        // Fleet manager sent us the messageId for our tool status message
+        this.toolStatusMessageId = msg.messageId as string;
       }
     });
 
@@ -200,17 +207,17 @@ export class Daemon {
     // 4. Transcript monitor
     this.transcriptMonitor = new TranscriptMonitor(this.instanceDir, this.logger);
 
-    // 5. Wire transcript events
+    // 5. Wire transcript events → tool status in Telegram
     this.transcriptMonitor.on("tool_use", (name: string, input: unknown) => {
       this.logger.info({ tool: name }, "Tool use");
-      this.toolTracker?.onToolUse(name, input);
+      this.addToolStatus(name, input, "running");
     });
-    this.transcriptMonitor.on("tool_result", (name: string, output: unknown) => {
-      this.toolTracker?.onToolResult(name, output);
+    this.transcriptMonitor.on("tool_result", (name: string, _output: unknown) => {
+      this.addToolStatus(name, null, "done");
     });
     this.transcriptMonitor.on("assistant_text", (text: string) => {
       this.logger.info({ text: text.slice(0, 200) }, "Claude response");
-      this.toolTracker?.reset();
+      this.resetToolStatus();
     });
     this.transcriptMonitor.startPolling();
 
@@ -343,6 +350,85 @@ export class Daemon {
 
   getMessageBus(): MessageBus {
     return this.messageBus;
+  }
+
+  // ── Tool status tracking ──────────────────────────────────────
+
+  private summarizeTool(name: string, input: unknown): string {
+    const inp = input as Record<string, unknown> | null;
+    if (!inp) return name;
+    if (name === "Read") return `Read ${inp.file_path ?? ""}`;
+    if (name === "Edit") return `Edit ${inp.file_path ?? ""}`;
+    if (name === "Write") return `Write ${inp.file_path ?? ""}`;
+    if (name === "Bash") return `$ ${String(inp.command ?? "").slice(0, 50)}`;
+    if (name === "Glob") return `Glob ${inp.pattern ?? ""}`;
+    if (name === "Grep") return `Grep ${inp.pattern ?? ""}`;
+    if (name === "Agent") return "Agent (subagent)";
+    if (name.startsWith("mcp__ccd-channel__")) return ""; // skip channel tools
+    return name;
+  }
+
+  private addToolStatus(name: string, input: unknown, state: "running" | "done"): void {
+    const summary = this.summarizeTool(name, input);
+    if (!summary) return; // skip empty (e.g., channel tools)
+
+    if (state === "running") {
+      this.toolStatusLines.push(`⏳ ${summary}`);
+    } else {
+      // Mark the last matching tool as done
+      for (let i = this.toolStatusLines.length - 1; i >= 0; i--) {
+        if (this.toolStatusLines[i].includes(name) && this.toolStatusLines[i].startsWith("⏳")) {
+          this.toolStatusLines[i] = this.toolStatusLines[i].replace("⏳", "✅");
+          break;
+        }
+      }
+    }
+    this.debouncedSendToolStatus();
+  }
+
+  private resetToolStatus(): void {
+    if (this.toolStatusDebounce) clearTimeout(this.toolStatusDebounce);
+    this.toolStatusMessageId = null;
+    this.toolStatusLines = [];
+  }
+
+  /** Debounce tool status updates to avoid Telegram rate limits */
+  private debouncedSendToolStatus(): void {
+    if (this.toolStatusDebounce) clearTimeout(this.toolStatusDebounce);
+    this.toolStatusDebounce = setTimeout(() => this.sendToolStatus(), 500);
+  }
+
+  private sendToolStatus(): void {
+    const text = this.toolStatusLines.join("\n");
+    if (!text) return;
+
+    if (this.topicMode) {
+      // Topic mode: send via IPC to fleet manager
+      this.ipcServer?.broadcast({
+        type: "fleet_tool_status",
+        instanceName: this.name,
+        text,
+        editMessageId: this.toolStatusMessageId,
+      });
+    } else {
+      // DM mode: send directly via adapter
+      const adapters = this.messageBus.getAllAdapters();
+      if (adapters.length === 0) return;
+      const adapter = adapters[0];
+      const chatId = ""; // DM mode uses default chat
+      if (!this.toolStatusMessageId) {
+        adapter.sendText(chatId, text, { threadId: this.lastThreadId })
+          .then(sent => { this.toolStatusMessageId = sent.messageId; })
+          .catch(() => {});
+      } else {
+        adapter.editMessage(chatId, this.toolStatusMessageId, text).catch(() => {});
+      }
+    }
+  }
+
+  /** Called by fleet manager when tool status message is sent (returns messageId) */
+  setToolStatusMessageId(messageId: string): void {
+    this.toolStatusMessageId = messageId;
   }
 
   /**

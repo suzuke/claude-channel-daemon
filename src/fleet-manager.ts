@@ -275,12 +275,14 @@ export class FleetManager {
         await ipc.connect();
         this.instanceIpcClients.set(name, ipc);
 
-        // Handle outbound tool calls and approval requests from daemon
+        // Handle outbound tool calls, approval requests, and tool status from daemon
         ipc.on("message", (msg: Record<string, unknown>) => {
           if (msg.type === "fleet_outbound") {
             this.handleOutboundFromInstance(name, msg);
           } else if (msg.type === "fleet_approval_request") {
             this.handleApprovalFromInstance(name, msg);
+          } else if (msg.type === "fleet_tool_status") {
+            this.handleToolStatusFromInstance(name, msg);
           }
         });
 
@@ -364,6 +366,28 @@ export class FleetManager {
     this.logger.info({ instanceName, approvalId, decision }, "Sending approval response to daemon");
     const ipc = this.instanceIpcClients.get(instanceName);
     ipc?.send({ type: "fleet_approval_response", approvalId, decision });
+  }
+
+  /** Handle tool status update from a daemon instance — forward to Telegram */
+  private handleToolStatusFromInstance(instanceName: string, msg: Record<string, unknown>): void {
+    if (!this.adapter) return;
+
+    const text = msg.text as string;
+    const editMessageId = msg.editMessageId as string | null;
+    const instanceConfig = this.fleetConfig?.instances[instanceName];
+    const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
+    const chatId = (this.adapter as TelegramAdapter).getLastChatId();
+    if (!chatId) return;
+
+    if (editMessageId) {
+      this.adapter.editMessage(chatId, editMessageId, text).catch(() => {});
+    } else {
+      this.adapter.sendText(chatId, text, { threadId }).then((sent) => {
+        // Send the messageId back to the daemon so it can edit next time
+        const ipc = this.instanceIpcClients.get(instanceName);
+        ipc?.send({ type: "fleet_tool_status_ack", messageId: sent.messageId });
+      }).catch(() => {});
+    }
   }
 
   // ===================== Auto-create topics =====================
