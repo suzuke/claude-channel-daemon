@@ -25,6 +25,7 @@ export class ContextGuardian extends EventEmitter {
 
   startWatching(): void {
     this.logger.debug({ path: this.statusFilePath }, "Watching status line file");
+    // watchFile (polling) over fs.watch: more reliable on NFS/Docker volumes; 2s latency is acceptable
     watchFile(this.statusFilePath, { interval: 2000 }, () => this.readAndCheck());
   }
 
@@ -100,6 +101,7 @@ export class ContextGuardian extends EventEmitter {
     this.startTimer();
   }
 
+  // No removeAllListeners — external listeners are on daemon, which is GC'd together with this instance
   stop(): void {
     this.clearTimer("ageTimer");
     this.clearTimer("idleTimer");

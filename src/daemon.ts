@@ -33,7 +33,8 @@ export class Daemon {
   private guardian: ContextGuardian | null = null;
   private memoryLayer: MemoryLayer | null = null;
   private adapter: ChannelAdapter | null = null;
-  // Track the threadId from inbound messages for automatic outbound routing
+  // Track chatId/threadId from inbound messages for automatic outbound routing
+  private lastChatId: string | undefined;
   private lastThreadId: string | undefined;
   // Tool status tracking for Telegram
   private toolStatusMessageId: string | null = null;
@@ -72,6 +73,7 @@ export class Daemon {
       } else if (msg.type === "fleet_inbound") {
         // Fleet manager routed a message to us (topic mode)
         const meta = msg.meta as Record<string, string>;
+        if (meta.chat_id) this.lastChatId = meta.chat_id;
         if (meta.thread_id) this.lastThreadId = meta.thread_id;
         this.pushChannelMessage(msg.content as string, meta);
       } else if (msg.type === "fleet_tool_status_ack") {
@@ -103,6 +105,7 @@ export class Daemon {
 
         // Wire inbound messages → push to Claude via IPC
         this.messageBus.on("message", (msg: InboundMessage) => {
+          if (msg.chatId) this.lastChatId = msg.chatId;
           if (msg.threadId) this.lastThreadId = msg.threadId;
           this.pushChannelMessage(msg.text, {
             chat_id: msg.chatId,
@@ -354,7 +357,8 @@ export class Daemon {
       const adapters = this.messageBus.getAllAdapters();
       if (adapters.length === 0) return;
       const adapter = adapters[0];
-      const chatId = ""; // DM mode uses default chat
+      const chatId = this.lastChatId ?? "";
+      if (!chatId) return; // No inbound message yet — nowhere to send
       if (!this.toolStatusMessageId) {
         adapter.sendText(chatId, text, { threadId: this.lastThreadId })
           .then(sent => { this.toolStatusMessageId = sent.messageId; })
@@ -534,6 +538,7 @@ export class Daemon {
     writeFileSync(windowIdFile, windowId);
   }
 
+  // Sync readFileSync — called every ~2s from status_update, but file is tiny; async not worth the complexity
   private saveSessionId(): void {
     try {
       const statusFile = join(this.instanceDir, "statusline.json");
