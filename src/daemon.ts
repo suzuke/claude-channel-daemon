@@ -63,6 +63,12 @@ export class Daemon {
         this.handleToolCall(msg, socket);
       } else if (msg.type === "mcp_ready") {
         this.logger.info("MCP channel server connected and ready");
+      } else if (msg.type === "fleet_inbound") {
+        // Fleet manager routed a message to us (topic mode)
+        this.pushChannelMessage(
+          msg.content as string,
+          msg.meta as Record<string, string>,
+        );
       }
     });
 
@@ -342,8 +348,17 @@ export class Daemon {
     // Route to adapter via MessageBus
     const adapters = this.messageBus.getAllAdapters();
     if (adapters.length === 0) {
-      // In topic mode, daemon doesn't own the adapter — respond with info
-      respond(null, "No adapter connected (topic mode — route via fleet manager)");
+      // Topic mode: forward to fleet manager via IPC (fleet manager connected as IPC client)
+      // The fleet manager's IPC client receives this and routes to shared adapter
+      this.ipcServer?.broadcast({ type: "fleet_outbound", tool, args, requestId });
+      // Response will come back as fleet_outbound_response — relay to MCP server
+      const onResponse = (respMsg: Record<string, unknown>) => {
+        if (respMsg.type === "fleet_outbound_response" && respMsg.requestId === requestId) {
+          respond(respMsg.result, respMsg.error as string | undefined);
+          this.ipcServer?.removeListener("message", onResponse as (...a: unknown[]) => void);
+        }
+      };
+      this.ipcServer?.on("message", onResponse as (...a: unknown[]) => void);
       return;
     }
 
