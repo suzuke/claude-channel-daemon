@@ -11,7 +11,7 @@ describe("Setup Wizard", () => {
 
     it("accepts valid token format", () => {
       expect(validateBotToken("123456789:ABCdefGHIjklMNOpqrSTUvwxYZ_1234567")).toBe(true);
-      expect(validateBotToken("8643519444:AAGMcAd0TNloFeKeuaYkfVmPoeBuGelmmw8")).toBe(true);
+      expect(validateBotToken("9999999999:BBBdefGHIjklMNOpqrSTUvwxYZ_9999999")).toBe(true);
     });
   });
 
