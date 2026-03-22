@@ -210,7 +210,19 @@ export class Daemon {
     );
     this.promptDetector.startPolling();
 
-    // 8. Context guardian
+    // 8. Capture session ID from statusline for resume
+    const sessionIdFile = join(this.instanceDir, "session-id");
+    this.guardian?.on("status_update", (status: Record<string, unknown>) => {
+      const raw = readFileSync(join(this.instanceDir, "statusline.json"), "utf-8");
+      try {
+        const data = JSON.parse(raw);
+        if (data.session_id) {
+          writeFileSync(sessionIdFile, data.session_id);
+        }
+      } catch {}
+    });
+
+    // 9. Context guardian
     const statusFile = join(this.instanceDir, "statusline.json");
     this.guardian = new ContextGuardian(this.config.context_guardian, this.logger, statusFile);
     this.guardian.startWatching();
@@ -262,12 +274,9 @@ export class Daemon {
     if (this.adapter) await this.adapter.stop();
     await this.approvalServer?.stop();
     await this.ipcServer?.close();
-    // Kill tmux window + clear window-id so next start gets fresh settings
-    if (this.tmux) {
-      await this.tmux.killWindow();
-      const windowIdFile = join(this.instanceDir, "window-id");
-      try { unlinkSync(windowIdFile); } catch {}
-    }
+    // Keep tmux window alive for resume — Claude continues running
+    // window-id is preserved so next daemon start reattaches
+    // Only context rotation kills the window (see guardian.on("rotate"))
     const pidPath = join(this.instanceDir, "daemon.pid");
     try {
       unlinkSync(pidPath);
