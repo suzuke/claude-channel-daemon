@@ -212,8 +212,37 @@ export class Daemon {
     this.guardian.startWatching();
     this.guardian.startTimer();
     this.guardian.on("rotate", async (reason: string) => {
-      this.logger.info({ reason }, "Context rotation triggered");
-      // Save session-id before killing
+      this.logger.info({ reason }, "Context rotation triggered — sending /compact");
+
+      // Step 1: Send /compact to let Claude compress context in-place
+      if (this.tmux) {
+        await this.tmux.sendKeys("/compact");
+        await this.tmux.sendSpecialKey("Enter");
+        this.logger.info("Sent /compact to Claude");
+
+        // Wait for compact to finish (poll statusline for reduced context %)
+        const compactTimeout = 60_000;
+        const start = Date.now();
+        while (Date.now() - start < compactTimeout) {
+          await new Promise(r => setTimeout(r, 5000));
+          try {
+            const sf = join(this.instanceDir, "statusline.json");
+            if (existsSync(sf)) {
+              const data = JSON.parse(readFileSync(sf, "utf-8"));
+              const pct = data.context_window?.used_percentage;
+              if (pct != null && pct < this.config.context_guardian.threshold_percentage) {
+                this.logger.info({ newUsage: pct }, "Compact succeeded — context below threshold");
+                this.guardian?.markRotationComplete();
+                return;
+              }
+            }
+          } catch {}
+        }
+
+        this.logger.warn("Compact did not reduce context below threshold — restarting session");
+      }
+
+      // Step 2: If compact wasn't enough, kill and start fresh (no --resume)
       try {
         const sf = join(this.instanceDir, "statusline.json");
         if (existsSync(sf)) {
@@ -224,15 +253,16 @@ export class Daemon {
         }
       } catch {}
 
-      // Kill current Claude window
+      // Remove session-id so spawnClaudeWindow starts fresh
+      const sessionIdFile = join(this.instanceDir, "session-id");
+      try { unlinkSync(sessionIdFile); } catch {}
+
       await this.tmux?.killWindow();
       this.transcriptMonitor?.resetOffset();
-
-      // Restart Claude with --resume (compact will happen via /compact in new session)
       await this.spawnClaudeWindow();
       this.autoConfirmDevChannels();
       this.guardian?.markRotationComplete();
-      this.logger.info({ reason }, "Context rotation complete — Claude restarted");
+      this.logger.info({ reason }, "Context rotation complete — fresh Claude session started");
     });
 
     // 9. Memory layer
