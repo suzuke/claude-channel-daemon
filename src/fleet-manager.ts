@@ -8,7 +8,7 @@ import yaml from "js-yaml";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig } from "./types.js";
-import { loadFleetConfig } from "./config.js";
+import { loadFleetConfig, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { TmuxManager } from "./tmux-manager.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
@@ -578,10 +578,10 @@ export class FleetManager {
       this.fleetConfig.instances[instanceName] = {
         working_directory: dirPath,
         topic_id: threadId,
-        restart_policy: this.fleetConfig.defaults.restart_policy ?? { max_retries: 10, backoff: "exponential", reset_after: 300 },
-        context_guardian: this.fleetConfig.defaults.context_guardian ?? { threshold_percentage: 60, max_idle_wait_ms: 300_000, completion_timeout_ms: 60_000, grace_period_ms: 600_000, max_age_hours: 8 },
-        memory: this.fleetConfig.defaults.memory ?? { auto_summarize: false, watch_memory_dir: true, backup_to_sqlite: true },
-        log_level: (this.fleetConfig.defaults.log_level as "info") ?? "info",
+        restart_policy: this.fleetConfig.defaults.restart_policy ?? DEFAULT_INSTANCE_CONFIG.restart_policy,
+        context_guardian: this.fleetConfig.defaults.context_guardian ?? DEFAULT_INSTANCE_CONFIG.context_guardian,
+        memory: this.fleetConfig.defaults.memory ?? DEFAULT_INSTANCE_CONFIG.memory,
+        log_level: this.fleetConfig.defaults.log_level ?? DEFAULT_INSTANCE_CONFIG.log_level,
       };
 
       // Save to fleet.yaml
@@ -676,10 +676,10 @@ export class FleetManager {
       this.fleetConfig.instances[instanceName] = {
         working_directory: projectDir,
         topic_id: threadId,
-        restart_policy: this.fleetConfig.defaults.restart_policy ?? { max_retries: 10, backoff: "exponential", reset_after: 300 },
-        context_guardian: this.fleetConfig.defaults.context_guardian ?? { threshold_percentage: 60, max_idle_wait_ms: 300_000, completion_timeout_ms: 60_000, grace_period_ms: 600_000, max_age_hours: 8 },
-        memory: this.fleetConfig.defaults.memory ?? { auto_summarize: false, watch_memory_dir: true, backup_to_sqlite: true },
-        log_level: (this.fleetConfig.defaults.log_level as "info") ?? "info",
+        restart_policy: this.fleetConfig.defaults.restart_policy ?? DEFAULT_INSTANCE_CONFIG.restart_policy,
+        context_guardian: this.fleetConfig.defaults.context_guardian ?? DEFAULT_INSTANCE_CONFIG.context_guardian,
+        memory: this.fleetConfig.defaults.memory ?? DEFAULT_INSTANCE_CONFIG.memory,
+        log_level: this.fleetConfig.defaults.log_level ?? DEFAULT_INSTANCE_CONFIG.log_level,
       };
       this.saveFleetConfig();
       this.routingTable.set(threadId, instanceName);

@@ -134,16 +134,7 @@ export class Daemon {
       if (savedId) {
         const oldTmux = new TmuxManager(sessionName, savedId);
         if (await oldTmux.isWindowAlive()) {
-          // Capture session-id from statusline before killing
-          try {
-            const statusFile = join(this.instanceDir, "statusline.json");
-            if (existsSync(statusFile)) {
-              const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-              if (data.session_id) {
-                writeFileSync(join(this.instanceDir, "session-id"), data.session_id);
-              }
-            }
-          } catch {}
+          this.saveSessionId();
           await oldTmux.killWindow();
           this.logger.info({ savedId }, "Killed old tmux window for fresh start");
         }
@@ -198,14 +189,7 @@ export class Daemon {
     this.guardian.startWatching();
     this.guardian.startTimer();
 
-    // Capture session ID from statusline for resume
-    const sessionIdFile = join(this.instanceDir, "session-id");
-    this.guardian.on("status_update", () => {
-      try {
-        const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-        if (data.session_id) writeFileSync(sessionIdFile, data.session_id);
-      } catch {}
-    });
+    this.guardian.on("status_update", () => this.saveSessionId());
     this.guardian.on("pending", async () => {
       this.logger.info("Context rotation pending — waiting for transcript to settle");
       await this.waitForTranscriptIdle(15000);
@@ -228,11 +212,7 @@ export class Daemon {
 
     this.guardian.on("rotate", async () => {
       this.logger.info("Context rotation — killing and respawning Claude");
-
-      try {
-        const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-        if (data.session_id) writeFileSync(sessionIdFile, data.session_id);
-      } catch {}
+      this.saveSessionId();
 
       await this.tmux?.killWindow();
       this.transcriptMonitor?.resetOffset();
@@ -278,17 +258,7 @@ export class Daemon {
     // MCP server has no reconnection → keeping window alive would leave
     // Claude without channel/approval connectivity
     if (this.tmux) {
-      // Capture session-id before killing (for --resume on next start)
-      try {
-        const statusFile = join(this.instanceDir, "statusline.json");
-        if (existsSync(statusFile)) {
-          const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-          if (data.session_id) {
-            writeFileSync(join(this.instanceDir, "session-id"), data.session_id);
-            this.logger.info({ sessionId: data.session_id }, "Saved session ID for resume");
-          }
-        }
-      } catch {}
+      this.saveSessionId();
       await this.tmux.killWindow();
       const windowIdFile = join(this.instanceDir, "window-id");
       try { unlinkSync(windowIdFile); } catch {}
@@ -562,6 +532,16 @@ export class Daemon {
     const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory);
     const windowIdFile = join(this.instanceDir, "window-id");
     writeFileSync(windowIdFile, windowId);
+  }
+
+  private saveSessionId(): void {
+    try {
+      const statusFile = join(this.instanceDir, "statusline.json");
+      const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+      if (data.session_id) {
+        writeFileSync(join(this.instanceDir, "session-id"), data.session_id);
+      }
+    } catch {}
   }
 
   private readContextPercentage(): number {
