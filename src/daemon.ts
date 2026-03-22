@@ -69,17 +69,54 @@ export class Daemon {
     if (!windowAlive) {
       // Generate settings file
       this.writeSettings();
-      // Build claude command
-      const pluginDir = join(__dirname, "plugin");
+      // Build claude command — find plugin dir (dist/plugin or src/plugin depending on how we're run)
+      // When run via tsx (dev), __dirname is src/; when run compiled, __dirname is dist/
+      // Either way, the built plugin is in the project root's dist/plugin/
+      let pluginDir = join(__dirname, "plugin");
+      this.logger.info({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir check");
+      if (!existsSync(join(pluginDir, "ccd-channel", "server.js"))) {
+        // Fallback: look for dist/plugin relative to project root
+        const projectRoot = join(__dirname, "..");
+        pluginDir = join(projectRoot, "dist", "plugin");
+        this.logger.info({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir fallback");
+      }
+      // Write MCP server config BEFORE starting Claude (so it finds the server)
+      const mcpDir = join(this.config.working_directory, ".claude");
+      mkdirSync(mcpDir, { recursive: true });
+      const mcpConfigPath = join(mcpDir, ".mcp.json");
+      let mcpConfig: { mcpServers?: Record<string, unknown> } = {};
+      if (existsSync(mcpConfigPath)) {
+        try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch {}
+      }
+      if (!mcpConfig.mcpServers) mcpConfig.mcpServers = {};
+      const sockPath = join(this.instanceDir, "channel.sock");
+      let serverJs = join(__dirname, "channel", "mcp-server.js");
+      if (!existsSync(serverJs)) {
+        serverJs = join(__dirname, "..", "dist", "channel", "mcp-server.js");
+      }
+      mcpConfig.mcpServers["ccd-channel"] = {
+        command: "node",
+        args: [serverJs],
+        env: { CCD_SOCKET_PATH: sockPath },
+      };
+      writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
+      this.logger.info({ mcpConfigPath }, "Wrote MCP server config");
+
+      // Now start Claude
       const settingsPath = join(this.instanceDir, "claude-settings.json");
       const sessionIdFile = join(this.instanceDir, "session-id");
-      let claudeCmd = `claude --plugin-dir ${pluginDir} --channels plugin:ccd-channel --settings ${settingsPath}`;
+      let claudeCmd = `claude --settings ${settingsPath} --channels server:ccd-channel --dangerously-load-development-channels server:ccd-channel`;
       if (existsSync(sessionIdFile)) {
         const sid = readFileSync(sessionIdFile, "utf-8").trim();
         if (sid) claudeCmd += ` --resume ${sid}`;
       }
       const windowId = await this.tmux.createWindow(claudeCmd, this.config.working_directory);
       writeFileSync(windowIdFile, windowId);
+
+      // Auto-confirm the development channels safety prompt
+      await new Promise(r => setTimeout(r, 3000));
+      await this.tmux.sendSpecialKey("Enter");
+      this.logger.info("Auto-confirmed development channels prompt");
     }
 
     // 3. Pipe-pane for prompt detection
@@ -210,10 +247,10 @@ export class Daemon {
           "WebSearch",
           "Agent",
           "Skill",
-          "mcp__plugin_ccd-channel_ccd-channel__reply",
-          "mcp__plugin_ccd-channel_ccd-channel__react",
-          "mcp__plugin_ccd-channel_ccd-channel__edit_message",
-          "mcp__plugin_ccd-channel_ccd-channel__download_attachment",
+          "mcp__ccd-channel__reply",
+          "mcp__ccd-channel__react",
+          "mcp__ccd-channel__edit_message",
+          "mcp__ccd-channel__download_attachment",
         ],
         deny: [
           "Bash(rm -rf /)",
