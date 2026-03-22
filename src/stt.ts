@@ -14,7 +14,7 @@ export interface SttResult {
 export async function transcribe(
   filePath: string,
   apiKey: string,
-  model = "whisper-large-v3",
+  model = "whisper-large-v3-turbo",
 ): Promise<SttResult> {
   const fileBuffer = readFileSync(filePath);
   // Telegram voice files use .oga extension; Groq expects .ogg
