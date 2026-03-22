@@ -613,8 +613,8 @@ export class FleetManager {
       return roots.map(r => r.startsWith("~") ? join(homedir(), r.slice(1)) : r)
         .filter(r => existsSync(r));
     }
-    // Fallback: home directory
-    return [homedir()];
+    // No fallback — user must configure project_roots in fleet.yaml
+    return [];
   }
 
   /** List project directories from project_roots */
