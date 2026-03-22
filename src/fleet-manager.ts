@@ -16,7 +16,7 @@ import { IpcClient } from "./channel/ipc-bridge.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { createLogger } from "./logger.js";
 
-const BASE_PORT = 18321;
+const BASE_PORT = 18400; // Start above 18321 to avoid conflict with official telegram plugin
 const TMUX_SESSION = "ccd";
 
 export class FleetManager {
