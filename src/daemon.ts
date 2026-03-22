@@ -405,20 +405,28 @@ export class Daemon {
     }
   }
 
-  /** Background polling to auto-confirm the dev channels safety prompt */
+  /** Background polling to auto-confirm all Claude startup prompts */
   private async autoConfirmDevChannels(): Promise<void> {
     if (!this.tmux) return;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) { // max 60s — may have multiple prompts
       await new Promise(r => setTimeout(r, 1000));
       try {
         const pane = await this.tmux.capturePane();
+        // Dev channels safety prompt
         if (pane.includes("I am using this for local development")) {
           await this.tmux.sendSpecialKey("Enter");
           this.logger.info("Auto-confirmed development channels prompt");
-          return;
+          continue; // may have more prompts after this
         }
+        // MCP server trust prompt (first time in a project)
+        if (pane.includes("New MCP server found") || pane.includes("Use this and all future MCP servers")) {
+          await this.tmux.sendSpecialKey("Enter");
+          this.logger.info("Auto-confirmed MCP server trust prompt");
+          continue;
+        }
+        // Successfully started
         if (pane.includes("Listening for channel messages")) {
-          this.logger.info("Claude started without dev channels prompt");
+          this.logger.info("Claude started and listening for channels");
           return;
         }
       } catch {}
