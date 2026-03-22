@@ -17,10 +17,14 @@ export async function transcribe(
   model = "whisper-large-v3",
 ): Promise<SttResult> {
   const fileBuffer = readFileSync(filePath);
-  const fileName = basename(filePath);
+  // Telegram voice files use .oga extension; Groq expects .ogg
+  let fileName = basename(filePath);
+  if (fileName.endsWith(".oga")) {
+    fileName = fileName.replace(/\.oga$/, ".ogg");
+  }
 
   const formData = new FormData();
-  formData.append("file", new Blob([fileBuffer]), fileName);
+  formData.append("file", new Blob([fileBuffer], { type: "audio/ogg" }), fileName);
   formData.append("model", model);
 
   const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
