@@ -72,7 +72,12 @@ export class ApprovalServer {
             }
 
             res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ hookSpecificOutput: { permissionDecision } }));
+            res.end(JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision,
+              },
+            }));
           } catch (err) {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Bad request" }));
