@@ -359,6 +359,7 @@ export class FleetManager {
         try {
           const localPath = await tgAdapter.downloadAttachment(voiceAttachment.fileId);
           const result = await transcribe(localPath, groqKey);
+          try { unlinkSync(localPath); } catch { /* ignore */ }
           text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
           this.logger.info({ instanceName, transcription: result.text.slice(0, 80) }, "Voice transcribed");
         } catch (err) {
