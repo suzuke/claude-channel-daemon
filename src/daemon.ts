@@ -76,6 +76,12 @@ export class Daemon {
         if (meta.chat_id) this.lastChatId = meta.chat_id;
         if (meta.thread_id) this.lastThreadId = meta.thread_id;
         this.pushChannelMessage(msg.content as string, meta);
+      } else if (msg.type === "fleet_schedule_trigger") {
+        const payload = msg.payload as Record<string, unknown>;
+        const meta = msg.meta as Record<string, string>;
+        this.lastChatId = meta.chat_id;
+        this.lastThreadId = meta.thread_id;
+        this.pushChannelMessage(payload.message as string, meta);
       } else if (msg.type === "fleet_tool_status_ack") {
         // Fleet manager sent us the messageId for our tool status message
         this.toolStatusMessageId = msg.messageId as string;
@@ -412,6 +418,43 @@ export class Daemon {
       this.ipcServer?.send(socket, { requestId, result, error });
     };
 
+    // Schedule tools → route to fleet manager
+    const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
+
+    if (SCHEDULE_TOOLS.has(tool)) {
+      const typeMap: Record<string, string> = {
+        create_schedule: "fleet_schedule_create",
+        list_schedules: "fleet_schedule_list",
+        update_schedule: "fleet_schedule_update",
+        delete_schedule: "fleet_schedule_delete",
+      };
+
+      this.ipcServer?.broadcast({
+        type: typeMap[tool],
+        payload: args,
+        meta: { chat_id: this.lastChatId, thread_id: this.lastThreadId, instance_name: this.name },
+        requestId,
+      });
+
+      // Wait for fleet_schedule_response — same pattern as fleet_outbound_response
+      const cleanup = () => {
+        this.ipcServer?.removeListener("message", onResponse as (...a: unknown[]) => void);
+        clearTimeout(timeout);
+      };
+      const onResponse = (respMsg: Record<string, unknown>) => {
+        if (respMsg.type === "fleet_schedule_response" && respMsg.requestId === requestId) {
+          cleanup();
+          respond(respMsg.result, respMsg.error as string | undefined);
+        }
+      };
+      const timeout = setTimeout(() => {
+        cleanup();
+        respond(null, "Schedule operation timed out after 30s");
+      }, 30_000);
+      this.ipcServer?.on("message", onResponse as (...a: unknown[]) => void);
+      return;
+    }
+
     // Route to adapter via MessageBus
     const adapters = this.messageBus.getAllAdapters();
     if (adapters.length === 0) {
@@ -630,6 +673,10 @@ export class Daemon {
           "mcp__ccd-channel__react",
           "mcp__ccd-channel__edit_message",
           "mcp__ccd-channel__download_attachment",
+          "mcp__ccd-channel__create_schedule",
+          "mcp__ccd-channel__list_schedules",
+          "mcp__ccd-channel__update_schedule",
+          "mcp__ccd-channel__delete_schedule",
         ],
         deny: [
           "Bash(rm -rf /)",
