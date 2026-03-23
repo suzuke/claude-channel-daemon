@@ -12,8 +12,9 @@ import { MemoryDb } from "./db.js";
 import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
-import { ApprovalServer } from "./approval/approval-server.js";
-import { TmuxPromptDetector, loadToolAllowlist } from "./approval/tmux-prompt-detector.js";
+import { TmuxPromptDetector } from "./approval/tmux-prompt-detector.js";
+import type { CliBackend, CliBackendConfig } from "./backend/types.js";
+import type { ApprovalStrategy } from "./backend/approval-strategy.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage, ApprovalResponse } from "./channel/types.js";
@@ -30,7 +31,6 @@ export class Daemon {
   private messageBus: MessageBus;
   private transcriptMonitor: TranscriptMonitor | null = null;
   private toolTracker: ToolTracker | null = null;
-  private approvalServer: ApprovalServer | null = null;
   private promptDetector: TmuxPromptDetector | null = null;
   private guardian: ContextGuardian | null = null;
   private memoryLayer: MemoryLayer | null = null;
@@ -49,6 +49,8 @@ export class Daemon {
     private instanceDir: string,
     private topicMode = false,
     private containerManager?: ContainerManager,
+    private backend?: CliBackend,
+    private approvalStrategyInstance?: ApprovalStrategy,
   ) {
     this.logger = createLogger(config.log_level);
     this.messageBus = new MessageBus();
@@ -203,7 +205,6 @@ export class Daemon {
     }
 
     await this.spawnClaudeWindow();
-    this.autoConfirmDevChannels();
 
     // 3. Pipe-pane for prompt detection
     const outputLog = join(this.instanceDir, "output.log");
@@ -225,15 +226,11 @@ export class Daemon {
     this.transcriptMonitor.startPolling();
 
     // 6. Approval server
-    const port = this.config.approval_port ?? 18321;
-    this.approvalServer = new ApprovalServer({
-      messageBus: this.messageBus,
-      port,
-      ipcServer: this.ipcServer,
-      topicMode: this.topicMode,
-      instanceName: this.name,
-    });
-    await this.approvalServer.start();
+    let port = this.config.approval_port ?? 18321;
+    if (this.approvalStrategyInstance) {
+      port = await this.approvalStrategyInstance.start();
+      this.logger.debug({ port }, "Approval strategy started");
+    }
 
     // 7. Prompt detector
     // In topic mode, messageBus has no adapters — must route via IPC like ApprovalServer does
@@ -290,7 +287,6 @@ export class Daemon {
       await this.tmux?.killWindow();
       this.transcriptMonitor?.resetOffset();
       await this.spawnClaudeWindow();
-      this.autoConfirmDevChannels();
       this.guardian?.markRotationComplete();
       this.logger.info("Context rotation complete — fresh Claude session started");
     });
@@ -325,7 +321,7 @@ export class Daemon {
     this.guardian?.stop();
     if (this.memoryLayer) await this.memoryLayer.stop();
     if (this.adapter) await this.adapter.stop();
-    await this.approvalServer?.stop();
+    await this.approvalStrategyInstance?.stop();
     await this.ipcServer?.close();
     // Strategy A: kill window on stop, resume via --resume on next start
     // MCP server has no reconnection → keeping window alive would leave
@@ -336,21 +332,10 @@ export class Daemon {
       const windowIdFile = join(this.instanceDir, "window-id");
       try { unlinkSync(windowIdFile); } catch {}
     }
-    // Clean up .mcp.json — remove ccd-channel entry (keep other MCP servers)
-    try {
-      const mcpConfigPath = join(this.config.working_directory, ".mcp.json");
-      if (existsSync(mcpConfigPath)) {
-        const mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
-        if (mcpConfig.mcpServers?.["ccd-channel"]) {
-          delete mcpConfig.mcpServers["ccd-channel"];
-          if (Object.keys(mcpConfig.mcpServers).length === 0) {
-            unlinkSync(mcpConfigPath);
-          } else {
-            writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
-          }
-        }
-      }
-    } catch {}
+    // Clean up backend config files
+    if (this.backend?.cleanup) {
+      this.backend.cleanup(this.buildBackendConfig());
+    }
 
     const pidPath = join(this.instanceDir, "daemon.pid");
     try {
@@ -614,80 +599,41 @@ export class Daemon {
     });
   }
 
-  /** Background polling to auto-confirm all Claude startup prompts */
-  private async autoConfirmDevChannels(): Promise<void> {
-    if (!this.tmux) return;
-    for (let i = 0; i < 60; i++) { // max 60s — may have multiple prompts
-      await new Promise(r => setTimeout(r, 1000));
-      try {
-        const pane = await this.tmux.capturePane();
-        // Dev channels safety prompt
-        if (pane.includes("I am using this for local development")) {
-          await this.tmux.sendSpecialKey("Enter");
-          this.logger.debug("Auto-confirmed development channels prompt");
-          continue; // may have more prompts after this
-        }
-        // MCP server trust prompt (first time in a project)
-        if (pane.includes("New MCP server found") || pane.includes("Use this and all future MCP servers")) {
-          await this.tmux.sendSpecialKey("Enter");
-          this.logger.debug("Auto-confirmed MCP server trust prompt");
-          continue;
-        }
-        // Successfully started
-        if (pane.includes("Listening for channel messages")) {
-          this.logger.debug("Claude started and listening for channels");
-          return;
-        }
-      } catch {}
-    }
-    this.logger.warn(`Auto-confirm timed out — manually run: tmux send-keys -t ccd:${this.tmux.getWindowId()} Enter`);
-  }
 
-  /** Spawn (or respawn) a Claude window in tmux */
-  private async spawnClaudeWindow(): Promise<void> {
-    this.writeSettings();
-
-    // Find MCP server JS
+  /** Build config object for the CLI backend */
+  private buildBackendConfig(): CliBackendConfig {
+    const sockPath = join(this.instanceDir, "channel.sock");
     let serverJs = join(__dirname, "channel", "mcp-server.js");
     if (!existsSync(serverJs)) {
       serverJs = join(__dirname, "..", "dist", "channel", "mcp-server.js");
     }
-    let pluginDir = join(__dirname, "plugin");
-    this.logger.debug({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir check");
-    if (!existsSync(join(pluginDir, "ccd-channel", "server.js"))) {
-      pluginDir = join(__dirname, "..", "dist", "plugin");
-      this.logger.debug({ pluginDir, exists: existsSync(join(pluginDir, "ccd-channel", "server.js")) }, "Plugin dir fallback");
-    }
-
-    // Write .mcp.json
-    const mcpConfigPath = join(this.config.working_directory, ".mcp.json");
-    let mcpConfig: { mcpServers?: Record<string, unknown> } = {};
-    if (existsSync(mcpConfigPath)) {
-      try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch {}
-    }
-    if (!mcpConfig.mcpServers) mcpConfig.mcpServers = {};
-    const sockPath = join(this.instanceDir, "channel.sock");
-    mcpConfig.mcpServers["ccd-channel"] = {
-      command: "node",
-      args: [serverJs],
-      env: { CCD_SOCKET_PATH: sockPath },
+    return {
+      workingDirectory: this.config.working_directory,
+      instanceDir: this.instanceDir,
+      instanceName: this.name,
+      approvalPort: this.config.approval_port ?? 18321,
+      mcpServers: {
+        "ccd-channel": {
+          command: "node",
+          args: [serverJs],
+          env: { CCD_SOCKET_PATH: sockPath },
+        },
+      },
+      approvalStrategy: this.approvalStrategyInstance!,
+      containerManager: this.containerManager,
     };
-    writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
-    this.logger.debug({ mcpConfigPath }, "Wrote MCP server config");
+  }
 
-    // Build claude command
-    // Disable cmux's claude shim hooks — daemon manages its own lifecycle,
-    // and cmux's --settings injection would conflict with ours.
-    const settingsPath = join(this.instanceDir, "claude-settings.json");
-    const sessionIdFile = join(this.instanceDir, "session-id");
-    let claudeCmd = `CMUX_CLAUDE_HOOKS_DISABLED=1 claude --settings ${settingsPath} --dangerously-load-development-channels server:ccd-channel`;
-    if (existsSync(sessionIdFile)) {
-      const sid = readFileSync(sessionIdFile, "utf-8").trim();
-      if (sid) claudeCmd += ` --resume ${sid}`;
+  /** Spawn (or respawn) a Claude window in tmux */
+  private async spawnClaudeWindow(): Promise<void> {
+    if (!this.backend) {
+      throw new Error("No backend configured — cannot spawn Claude window");
     }
+    const backendConfig = this.buildBackendConfig();
+    this.backend.writeConfig(backendConfig);
+    let claudeCmd = this.backend.buildCommand(backendConfig);
 
-    // In sandbox mode, set CLAUDE_CODE_SHELL to redirect Bash commands to Docker.
-    // Claude itself stays on host (preserves Keychain auth, hooks, tmux attach).
+    // Sandbox shell is shared across backends — daemon handles it
     if (this.containerManager) {
       const shellPath = this.writeSandboxShell();
       claudeCmd = `CLAUDE_CODE_SHELL=${shellPath} ${claudeCmd}`;
@@ -696,27 +642,26 @@ export class Daemon {
     const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory);
     const windowIdFile = join(this.instanceDir, "window-id");
     writeFileSync(windowIdFile, windowId);
+
+    // Post-launch setup (auto-confirm prompts for Claude Code)
+    if (this.backend.postLaunch) {
+      this.backend.postLaunch(this.tmux!, windowId).then(() => {
+        this.logger.debug("Post-launch setup completed");
+      }).catch(err => {
+        this.logger.warn({ err }, "Post-launch setup failed or timed out — manually run: tmux send-keys -t ccd:${this.tmux?.getWindowId()} Enter");
+      });
+    }
   }
 
-  // Sync readFileSync — called every ~2s from status_update, but file is tiny; async not worth the complexity
   private saveSessionId(): void {
-    try {
-      const statusFile = join(this.instanceDir, "statusline.json");
-      const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-      if (data.session_id) {
-        writeFileSync(join(this.instanceDir, "session-id"), data.session_id);
-      }
-    } catch {}
+    const sid = this.backend?.getSessionId();
+    if (sid) {
+      writeFileSync(join(this.instanceDir, "session-id"), sid);
+    }
   }
 
   private readContextPercentage(): number {
-    try {
-      const sf = join(this.instanceDir, "statusline.json");
-      const data = JSON.parse(readFileSync(sf, "utf-8"));
-      return data.context_window?.used_percentage ?? 0;
-    } catch {
-      return 0;
-    }
+    return this.backend?.getContextUsage() ?? 0;
   }
 
   /** Debounce-based idle: resolves when no transcript events for `quietMs`. */
@@ -748,73 +693,6 @@ export class Daemon {
     this.guardian?.signalHandoverComplete();
   }
 
-  private writeSettings(): void {
-    const port = this.config.approval_port ?? 18321;
-    const settings: Record<string, unknown> = {
-      // NOTE: enabledPlugins via --settings does NOT work — plugins are loaded
-      // before --settings is merged. Use .claude/settings.local.json instead.
-      // The 409 retry in TelegramAdapter handles any lingering official plugin.
-      hooks: {
-        PreToolUse: [
-          {
-            matcher: "Bash",
-            hooks: [
-              {
-                type: "command",
-                command: `curl -s -X POST http://127.0.0.1:${port}/approve -H 'Content-Type: application/json' -d @- --max-time 130 --connect-timeout 1 || echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"approval server unreachable"}}'`,
-                timeout: 135000,
-              },
-            ],
-          },
-        ],
-      },
-      permissions: {
-        allow: [
-          "Read",
-          "Edit",
-          "Write",
-          "Glob",
-          "Grep",
-          "Bash(*)",
-          "WebFetch",
-          "WebSearch",
-          "Agent",
-          "Skill",
-          "mcp__ccd-channel__reply",
-          "mcp__ccd-channel__react",
-          "mcp__ccd-channel__edit_message",
-          "mcp__ccd-channel__download_attachment",
-          "mcp__ccd-channel__create_schedule",
-          "mcp__ccd-channel__list_schedules",
-          "mcp__ccd-channel__update_schedule",
-          "mcp__ccd-channel__delete_schedule",
-          // Merge user-approved "always allow" tools from persistent allowlist
-          ...loadToolAllowlist(this.instanceDir),
-        ],
-        deny: [
-          // Catastrophic operations — hard deny, no user override
-          "Bash(rm -rf /)",
-          "Bash(rm -rf /*)",
-          "Bash(rm -rf ~)",
-          "Bash(rm -rf ~/*)",
-          "Bash(dd *)",
-          "Bash(mkfs *)",
-          // git force ops and git clean are handled by ApprovalServer
-          // (danger patterns) — user can approve via Telegram if needed
-        ],
-        defaultMode: "default",
-      },
-      statusLine: {
-        type: "command",
-        command: this.writeStatusLineScript(),
-      },
-    };
-    writeFileSync(
-      join(this.instanceDir, "claude-settings.json"),
-      JSON.stringify(settings),
-    );
-  }
-
   /** Generate sandbox-bash wrapper script that forwards Bash commands to Docker */
   private writeSandboxShell(): string {
     const scriptPath = join(this.instanceDir, "sandbox-bash");
@@ -827,11 +705,4 @@ exec docker exec -i -w "$(pwd)" ccd-shared /bin/bash "$@"
     return scriptPath;
   }
 
-  private writeStatusLineScript(): string {
-    const statusFile = join(this.instanceDir, "statusline.json");
-    const script = `#!/bin/bash\nINPUT=$(cat)\necho "$INPUT" > "${statusFile}"\necho "ok"`;
-    const scriptPath = join(this.instanceDir, "statusline.sh");
-    writeFileSync(scriptPath, script, { mode: 0o755 });
-    return scriptPath;
-  }
 }
