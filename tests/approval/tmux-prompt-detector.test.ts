@@ -53,4 +53,10 @@ Do you want to proceed?
     const text = `2. Yes, and don\x1b[0m't ask again for \x1b[32mpuppeteer\x1b[0m - \x1b[32mpuppeteer_click\x1b[0m commands in /foo`;
     expect(extractToolPattern(text)).toBe("mcp__puppeteer__puppeteer_click(*)");
   });
+
+  it("handles real tmux output with cursor-forward codes", () => {
+    // Real data from ccplugin output.log — \x1b[1C = cursor forward (space)
+    const text = "\x1b[3C\x1b[38;5;246m2.\x1b[1C\x1b[39mYes,\x1b[1Cand\x1b[1Cdont\x1b[1Cask\x1b[1Cagain\x1b[1Cfor\x1b[1C\x1b[1mpuppeteer\x1b[1C-\x1b[1Cpuppeteer_navigate\x1b[1C\x1b[22mcommands\x1b[1Cin";
+    expect(extractToolPattern(text)).toBe("mcp__puppeteer__puppeteer_navigate(*)");
+  });
 });

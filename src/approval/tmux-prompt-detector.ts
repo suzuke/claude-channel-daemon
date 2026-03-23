@@ -6,10 +6,11 @@ import type { ApprovalResponse } from "../channel/types.js";
 /** Strip ANSI escape codes from terminal output */
 function stripAnsi(text: string): string {
   // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
-             .replace(/\x1b\][^\x07]*\x07/g, "")   // OSC sequences
-             .replace(/\x1b[()][0-9A-B]/g, "")       // charset switches
-             .replace(/[\x00-\x08\x0e-\x1f]/g, "");  // misc control chars
+  return text.replace(/\x1b\[\d*C/g, " ")            // cursor forward → space
+             .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")  // other CSI sequences
+             .replace(/\x1b\][^\x07]*\x07/g, "")      // OSC sequences
+             .replace(/\x1b[()][0-9A-B]/g, "")        // charset switches
+             .replace(/[\x00-\x08\x0e-\x1f]/g, "");   // misc control chars
 }
 
 export function detectPermissionPrompt(text: string): boolean {
@@ -27,8 +28,8 @@ export function extractToolPattern(text: string): string | null {
   const clean = stripAnsi(text);
   // Match: "don't ask again for <tool_display_name> commands in"
   // Tool display: "server - tool_name" for MCP, or just "ToolName" for built-in
-  const m = clean.match(/don't ask again for\s+(.+?)\s+commands?\s+in\b/i)
-         ?? clean.match(/don.t ask again for\s+(.+?)\s+commands?\s+in\b/i);
+  // "don't" may appear as don't, don.t, or dont (apostrophe stripped by terminal)
+  const m = clean.match(/don.?t ask again for\s+(.+?)\s+commands?\s+in\b/i);
   if (!m) return null;
 
   const display = m[1].trim();
