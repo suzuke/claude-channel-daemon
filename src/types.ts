@@ -87,9 +87,18 @@ export interface InstanceConfig {
   channel_plugin?: string;
 }
 
+export interface FleetDefaults extends Partial<InstanceConfig> {
+  scheduler?: {
+    max_schedules?: number;
+    default_timezone?: string;
+    retry_count?: number;
+    retry_interval_ms?: number;
+  };
+}
+
 export interface FleetConfig {
   channel?: ChannelConfig;
   project_roots?: string[];
-  defaults: Partial<InstanceConfig>;
+  defaults: FleetDefaults;
   instances: Record<string, InstanceConfig>;
 }
