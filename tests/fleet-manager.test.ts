@@ -70,4 +70,42 @@ instances:
     expect(table.get(87)).toBe("proj-b");
     expect(table.size).toBe(2); // proj-c has no topic_id
   });
+
+  it("bindAndStart exists as a method on FleetManager", () => {
+    const fm = new FleetManager(tmpDir);
+    expect(typeof (fm as any).bindAndStart).toBe("function");
+  });
+
+  it("createForumTopic calls Telegram API and returns message_thread_id", async () => {
+    const fm = new FleetManager(tmpDir);
+    const configPath = join(tmpDir, "fleet.yaml");
+    writeFileSync(configPath, `
+channel:
+  type: telegram
+  mode: topic
+  bot_token_env: TEST_BOT_TOKEN
+  group_id: -100123
+instances: {}
+`);
+    fm.loadConfig(configPath);
+
+    // Stub global fetch
+    const originalFetch = global.fetch;
+    global.fetch = async (_url: string | URL | Request, _init?: RequestInit) => {
+      return {
+        json: async () => ({ ok: true, result: { message_thread_id: 999 } }),
+      } as Response;
+    };
+
+    process.env.TEST_BOT_TOKEN = "test-token-abc";
+
+    try {
+      // Access private method via cast
+      const threadId = await (fm as any).createForumTopic("my-topic");
+      expect(threadId).toBe(999);
+    } finally {
+      global.fetch = originalFetch;
+      delete process.env.TEST_BOT_TOKEN;
+    }
+  });
 });

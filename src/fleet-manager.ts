@@ -611,6 +611,29 @@ export class FleetManager {
 
   // ===================== Auto-create topics =====================
 
+  /** Create a Telegram Forum Topic. Returns the message_thread_id. */
+  private async createForumTopic(topicName: string): Promise<number> {
+    const groupId = this.fleetConfig?.channel?.group_id;
+    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
+    if (!groupId || !botTokenEnv) throw new Error("No group_id or bot_token configured");
+    const botToken = process.env[botTokenEnv];
+    if (!botToken) throw new Error(`Bot token env var ${botTokenEnv} not set`);
+
+    const res = await fetch(
+      `https://api.telegram.org/bot${botToken}/createForumTopic`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: groupId, name: topicName }),
+      },
+    );
+    const data = await res.json() as { ok: boolean; result?: { message_thread_id: number }; description?: string };
+    if (!data.ok || !data.result) {
+      throw new Error(`createForumTopic failed: ${data.description ?? "unknown error"}`);
+    }
+    return data.result.message_thread_id;
+  }
+
   /** Create Telegram topics for instances that don't have topic_id */
   private async autoCreateTopics(fleet: FleetConfig): Promise<void> {
     if (!fleet.channel?.group_id) return;
@@ -624,23 +647,10 @@ export class FleetManager {
       try {
         // Use Bot API directly (adapter may not be started yet)
         const topicName = basename(config.working_directory);
-        const res = await fetch(
-          `https://api.telegram.org/bot${botToken}/createForumTopic`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: fleet.channel.group_id,
-              name: topicName,
-            }),
-          },
-        );
-        const data = await res.json() as { ok: boolean; result?: { message_thread_id: number } };
-        if (data.ok && data.result) {
-          config.topic_id = data.result.message_thread_id;
-          configChanged = true;
-          this.logger.info({ name, topicId: config.topic_id, topicName }, "Auto-created Telegram topic");
-        }
+        const threadId = await this.createForumTopic(topicName);
+        config.topic_id = threadId;
+        configChanged = true;
+        this.logger.info({ name, topicId: config.topic_id, topicName }, "Auto-created Telegram topic");
       } catch (err) {
         this.logger.warn({ name, err }, "Failed to auto-create topic");
       }
