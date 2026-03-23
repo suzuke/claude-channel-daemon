@@ -33,10 +33,11 @@ export function extractToolPattern(text: string): string | null {
   if (!m) return null;
 
   const display = m[1].trim();
-  // MCP tool: "server - tool_name" → "mcp__server__tool_name(*)"
+  // MCP tool: "server - tool_name" → "mcp__server__tool_name"
+  // (Claude Code MCP rules don't support parenthesized patterns)
   const mcpMatch = display.match(/^(\S+)\s*-\s*(\S+)$/);
   if (mcpMatch) {
-    return `mcp__${mcpMatch[1]}__${mcpMatch[2]}(*)`;
+    return `mcp__${mcpMatch[1]}__${mcpMatch[2]}`;
   }
   // Built-in tool: "Bash" → "Bash(*)"
   return `${display}(*)`;
@@ -107,6 +108,11 @@ export class TmuxPromptDetector {
 
   startPolling(intervalMs = 2000): void {
     if (this.pollTimer !== null) return;
+
+    // Skip existing content — only detect prompts written after we start polling
+    try {
+      this.byteOffset = statSync(this.outputLogPath).size;
+    } catch { /* file may not exist yet */ }
 
     this.pollTimer = setInterval(async () => {
       try {
