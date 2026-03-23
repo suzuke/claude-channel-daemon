@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createReadStream, mkdirSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, basename } from "node:path";
 import { Bot, GrammyError, InputFile } from "grammy";
 import type { Context, InlineKeyboard as InlineKeyboardType } from "grammy";
 import { InlineKeyboard } from "grammy";
@@ -49,17 +49,18 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       },
       sendFile: async (chatId, threadId, filePath) => {
         const ext = extname(filePath).toLowerCase();
+        const filename = basename(filePath);
         if (IMAGE_EXTENSIONS.has(ext)) {
           const msg = await this.bot.api.sendPhoto(
             Number(chatId),
-            new InputFile(createReadStream(filePath)),
+            new InputFile(createReadStream(filePath), filename),
             { message_thread_id: threadId != null ? Number(threadId) : undefined },
           );
           return { messageId: String(msg.message_id) };
         } else {
           const msg = await this.bot.api.sendDocument(
             Number(chatId),
-            new InputFile(createReadStream(filePath)),
+            new InputFile(createReadStream(filePath), filename),
             { message_thread_id: threadId != null ? Number(threadId) : undefined },
           );
           return { messageId: String(msg.message_id) };
@@ -313,19 +314,20 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
   async sendFile(chatId: string, filePath: string, opts?: SendOpts): Promise<SentMessage> {
     const threadId = opts?.threadId;
     const ext = extname(filePath).toLowerCase();
+    const filename = basename(filePath);
     let messageId: string;
 
     if (IMAGE_EXTENSIONS.has(ext)) {
       const msg = await this.bot.api.sendPhoto(
         Number(chatId),
-        new InputFile(createReadStream(filePath)),
+        new InputFile(createReadStream(filePath), filename),
         { message_thread_id: threadId != null ? Number(threadId) : undefined },
       );
       messageId = String(msg.message_id);
     } else {
       const msg = await this.bot.api.sendDocument(
         Number(chatId),
-        new InputFile(createReadStream(filePath)),
+        new InputFile(createReadStream(filePath), filename),
         { message_thread_id: threadId != null ? Number(threadId) : undefined },
       );
       messageId = String(msg.message_id);
