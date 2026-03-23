@@ -429,11 +429,14 @@ export class Daemon {
         delete_schedule: "fleet_schedule_delete",
       };
 
+      // Use fleetRequestId (not requestId) to avoid MCP server resolving the
+      // pending tool call prematurely when it receives the broadcast.
+      const fleetReqId = `sched_${requestId}`;
       this.ipcServer?.broadcast({
         type: typeMap[tool],
         payload: args,
         meta: { chat_id: this.lastChatId, thread_id: this.lastThreadId, instance_name: this.name },
-        requestId,
+        fleetRequestId: fleetReqId,
       });
 
       // Wait for fleet_schedule_response — same pattern as fleet_outbound_response
@@ -442,7 +445,7 @@ export class Daemon {
         clearTimeout(timeout);
       };
       const onResponse = (respMsg: Record<string, unknown>) => {
-        if (respMsg.type === "fleet_schedule_response" && respMsg.requestId === requestId) {
+        if (respMsg.type === "fleet_schedule_response" && respMsg.fleetRequestId === fleetReqId) {
           cleanup();
           respond(respMsg.result, respMsg.error as string | undefined);
         }

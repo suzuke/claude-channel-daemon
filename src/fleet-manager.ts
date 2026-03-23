@@ -516,7 +516,7 @@ export class FleetManager {
   }
 
   private handleScheduleCrud(instanceName: string, msg: Record<string, unknown>): void {
-    const requestId = msg.requestId as string;
+    const fleetRequestId = msg.fleetRequestId as string;
     const payload = (msg.payload ?? {}) as Record<string, unknown>;
     const meta = (msg.meta ?? {}) as Record<string, string>;
     const ipc = this.instanceIpcClients.get(instanceName);
@@ -552,9 +552,9 @@ export class FleetManager {
           break;
       }
 
-      ipc.send({ type: "fleet_schedule_response", requestId, result });
+      ipc.send({ type: "fleet_schedule_response", fleetRequestId, result });
     } catch (err) {
-      ipc.send({ type: "fleet_schedule_response", requestId, error: (err as Error).message });
+      ipc.send({ type: "fleet_schedule_response", fleetRequestId, error: (err as Error).message });
     }
   }
 
