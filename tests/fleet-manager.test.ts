@@ -23,8 +23,8 @@ describe("FleetManager", () => {
       "b": {},
       "c": { approval_port: 19000 },
     } as any);
-    expect(ports.a).toBe(18321);
-    expect(ports.b).toBe(18322);
+    expect(ports.a).toBe(18400);
+    expect(ports.b).toBe(18401);
     expect(ports.c).toBe(19000);
   });
 

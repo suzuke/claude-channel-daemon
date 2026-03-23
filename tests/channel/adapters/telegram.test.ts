@@ -57,6 +57,10 @@ vi.mock("grammy", () => {
     stop(): Promise<void> {
       return Promise.resolve();
     }
+
+    catch(_handler: (err: unknown) => void): this {
+      return this;
+    }
   }
 
   class MockInputFile {
@@ -355,7 +359,7 @@ describe("TelegramAdapter", () => {
     await adapter.sendApproval("Do it?", callback);
 
     adapter.emit("callback_query", {
-      data: `approval:approve:${capturedNonce}`,
+      callbackData: `approval:approve:${capturedNonce}`,
       from: { id: 42 },
     });
 
@@ -373,7 +377,7 @@ describe("TelegramAdapter", () => {
     await adapter.sendApproval("Do it?", callback);
 
     adapter.emit("callback_query", {
-      data: `approval:deny:${capturedNonce}`,
+      callbackData: `approval:deny:${capturedNonce}`,
       from: { id: 42 },
     });
 
