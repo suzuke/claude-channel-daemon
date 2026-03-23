@@ -226,10 +226,10 @@ export class Daemon {
     this.transcriptMonitor.startPolling();
 
     // 6. Approval server
-    const port = this.config.approval_port ?? 18321;
+    let port = this.config.approval_port ?? 18321;
     if (this.approvalStrategyInstance) {
-      const actualPort = await this.approvalStrategyInstance.start();
-      this.logger.debug({ port: actualPort }, "Approval strategy started");
+      port = await this.approvalStrategyInstance.start();
+      this.logger.debug({ port }, "Approval strategy started");
     }
 
     // 7. Prompt detector
@@ -626,9 +626,12 @@ export class Daemon {
 
   /** Spawn (or respawn) a Claude window in tmux */
   private async spawnClaudeWindow(): Promise<void> {
+    if (!this.backend) {
+      throw new Error("No backend configured — cannot spawn Claude window");
+    }
     const backendConfig = this.buildBackendConfig();
-    this.backend!.writeConfig(backendConfig);
-    let claudeCmd = this.backend!.buildCommand(backendConfig);
+    this.backend.writeConfig(backendConfig);
+    let claudeCmd = this.backend.buildCommand(backendConfig);
 
     // Sandbox shell is shared across backends — daemon handles it
     if (this.containerManager) {
@@ -641,9 +644,11 @@ export class Daemon {
     writeFileSync(windowIdFile, windowId);
 
     // Post-launch setup (auto-confirm prompts for Claude Code)
-    if (this.backend!.postLaunch) {
-      this.backend!.postLaunch(this.tmux!, windowId).catch(err => {
-        this.logger.warn({ err }, "Post-launch setup failed");
+    if (this.backend.postLaunch) {
+      this.backend.postLaunch(this.tmux!, windowId).then(() => {
+        this.logger.debug("Post-launch setup completed");
+      }).catch(err => {
+        this.logger.warn({ err }, "Post-launch setup failed or timed out — manually run: tmux send-keys -t ccd:${this.tmux?.getWindowId()} Enter");
       });
     }
   }
