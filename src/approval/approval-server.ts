@@ -76,12 +76,16 @@ export class ApprovalServer {
             };
 
             let permissionDecision: "allow" | "deny";
+            let permissionDecisionReason: string | undefined;
 
             if (tool_name === "Bash" && typeof tool_input?.command === "string" && isDangerousCommand(tool_input.command)) {
               // Dangerous Bash commands → require human approval
               const prompt = `⚠️ ${tool_name}\n\`\`\`\n${tool_input.command}\n\`\`\``;
               const decision = await this.requestApproval(prompt);
               permissionDecision = decision;
+              permissionDecisionReason = decision === "allow"
+                ? "approved by user"
+                : "denied by user";
             } else {
               // Everything else (all tools + normal Bash) → auto-allow
               permissionDecision = "allow";
@@ -92,7 +96,7 @@ export class ApprovalServer {
               hookSpecificOutput: {
                 hookEventName: "PreToolUse",
                 permissionDecision,
-                ...(permissionDecision === "deny" ? { permissionDecisionReason: "denied by user via Telegram" } : {}),
+                ...(permissionDecisionReason ? { permissionDecisionReason } : {}),
               },
             }));
           } catch (err) {
