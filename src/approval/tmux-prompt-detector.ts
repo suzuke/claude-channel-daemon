@@ -134,17 +134,22 @@ export class TmuxPromptDetector {
           try {
             const result = await this.approvalFn(cleanPrompt);
             if (result.decision === "always_allow") {
-              // Send "2" = "Yes, and don't ask again"
-              await this.tmux.sendKeys("2");
+              // Navigate to option 2 and confirm
+              await this.tmux.sendSpecialKey("Down");
+              await this.tmux.sendSpecialKey("Enter");
               // Persist the tool pattern so writeSettings includes it next time
               if (toolPattern && this.instanceDir) {
                 saveToolToAllowlist(this.instanceDir, toolPattern);
                 this.logger.info(`TmuxPromptDetector: added ${toolPattern} to allowlist`);
               }
             } else if (result.decision === "approve") {
-              await this.tmux.sendKeys("1");
+              // Option 1 is already selected by default
+              await this.tmux.sendSpecialKey("Enter");
             } else {
-              await this.tmux.sendKeys("3");
+              // Navigate to option 3 (No) and confirm
+              await this.tmux.sendSpecialKey("Down");
+              await this.tmux.sendSpecialKey("Down");
+              await this.tmux.sendSpecialKey("Enter");
             }
           } catch (err) {
             this.logger.warn("TmuxPromptDetector: approvalFn error", err);
