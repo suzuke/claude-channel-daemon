@@ -121,6 +121,19 @@ instances:
     expect(none).toEqual({ type: "none" });
   });
 
+  it("validateProjectName rejects invalid names", () => {
+    const fm = new FleetManager(tmpDir);
+    const validate = (name: string) => (fm as any).validateProjectName(name);
+    expect(validate("my-project")).toBe(true);
+    expect(validate("")).toBe(false);
+    expect(validate("   ")).toBe(false);
+    expect(validate("foo/bar")).toBe(false);
+    expect(validate("..")).toBe(false);
+    expect(validate("-flag")).toBe(false);
+    expect(validate("ok-project")).toBe(true);
+    expect(validate("中文專案")).toBe(true);
+  });
+
   it("createForumTopic calls Telegram API and returns message_thread_id", async () => {
     const fm = new FleetManager(tmpDir);
     const configPath = join(tmpDir, "fleet.yaml");

@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -446,9 +446,81 @@ export class FleetManager {
     }
   }
 
-  /** Handle /new command — stub, implemented in Task 5 */
-  private async handleNewCommand(_msg: InboundMessage, _name?: string): Promise<void> {
-    // TODO: implement in Task 5
+  /** Validate project name for /new command */
+  private validateProjectName(name: string): boolean {
+    if (!name || !name.trim()) return false;
+    if (name.includes("/") || name.includes("..")) return false;
+    if (name.startsWith("-")) return false;
+    return true;
+  }
+
+  /** Handle /new command — create directory + git init + bind */
+  private async handleNewCommand(msg: InboundMessage, name?: string): Promise<void> {
+    if (!this.adapter || !this.fleetConfig) return;
+
+    if (!name) {
+      await this.adapter.sendText(msg.chatId, "Usage: /new <project-name>");
+      return;
+    }
+
+    if (!this.validateProjectName(name)) {
+      await this.adapter.sendText(msg.chatId, "Invalid project name. Avoid /, .., leading -, and whitespace-only names.");
+      return;
+    }
+
+    const roots = this.getProjectRoots();
+    if (roots.length === 0 || (roots.length === 1 && roots[0] === homedir())) {
+      await this.adapter.sendText(msg.chatId, "No project roots configured. Run `ccd init` to set up.");
+      return;
+    }
+
+    const projectDir = join(roots[0], name);
+    if (existsSync(projectDir)) {
+      await this.adapter.sendText(msg.chatId, `Directory "${name}" already exists. Use /open ${name} instead.`);
+      return;
+    }
+
+    try {
+      // Create directory + git init in parallel with createForumTopic
+      const [topicId] = await Promise.all([
+        this.createForumTopic(name),
+        (async () => {
+          mkdirSync(projectDir, { recursive: true });
+          try {
+            const { execFile } = await import("node:child_process");
+            const { promisify } = await import("node:util");
+            const exec = promisify(execFile);
+            await exec("git", ["init"], { cwd: projectDir });
+          } catch {}
+        })(),
+      ]);
+
+      const instanceName = await this.bindAndStart(projectDir, topicId);
+
+      const tgAdapter = this.adapter as TelegramAdapter;
+      await tgAdapter.sendText(
+        msg.chatId,
+        `✅ Bound to: ${projectDir}\nInstance: ${instanceName}`,
+        { threadId: String(topicId) },
+      );
+    } catch (err) {
+      // Rollback: remove created directory
+      try {
+        if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
+      } catch {}
+      // Rollback: remove partial instance config
+      if (this.fleetConfig) {
+        const partialName = Object.entries(this.fleetConfig.instances)
+          .find(([, cfg]) => cfg.working_directory === projectDir)?.[0];
+        if (partialName) {
+          const tid = this.fleetConfig.instances[partialName].topic_id;
+          delete this.fleetConfig.instances[partialName];
+          if (tid != null) this.routingTable.delete(tid);
+          this.saveFleetConfig();
+        }
+      }
+      await this.adapter.sendText(msg.chatId, `❌ Failed: ${(err as Error).message}`);
+    }
   }
 
   /** Handle inbound message — transcribe voice if present, then route */
