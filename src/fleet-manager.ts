@@ -39,6 +39,7 @@ export class FleetManager {
   private routingTable: Map<number, string> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
   private pendingBindings: Map<number, string> = new Map(); // threadId → browsing state
+  private currentOpenSession: { id: string; paths: string[] } | null = null;
   private scheduler: Scheduler | null = null;
   private containerManager: ContainerManager | null = null;
   private configPath: string = "";
@@ -317,11 +318,47 @@ export class FleetManager {
     }
   }
 
+  /** Detect if threadId represents the General topic (undefined = General in our adapter) */
+  private isGeneralTopic(threadId: number | undefined): boolean {
+    return threadId == null;
+  }
+
+  /** Parse and dispatch commands from the General topic */
+  private async handleGeneralCommand(msg: InboundMessage): Promise<void> {
+    const text = msg.text?.trim();
+    if (!text) return;
+
+    if (text === "/open" || text === "/open@" || text.startsWith("/open ") || text.startsWith("/open@")) {
+      // Extract keyword: remove /open or /open@botname, take the rest
+      const keyword = text.replace(/^\/open(@\S+)?\s*/, "").trim();
+      await this.handleOpenCommand(msg, keyword || undefined);
+      return;
+    }
+
+    if (text === "/new" || text === "/new@" || text.startsWith("/new ") || text.startsWith("/new@")) {
+      const name = text.replace(/^\/new(@\S+)?\s*/, "").trim();
+      await this.handleNewCommand(msg, name || undefined);
+      return;
+    }
+
+    // Not a command — ignore silently
+  }
+
+  /** Handle /open command — stub, implemented in Task 4 */
+  private async handleOpenCommand(_msg: InboundMessage, _keyword?: string): Promise<void> {
+    // TODO: implement in Task 4
+  }
+
+  /** Handle /new command — stub, implemented in Task 5 */
+  private async handleNewCommand(_msg: InboundMessage, _name?: string): Promise<void> {
+    // TODO: implement in Task 5
+  }
+
   /** Handle inbound message — transcribe voice if present, then route */
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
     const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
-    if (threadId == null) {
-      this.logger.warn({ chatId: msg.chatId }, "Message without threadId — ignoring in topic mode");
+    if (this.isGeneralTopic(threadId)) {
+      await this.handleGeneralCommand(msg);
       return;
     }
 
