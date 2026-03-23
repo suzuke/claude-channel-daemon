@@ -118,21 +118,48 @@ export class Daemon {
           if (msg.threadId) this.lastThreadId = msg.threadId;
 
           let text = msg.text;
-          const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
-          if (voiceAttachment && this.adapter) {
-            const groqKey = process.env.GROQ_API_KEY;
-            if (groqKey) {
+          const extraMeta: Record<string, string> = {};
+
+          if (this.adapter) {
+            const tgAdapter = this.adapter as TelegramAdapter;
+
+            // Auto-download photos so Claude can Read them directly
+            const photoAttachment = msg.attachments?.find(a => a.kind === "photo");
+            if (photoAttachment) {
               try {
-                const localPath = await (this.adapter as TelegramAdapter).downloadAttachment(voiceAttachment.fileId);
-                const result = await transcribe(localPath, groqKey);
-                text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
-                this.logger.info({ transcription: result.text.slice(0, 80) }, "Voice transcribed");
+                const localPath = await tgAdapter.downloadAttachment(photoAttachment.fileId);
+                extraMeta.image_path = localPath;
               } catch (err) {
-                this.logger.warn({ err: (err as Error).message }, "Voice transcription failed");
-                text = text || "[語音訊息 — 轉錄失敗]";
+                this.logger.warn({ err: (err as Error).message }, "Photo download failed");
               }
-            } else {
-              text = text || "[語音訊息 — 未設定 STT API key]";
+            }
+
+            // Transcribe voice/audio
+            const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
+            if (voiceAttachment) {
+              const groqKey = process.env.GROQ_API_KEY;
+              if (groqKey) {
+                try {
+                  const localPath = await tgAdapter.downloadAttachment(voiceAttachment.fileId);
+                  const result = await transcribe(localPath, groqKey);
+                  text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
+                  this.logger.info({ transcription: result.text.slice(0, 80) }, "Voice transcribed");
+                } catch (err) {
+                  this.logger.warn({ err: (err as Error).message }, "Voice transcription failed");
+                  text = text || "[語音訊息 — 轉錄失敗]";
+                }
+              } else {
+                text = text || "[語音訊息 — 未設定 STT API key]";
+              }
+              extraMeta.attachment_file_id = voiceAttachment.fileId;
+            }
+
+            // Pass other attachment types as file_id for manual download
+            const otherAttachment = msg.attachments?.find(a =>
+              a.kind !== "photo" && a.kind !== "voice" && a.kind !== "audio",
+            );
+            if (otherAttachment) {
+              extraMeta.attachment_file_id = otherAttachment.fileId;
             }
           }
 
@@ -143,7 +170,7 @@ export class Daemon {
             user_id: msg.userId,
             ts: msg.timestamp.toISOString(),
             ...(msg.threadId ? { thread_id: msg.threadId } : {}),
-            ...(voiceAttachment ? { attachment_file_id: voiceAttachment.fileId } : {}),
+            ...extraMeta,
           });
         });
 

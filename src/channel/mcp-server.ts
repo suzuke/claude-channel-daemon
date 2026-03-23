@@ -166,6 +166,7 @@ const mcp = new Server(
       "Messages from channels arrive as <channel source=\"ccd\" chat_id=\"...\" message_id=\"...\" user=\"...\" ts=\"...\">.",
       "Reply using the reply tool -- pass chat_id back. Use reply_to (set to a message_id) to thread.",
       "Use react to add emoji reactions, edit_message for progress updates, and download_attachment for file attachments.",
+      "If the inbound meta has image_path, Read that file — it is a photo the sender attached.",
       "If the inbound meta has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path.",
     ].join("\n"),
   },

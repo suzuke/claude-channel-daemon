@@ -336,14 +336,28 @@ export class FleetManager {
       return;
     }
 
-    // Transcribe voice messages
     let text = msg.text;
+    const extraMeta: Record<string, string> = {};
+    const tgAdapter = this.adapter as TelegramAdapter;
+
+    // Auto-download photos so Claude can Read them directly
+    const photoAttachment = msg.attachments?.find(a => a.kind === "photo");
+    if (photoAttachment) {
+      try {
+        const localPath = await tgAdapter.downloadAttachment(photoAttachment.fileId);
+        extraMeta.image_path = localPath;
+      } catch (err) {
+        this.logger.warn({ err: (err as Error).message }, "Photo download failed");
+      }
+    }
+
+    // Transcribe voice/audio
     const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
     if (voiceAttachment) {
       const groqKey = process.env.GROQ_API_KEY;
       if (groqKey) {
         try {
-          const localPath = await (this.adapter as TelegramAdapter).downloadAttachment(voiceAttachment.fileId);
+          const localPath = await tgAdapter.downloadAttachment(voiceAttachment.fileId);
           const result = await transcribe(localPath, groqKey);
           text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
           this.logger.info({ instanceName, transcription: result.text.slice(0, 80) }, "Voice transcribed");
@@ -355,6 +369,15 @@ export class FleetManager {
         this.logger.warn("GROQ_API_KEY not set, skipping voice transcription");
         text = text || "[語音訊息 — 未設定 STT API key]";
       }
+      extraMeta.attachment_file_id = voiceAttachment.fileId;
+    }
+
+    // Pass other attachment types as file_id for manual download
+    const otherAttachment = msg.attachments?.find(a =>
+      a.kind !== "photo" && a.kind !== "voice" && a.kind !== "audio",
+    );
+    if (otherAttachment) {
+      extraMeta.attachment_file_id = otherAttachment.fileId;
     }
 
     const ipc = this.instanceIpcClients.get(instanceName);
@@ -373,7 +396,7 @@ export class FleetManager {
         user_id: msg.userId,
         ts: msg.timestamp.toISOString(),
         thread_id: msg.threadId ?? "",
-        ...(voiceAttachment ? { attachment_file_id: voiceAttachment.fileId } : {}),
+        ...extraMeta,
       },
     });
     this.logger.info(`← ${instanceName} ${msg.username}: ${(text ?? "").slice(0, 100)}`);
