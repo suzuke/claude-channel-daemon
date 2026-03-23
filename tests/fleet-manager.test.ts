@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { FleetManager } from "../src/fleet-manager.js";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -74,6 +74,51 @@ instances:
   it("bindAndStart exists as a method on FleetManager", () => {
     const fm = new FleetManager(tmpDir);
     expect(typeof (fm as any).bindAndStart).toBe("function");
+  });
+
+  it("listUnboundDirectories excludes already-bound dirs", () => {
+    const fm = new FleetManager(tmpDir);
+    const configPath = join(tmpDir, "fleet.yaml");
+
+    // Create some project dirs
+    const projectRoot = join(tmpDir, "projects");
+    mkdirSync(join(projectRoot, "proj-a"), { recursive: true });
+    mkdirSync(join(projectRoot, "proj-b"), { recursive: true });
+    mkdirSync(join(projectRoot, "proj-c"), { recursive: true });
+
+    writeFileSync(configPath, `
+project_roots:
+  - ${projectRoot}
+instances:
+  proj-a-t42:
+    working_directory: ${join(projectRoot, "proj-a")}
+    topic_id: 42
+`);
+    fm.loadConfig(configPath);
+    fm.buildRoutingTable();
+
+    const unbound = (fm as any).listUnboundDirectories();
+    const names = unbound.map((d: string) => basename(d));
+    expect(names).toContain("proj-b");
+    expect(names).toContain("proj-c");
+    expect(names).not.toContain("proj-a");
+  });
+
+  it("filterDirectories: exact match wins over substring", () => {
+    const dirs = ["/p/myapp", "/p/myapp-v2", "/p/other"];
+    const fm = new FleetManager(tmpDir);
+
+    // Exact match
+    const exact = (fm as any).filterDirectories(dirs, "myapp");
+    expect(exact).toEqual({ type: "exact", path: "/p/myapp" });
+
+    // Substring only
+    const sub = (fm as any).filterDirectories(dirs, "app");
+    expect(sub).toEqual({ type: "multiple", paths: ["/p/myapp", "/p/myapp-v2"] });
+
+    // No match
+    const none = (fm as any).filterDirectories(dirs, "zzz");
+    expect(none).toEqual({ type: "none" });
   });
 
   it("createForumTopic calls Telegram API and returns message_thread_id", async () => {

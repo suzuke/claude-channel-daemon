@@ -344,9 +344,106 @@ export class FleetManager {
     // Not a command — ignore silently
   }
 
-  /** Handle /open command — stub, implemented in Task 4 */
-  private async handleOpenCommand(_msg: InboundMessage, _keyword?: string): Promise<void> {
-    // TODO: implement in Task 4
+  /** Handle /open command — list or search unbound directories */
+  private async handleOpenCommand(msg: InboundMessage, keyword?: string): Promise<void> {
+    if (!this.adapter || !this.fleetConfig) return;
+
+    const roots = this.getProjectRoots();
+    if (roots.length === 0 || (roots.length === 1 && roots[0] === homedir())) {
+      await this.adapter.sendText(msg.chatId, "No project roots configured. Run `ccd init` to set up.");
+      return;
+    }
+
+    const dirs = this.listUnboundDirectories();
+
+    if (keyword) {
+      const result = this.filterDirectories(dirs, keyword);
+      if (result.type === "none") {
+        await this.adapter.sendText(msg.chatId, `No projects found matching "${keyword}".`);
+        return;
+      }
+      if (result.type === "exact") {
+        await this.openBindProject(msg.chatId, result.path);
+        return;
+      }
+      // Multiple matches — show keyboard
+      await this.sendOpenKeyboard(msg.chatId, result.paths, 0);
+      return;
+    }
+
+    // No keyword — show full list
+    if (dirs.length === 0) {
+      await this.adapter.sendText(msg.chatId, "All projects are already bound to topics.");
+      return;
+    }
+    await this.sendOpenKeyboard(msg.chatId, dirs, 0);
+  }
+
+  /** Send paginated inline keyboard for /open */
+  private async sendOpenKeyboard(chatId: string, dirs: string[], page: number): Promise<void> {
+    const sessionId = Math.random().toString(16).slice(2, 10); // 8 hex chars
+    this.currentOpenSession = { id: sessionId, paths: dirs };
+
+    const PAGE_SIZE = 5;
+    const pageStart = page * PAGE_SIZE;
+    const pageDirs = dirs.slice(pageStart, pageStart + PAGE_SIZE);
+
+    const { InlineKeyboard } = await import("grammy");
+    const keyboard = new InlineKeyboard();
+
+    for (let i = 0; i < pageDirs.length; i++) {
+      const idx = pageStart + i;
+      keyboard.text(`📁 ${basename(pageDirs[i])}`, `cmd_open:${sessionId}:${idx}`).row();
+    }
+
+    // Pagination
+    const hasMore = pageStart + PAGE_SIZE < dirs.length;
+    if (page > 0 || hasMore) {
+      if (page > 0) keyboard.text("⬅️ Prev", `cmd_open:${sessionId}:page:${page - 1}`);
+      if (hasMore) keyboard.text("➡️ Next", `cmd_open:${sessionId}:page:${page + 1}`);
+      keyboard.row();
+    }
+
+    keyboard.text("❌ Cancel", `cmd_open:${sessionId}:cancel`).row();
+
+    const headerText = page === 0
+      ? "📂 Select a project:"
+      : `📂 Projects (page ${page + 1}):`;
+
+    const tgAdapter = this.adapter as TelegramAdapter;
+    // Intentionally no threadId — keyboard is sent to the General topic
+    await tgAdapter.sendTextWithKeyboard(chatId, headerText, keyboard);
+  }
+
+  /** Create topic and bind a project directory (triggered by /open exact match or keyboard selection) */
+  private async openBindProject(chatId: string, dirPath: string): Promise<void> {
+    if (!this.adapter || !this.fleetConfig) return;
+
+    let topicId: number | undefined;
+    try {
+      const topicName = basename(dirPath);
+      topicId = await this.createForumTopic(topicName);
+      const instanceName = await this.bindAndStart(dirPath, topicId);
+
+      const tgAdapter = this.adapter as TelegramAdapter;
+      await tgAdapter.sendText(
+        chatId,
+        `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`,
+        { threadId: String(topicId) },
+      );
+    } catch (err) {
+      // Rollback: remove partial instance config if bindAndStart failed after topic creation
+      if (topicId != null) {
+        const partialName = Object.entries(this.fleetConfig.instances)
+          .find(([, cfg]) => cfg.topic_id === topicId)?.[0];
+        if (partialName) {
+          delete this.fleetConfig.instances[partialName];
+          this.routingTable.delete(topicId);
+          this.saveFleetConfig();
+        }
+      }
+      await this.adapter.sendText(chatId, `❌ Failed to bind: ${(err as Error).message}`);
+    }
   }
 
   /** Handle /new command — stub, implemented in Task 5 */
@@ -946,6 +1043,34 @@ export class FleetManager {
       } catch {}
     }
     return dirs.sort((a, b) => basename(a).localeCompare(basename(b)));
+  }
+
+  /** List directories from project_roots that are not already bound to an instance */
+  private listUnboundDirectories(): string[] {
+    const boundDirs = new Set(
+      Object.values(this.fleetConfig?.instances ?? {}).map(i => i.working_directory),
+    );
+    return this.listProjectDirectories().filter(d => !boundDirs.has(d));
+  }
+
+  /** Match directories by keyword. Exact basename match wins over substring. */
+  private filterDirectories(
+    dirs: string[],
+    keyword: string,
+  ): { type: "exact"; path: string } | { type: "multiple"; paths: string[] } | { type: "none" } {
+    const kw = keyword.toLowerCase();
+
+    // Check for exact basename match first
+    const exactMatches = dirs.filter(d => basename(d).toLowerCase() === kw);
+    if (exactMatches.length === 1) {
+      return { type: "exact", path: exactMatches[0] };
+    }
+
+    // Fall back to substring match
+    const subMatches = dirs.filter(d => basename(d).toLowerCase().includes(kw));
+    if (subMatches.length === 0) return { type: "none" };
+    if (subMatches.length === 1) return { type: "exact", path: subMatches[0] };
+    return { type: "multiple", paths: subMatches };
   }
 
   /** Get directories of recently bound instances (for "recent" section) */
