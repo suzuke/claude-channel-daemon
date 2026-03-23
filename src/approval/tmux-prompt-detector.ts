@@ -42,6 +42,32 @@ export function extractToolPattern(text: string): string | null {
   return `${display}(*)`;
 }
 
+/**
+ * Build a clean, human-readable prompt from raw terminal output.
+ * Extracts tool name and description for display in Telegram.
+ */
+export function formatPromptForDisplay(text: string): string {
+  const clean = stripAnsi(text)
+    .replace(/\r/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  // Try to extract structured info
+  // Pattern: "puppeteer - puppeteer_navigate(url: "...")" or "Bash(command)"
+  const toolMatch = clean.match(/(\S+\s*-\s*\S+)\s*\(([^)]*)\)\s*\(MCP\)/i)
+                 ?? clean.match(/(\S+)\s*\(([^)]*)\)/);
+  if (toolMatch) {
+    const tool = toolMatch[1].trim();
+    const args = toolMatch[2].trim();
+    const truncatedArgs = args.length > 200 ? args.slice(0, 200) + "…" : args;
+    return `⚠️ ${tool}\n\`\`\`\n${truncatedArgs}\n\`\`\``;
+  }
+
+  // Fallback: just return cleaned text, truncated
+  const truncated = clean.length > 500 ? clean.slice(0, 500) + "…" : clean;
+  return `⚠️ Permission prompt\n${truncated}`;
+}
+
 // ── Persistent tool allowlist ────────────────────────────────────────────────
 
 const ALLOWLIST_FILE = "tool-allowlist.json";
@@ -101,8 +127,9 @@ export class TmuxPromptDetector {
         if (detectPermissionPrompt(newContent)) {
           this.logger.info("TmuxPromptDetector: permission prompt detected");
           const toolPattern = extractToolPattern(newContent);
+          const cleanPrompt = formatPromptForDisplay(newContent);
           try {
-            const result = await this.approvalFn(newContent);
+            const result = await this.approvalFn(cleanPrompt);
             if (result.decision === "always_allow") {
               // Send "2" = "Yes, and don't ask again"
               await this.tmux.sendKeys("2");
