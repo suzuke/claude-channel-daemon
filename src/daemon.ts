@@ -13,7 +13,7 @@ import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import { ApprovalServer } from "./approval/approval-server.js";
-import { TmuxPromptDetector } from "./approval/tmux-prompt-detector.js";
+import { TmuxPromptDetector, loadToolAllowlist } from "./approval/tmux-prompt-detector.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
@@ -241,6 +241,7 @@ export class Daemon {
       this.tmux,
       (prompt) => this.messageBus.requestApproval(prompt),
       this.logger,
+      this.instanceDir,
     );
     this.promptDetector.startPolling();
 
@@ -746,6 +747,8 @@ export class Daemon {
           "mcp__ccd-channel__list_schedules",
           "mcp__ccd-channel__update_schedule",
           "mcp__ccd-channel__delete_schedule",
+          // Merge user-approved "always allow" tools from persistent allowlist
+          ...loadToolAllowlist(this.instanceDir),
         ],
         deny: [
           // Catastrophic operations — hard deny, no user override

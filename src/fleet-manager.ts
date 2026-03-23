@@ -479,7 +479,7 @@ export class FleetManager {
     });
   }
 
-  private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "deny"): void {
+  private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "always_allow" | "deny"): void {
     this.logger.debug({ instanceName, approvalId, decision }, "Sending approval response to daemon");
     const ipc = this.instanceIpcClients.get(instanceName);
     ipc?.send({ type: "fleet_approval_response", approvalId, decision });

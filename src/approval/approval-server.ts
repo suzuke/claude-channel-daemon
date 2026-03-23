@@ -125,7 +125,7 @@ export class ApprovalServer {
   /** DM mode: use messageBus directly (adapter is registered on this daemon) */
   private async requestApprovalViaBus(prompt: string): Promise<"allow" | "deny"> {
     const result = await this.messageBus.requestApproval(prompt);
-    return result.decision === "approve" ? "allow" : "deny";
+    return result.decision === "deny" ? "deny" : "allow";
   }
 
   /** Topic mode: forward approval request to fleet manager via IPC */
@@ -141,7 +141,7 @@ export class ApprovalServer {
       const onMessage = (msg: Record<string, unknown>) => {
         if (msg.type === "fleet_approval_response" && msg.approvalId === approvalId) {
           cleanup();
-          resolve(msg.decision === "approve" ? "allow" : "deny");
+          resolve(msg.decision === "deny" ? "deny" : "allow");
         }
       };
 

@@ -369,16 +369,18 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   async sendApproval(
     prompt: string,
-    callback: (decision: "approve" | "deny") => void,
+    callback: (decision: "approve" | "always_allow" | "deny") => void,
     signal?: AbortSignal,
     threadId?: string,
   ): Promise<ApprovalHandle> {
     const nonce = Math.random().toString(36).slice(2, 10);
     const approveData = `approval:approve:${nonce}`;
+    const alwaysData = `approval:always_allow:${nonce}`;
     const denyData = `approval:deny:${nonce}`;
 
     const keyboard = new InlineKeyboard()
       .text("✅ Approve", approveData)
+      .text("✅ Always", alwaysData)
       .text("❌ Deny", denyData);
 
     const cleanup = () => {
@@ -388,19 +390,20 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     const handler = (query: { callbackData?: string; chatId?: string; messageId?: string }) => {
       if (!query.callbackData) return;
       const isApprove = query.callbackData === approveData;
+      const isAlways = query.callbackData === alwaysData;
       const isDeny = query.callbackData === denyData;
-      if (!isApprove && !isDeny) return;
+      if (!isApprove && !isAlways && !isDeny) return;
 
       cleanup();
       // Update the message to show the decision (remove buttons)
       if (query.chatId && query.messageId) {
-        const label = isApprove ? "✅ Approved" : "❌ Denied";
+        const label = isAlways ? "✅ Always Allowed" : isApprove ? "✅ Approved" : "❌ Denied";
         this.bot.api.editMessageText(
           Number(query.chatId), Number(query.messageId),
           `${label}\n${prompt}`,
         ).catch(() => {});
       }
-      callback(isApprove ? "approve" : "deny");
+      callback(isAlways ? "always_allow" : isApprove ? "approve" : "deny");
     };
 
     this.on("callback_query", handler);

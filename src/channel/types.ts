@@ -14,7 +14,7 @@ export interface ChannelAdapter extends EventEmitter {
 
   sendApproval(
     prompt: string,
-    callback: (decision: "approve" | "deny") => void,
+    callback: (decision: "approve" | "always_allow" | "deny") => void,
     signal?: AbortSignal,
     threadId?: string,
   ): Promise<ApprovalHandle>;
@@ -75,7 +75,7 @@ export interface Attachment {
 }
 
 export interface ApprovalResponse {
-  decision: "approve" | "deny";
+  decision: "approve" | "always_allow" | "deny";
   respondedBy: { channelType: string; userId: string };
 }
 
