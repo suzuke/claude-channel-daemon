@@ -119,9 +119,9 @@ describe("ClaudeCodeBackend", () => {
       expect(backend.getContextUsage()).toBe(42);
     });
 
-    it("returns 0 when file missing", () => {
+    it("returns null when file missing", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
-      expect(backend.getContextUsage()).toBe(0);
+      expect(backend.getContextUsage()).toBeNull();
     });
   });
 

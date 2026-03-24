@@ -25,8 +25,8 @@ export interface CliBackend {
   /** Write all config files the CLI needs before launch. */
   writeConfig(config: CliBackendConfig): void;
 
-  /** Read context window usage percentage (0-100). Returns 0 if unavailable. */
-  getContextUsage(): number;
+  /** Read context window usage percentage (0-100). Returns null if unavailable. */
+  getContextUsage(): number | null;
 
   /** Read session ID for resume capability. Returns null if unavailable. */
   getSessionId(): string | null;

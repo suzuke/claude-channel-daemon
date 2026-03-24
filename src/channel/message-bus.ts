@@ -5,6 +5,11 @@ const APPROVAL_TIMEOUT_MS = 120_000;
 
 export class MessageBus extends EventEmitter {
   private adapters: Map<string, ChannelAdapter> = new Map();
+  private logger?: { warn(obj: unknown, msg?: string): void; error(msg: string): void };
+
+  setLogger(logger: { warn(obj: unknown, msg?: string): void; error(msg: string): void }): void {
+    this.logger = logger;
+  }
 
   register(adapter: ChannelAdapter): void {
     this.adapters.set(adapter.id, adapter);
@@ -21,9 +26,14 @@ export class MessageBus extends EventEmitter {
       if (!adapter) throw new Error(`Adapter ${target.adapterId} not found`);
       await this.sendVia(adapter, target, msg);
     } else {
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         [...this.adapters.values()].map(a => this.sendVia(a, target, msg))
       );
+      for (const r of results) {
+        if (r.status === "rejected") {
+          this.logger?.warn({ err: r.reason }, "Adapter send failed");
+        }
+      }
     }
   }
 
@@ -57,6 +67,7 @@ export class MessageBus extends EventEmitter {
         return;
       }
 
+      let adapterFailures = 0;
       for (const adapter of this.adapters.values()) {
         adapter.sendApproval(prompt, (decision) => {
           if (resolved) return;
@@ -65,7 +76,17 @@ export class MessageBus extends EventEmitter {
           controller.abort();
           handles.forEach(h => h.cancel());
           resolve({ decision, respondedBy: { channelType: adapter.type, userId: adapter.id } });
-        }, controller.signal).then(handle => handles.push(handle)).catch(() => {});
+        }, controller.signal).then(handle => handles.push(handle)).catch(err => {
+          this.logger?.warn({ err }, "Failed to send approval prompt via adapter");
+          adapterFailures++;
+          if (adapterFailures === this.adapters.size) {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(timeout);
+            this.logger?.error("All adapters failed to send approval prompt, auto-denying");
+            resolve({ decision: "deny", reason: "All channel adapters failed to send approval prompt" });
+          }
+        });
       }
     });
   }

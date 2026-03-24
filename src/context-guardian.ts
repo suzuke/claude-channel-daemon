@@ -15,6 +15,7 @@ export class ContextGuardian extends EventEmitter {
   private completionTimer: ReturnType<typeof setTimeout> | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private statusFilePath: string;
+  private consecutiveReadFailures = 0;
 
   constructor(
     private config: GuardianConfig,
@@ -39,6 +40,7 @@ export class ContextGuardian extends EventEmitter {
       const cw = data.context_window;
 
       if (cw.used_percentage != null) {
+        this.consecutiveReadFailures = 0;
         const status: ContextStatus = {
           used_percentage: cw.used_percentage,
           remaining_percentage: cw.remaining_percentage ?? (100 - cw.used_percentage),
@@ -53,9 +55,19 @@ export class ContextGuardian extends EventEmitter {
         }, "Status update received");
         this.emit("status_update", { ...status, rate_limits: rl });
         this.updateContextStatus(status);
+      } else {
+        this.consecutiveReadFailures++;
+        if (this.consecutiveReadFailures >= 3) {
+          this.logger.warn({ consecutiveFailures: this.consecutiveReadFailures }, "Context usage unavailable for 3+ consecutive reads, skipping threshold check");
+        }
       }
     } catch (err) {
-      this.logger.debug({ err }, "Failed to read status line file");
+      this.consecutiveReadFailures++;
+      if (this.consecutiveReadFailures >= 3) {
+        this.logger.warn({ err, consecutiveFailures: this.consecutiveReadFailures }, "Context usage read failed 3+ consecutive times");
+      } else {
+        this.logger.debug({ err }, "Failed to read status line file");
+      }
     }
   }
 
@@ -119,6 +131,7 @@ export class ContextGuardian extends EventEmitter {
     this.idleTimer = setTimeout(() => {
       this.logger.warn("Idle wait timeout — abandoning this rotation attempt");
       this.state = "NORMAL";
+      this.rotationReason = null;
     }, this.config.max_idle_wait_ms);
   }
 

@@ -20,11 +20,13 @@ function makeLineParser(onMessage: (msg: unknown) => void) {
     buf = lines.pop() ?? "";
     for (const line of lines) {
       if (line.trim() === "") continue;
+      let msg;
       try {
-        onMessage(JSON.parse(line));
+        msg = JSON.parse(line);
       } catch {
-        // Ignore malformed lines
+        return; // truly malformed JSON, skip
       }
+      onMessage(msg);
     }
   };
 }
@@ -33,10 +35,12 @@ export class IpcServer extends EventEmitter {
   private sockPath: string;
   private server: Server | null = null;
   private clients: Set<Socket> = new Set();
+  private logger?: { warn(obj: unknown, msg?: string): void; debug(obj: unknown, msg?: string): void };
 
-  constructor(sockPath: string) {
+  constructor(sockPath: string, logger?: { warn(obj: unknown, msg?: string): void; debug(obj: unknown, msg?: string): void }) {
     super();
     this.sockPath = sockPath;
+    this.logger = logger;
   }
 
   async listen(): Promise<void> {
@@ -45,7 +49,7 @@ export class IpcServer extends EventEmitter {
       try {
         unlinkSync(this.sockPath);
       } catch {
-        // Ignore if already gone
+        // Ignore if already gone — race with another process
       }
     }
 
@@ -59,7 +63,8 @@ export class IpcServer extends EventEmitter {
         socket.on("close", () => {
           this.clients.delete(socket);
         });
-        socket.on("error", () => {
+        socket.on("error", (err) => {
+          this.logger?.warn({ err }, "IPC client socket error, removing client");
           this.clients.delete(socket);
         });
       });
@@ -101,7 +106,7 @@ export class IpcServer extends EventEmitter {
             unlinkSync(this.sockPath);
           }
         } catch {
-          // Ignore cleanup errors
+          // Best-effort socket file cleanup on shutdown
         }
         resolve();
       });

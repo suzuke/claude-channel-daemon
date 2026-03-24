@@ -401,7 +401,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
         this.bot.api.editMessageText(
           Number(query.chatId), Number(query.messageId),
           `${label}\n${prompt}`,
-        ).catch(() => {});
+        ).catch(() => { /* UI update only — safe to ignore */ });
       }
       callback(isAlways ? "always_allow" : isApprove ? "approve" : "deny");
     };

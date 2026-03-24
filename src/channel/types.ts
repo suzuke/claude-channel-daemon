@@ -76,7 +76,8 @@ export interface Attachment {
 
 export interface ApprovalResponse {
   decision: "approve" | "always_allow" | "deny";
-  respondedBy: { channelType: string; userId: string };
+  respondedBy?: { channelType: string; userId: string };
+  reason?: string;
 }
 
 export interface Target {

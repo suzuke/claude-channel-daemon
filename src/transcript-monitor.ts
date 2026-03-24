@@ -46,7 +46,9 @@ export class TranscriptMonitor extends EventEmitter {
       try {
         const data = JSON.parse(readFileSync(statusFile, "utf-8"));
         if (data.transcript_path) return data.transcript_path;
-      } catch {}
+      } catch {
+        // Status file may be partially written — retry on next poll
+      }
     }
     return null;
   }
@@ -85,7 +87,9 @@ export class TranscriptMonitor extends EventEmitter {
           try {
             const entry = JSON.parse(line);
             this.processEntry(entry);
-          } catch {}
+          } catch {
+            // Malformed JSONL line in transcript — skip
+          }
         }
 
         this.saveOffset();

@@ -50,8 +50,11 @@ function splitText(text: string): string[] {
 export class MessageQueue {
   private queues = new Map<string, PerQueueState>();
   private stopped = true;
+  private logger?: { warn(obj: unknown, msg?: string): void };
 
-  constructor(private sender: QueueSender) {}
+  constructor(private sender: QueueSender, logger?: { warn(obj: unknown, msg?: string): void }) {
+    this.logger = logger;
+  }
 
   private queueKey(chatId: string, threadId: string | undefined): string {
     return threadId != null ? `${chatId}:${threadId}` : `${chatId}:`;
@@ -149,6 +152,7 @@ export class MessageQueue {
           state.backoffMs = Math.min(state.backoffMs * 2, MAX_BACKOFF_MS);
         } else {
           // Non-rate-limit error: drop the item to avoid infinite loops
+          this.logger?.warn({ err, chatId: state.key.chatId }, "Message dropped due to non-retryable error");
           state.backoffMs = INITIAL_BACKOFF_MS;
           state.backoffUntil = 0;
           await this.sleep(WORKER_BETWEEN_MS);

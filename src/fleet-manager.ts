@@ -146,7 +146,7 @@ export class FleetManager {
     const pidPath = join(this.getInstanceDir(name), "daemon.pid");
     if (existsSync(pidPath)) {
       const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
-      try { process.kill(pid, "SIGTERM"); } catch {}
+      try { process.kill(pid, "SIGTERM"); } catch (e) { this.logger.debug({ err: e, pid }, "SIGTERM failed for stale process"); }
     }
   }
 
@@ -536,7 +536,7 @@ export class FleetManager {
             const { promisify } = await import("node:util");
             const exec = promisify(execFile);
             await exec("git", ["init"], { cwd: projectDir });
-          } catch {}
+          } catch (e) { this.logger.debug({ err: e }, "git init failed for new project directory"); }
         })(),
       ]);
 
@@ -552,7 +552,7 @@ export class FleetManager {
       // Rollback: remove created directory
       try {
         if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
-      } catch {}
+      } catch (e) { this.logger.debug({ err: e }, "Rollback cleanup failed for project directory"); }
       // Rollback: remove partial instance config
       if (this.fleetConfig) {
         const partialName = Object.entries(this.fleetConfig.instances)
@@ -743,13 +743,13 @@ export class FleetManager {
     if (!chatId) return;
 
     if (editMessageId) {
-      this.adapter.editMessage(chatId, editMessageId, text).catch(() => {});
+      this.adapter.editMessage(chatId, editMessageId, text).catch(e => this.logger.debug({ err: e }, "Failed to edit tool status message"));
     } else {
       this.adapter.sendText(chatId, text, { threadId }).then((sent) => {
         // Send the messageId back to the daemon so it can edit next time
         const ipc = this.instanceIpcClients.get(instanceName);
         ipc?.send({ type: "fleet_tool_status_ack", messageId: sent.messageId });
-      }).catch(() => {});
+      }).catch(e => this.logger.debug({ err: e }, "Failed to send tool status message"));
     }
   }
 
@@ -998,7 +998,7 @@ export class FleetManager {
         this.logger.info({ threadId, instanceName, count }, "Cleaned up schedules for deleted topic");
         const groupId = this.fleetConfig?.channel?.group_id;
         if (groupId && this.adapter) {
-          this.adapter.sendText(String(groupId), `⚠️ Topic 已刪除，已清除 ${count} 條相關排程。`).catch(() => {});
+          this.adapter.sendText(String(groupId), `⚠️ Topic 已刪除，已清除 ${count} 條相關排程。`).catch(e => this.logger.debug({ err: e }, "Failed to send schedule cleanup notification"));
         }
       }
     }
@@ -1078,7 +1078,7 @@ export class FleetManager {
             dirs.push(join(root, entry.name));
           }
         }
-      } catch {}
+      } catch (e) { this.logger.debug({ err: e, root }, "Failed to read project root directory"); }
     }
     return dirs.sort((a, b) => basename(a).localeCompare(basename(b)));
   }
@@ -1149,7 +1149,7 @@ export class FleetManager {
             message_thread_id: threadId,
           });
           // Topic exists — delete the probe message
-          await bot.api.deleteMessage(groupId, msg.message_id).catch(() => {});
+          await bot.api.deleteMessage(groupId, msg.message_id).catch(e => this.logger.debug({ err: e }, "Failed to delete topic probe message"));
         } catch (err: unknown) {
           const errMsg = String(err);
           if (errMsg.includes("thread not found") || errMsg.includes("TOPIC_ID_INVALID")) {
@@ -1189,6 +1189,6 @@ export class FleetManager {
 
     // 5. Remove PID file
     const pidPath = join(this.dataDir, "fleet.pid");
-    try { unlinkSync(pidPath); } catch {}
+    try { unlinkSync(pidPath); } catch (e) { this.logger.debug({ err: e }, "Failed to remove fleet PID file"); }
   }
 }

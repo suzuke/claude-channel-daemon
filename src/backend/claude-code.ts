@@ -27,8 +27,19 @@ export class ClaudeCodeBackend implements CliBackend {
     // 1. Write .mcp.json
     const mcpConfigPath = join(config.workingDirectory, ".mcp.json");
     let mcpConfig: { mcpServers?: Record<string, unknown> } = {};
-    if (existsSync(mcpConfigPath)) {
-      try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch {}
+    try {
+      const raw = readFileSync(mcpConfigPath, "utf-8");
+      try {
+        mcpConfig = JSON.parse(raw);
+      } catch (parseErr) {
+        throw new Error(`Existing .mcp.json is corrupted and cannot be parsed. Please fix or remove it manually: ${mcpConfigPath}`);
+      }
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        mcpConfig = {};
+      } else {
+        throw err;
+      }
     }
     if (!mcpConfig.mcpServers) mcpConfig.mcpServers = {};
     for (const [name, entry] of Object.entries(config.mcpServers)) {
@@ -74,13 +85,14 @@ export class ClaudeCodeBackend implements CliBackend {
     );
   }
 
-  getContextUsage(): number {
+  getContextUsage(): number | null {
     try {
       const sf = join(this.instanceDir, "statusline.json");
       const data = JSON.parse(readFileSync(sf, "utf-8"));
       return data.context_window?.used_percentage ?? 0;
-    } catch {
-      return 0;
+    } catch (err) {
+      // File may not exist yet during startup — return null to signal unavailable
+      return null;
     }
   }
 
@@ -114,7 +126,9 @@ export class ClaudeCodeBackend implements CliBackend {
         if (/[$%>]\s*$/.test(lastLine)) {
           return;
         }
-      } catch {}
+      } catch {
+        // Transient pane capture failure during startup — retry loop continues
+      }
     }
   }
 
@@ -133,7 +147,9 @@ export class ClaudeCodeBackend implements CliBackend {
           }
         }
       }
-    } catch {}
+    } catch {
+      // Best-effort cleanup — don't fail shutdown if .mcp.json is inaccessible
+    }
   }
 
   // NOTE: writeSandboxShell() stays in daemon.ts (shared across backends)

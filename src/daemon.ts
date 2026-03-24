@@ -35,6 +35,7 @@ export class Daemon {
   private guardian: ContextGuardian | null = null;
   private memoryLayer: MemoryLayer | null = null;
   private adapter: ChannelAdapter | null = null;
+  private pendingIpcRequests = new Map<string, (msg: Record<string, unknown>) => void>();
   // Track chatId/threadId from inbound messages for automatic outbound routing
   private lastChatId: string | undefined;
   private lastThreadId: string | undefined;
@@ -54,6 +55,7 @@ export class Daemon {
   ) {
     this.logger = createLogger(config.log_level);
     this.messageBus = new MessageBus();
+    this.messageBus.setLogger(this.logger);
   }
 
   async start(): Promise<void> {
@@ -63,8 +65,28 @@ export class Daemon {
 
     // 1. IPC server — bridge between MCP server (Claude's child) and daemon
     const sockPath = join(this.instanceDir, "channel.sock");
-    this.ipcServer = new IpcServer(sockPath);
+    this.ipcServer = new IpcServer(sockPath, this.logger);
     await this.ipcServer.listen();
+
+    // Permanent IPC dispatcher: routes responses to pending requests by type+id key
+    this.ipcServer.on("message", (msg: Record<string, unknown>) => {
+      const type = msg.type as string | undefined;
+      if (!type) return;
+      // Build lookup key matching the pattern used when registering
+      let key: string | undefined;
+      if (type === "fleet_schedule_response" && msg.fleetRequestId) {
+        key = String(msg.fleetRequestId);
+      } else if (type === "fleet_outbound_response" && msg.requestId != null) {
+        key = `fleet_out_${msg.requestId}`;
+      } else if (type === "fleet_approval_response" && msg.approvalId) {
+        key = String(msg.approvalId);
+      }
+      if (key && this.pendingIpcRequests.has(key)) {
+        const handler = this.pendingIpcRequests.get(key)!;
+        this.pendingIpcRequests.delete(key);
+        handler(msg);
+      }
+    });
 
     // IPC message relay: when daemon wants to push a channel message to Claude,
     // it broadcasts to all IPC clients (the MCP server is one of them).
@@ -331,7 +353,7 @@ export class Daemon {
       this.saveSessionId();
       await this.tmux.killWindow();
       const windowIdFile = join(this.instanceDir, "window-id");
-      try { unlinkSync(windowIdFile); } catch {}
+      try { unlinkSync(windowIdFile); } catch (e) { this.logger.debug({ err: e }, "Failed to remove window-id file"); }
     }
     // Clean up backend config files
     if (this.backend?.cleanup) {
@@ -341,8 +363,8 @@ export class Daemon {
     const pidPath = join(this.instanceDir, "daemon.pid");
     try {
       unlinkSync(pidPath);
-    } catch {
-      // Ignore if not found
+    } catch (e) {
+      this.logger.debug({ err: e }, "Failed to remove PID file");
     }
   }
 
@@ -418,9 +440,10 @@ export class Daemon {
       if (!this.toolStatusMessageId) {
         adapter.sendText(chatId, text, { threadId: this.lastThreadId })
           .then(sent => { this.toolStatusMessageId = sent.messageId; })
-          .catch(() => {});
+          .catch(e => this.logger.debug({ err: e }, "Failed to send tool status message"));
       } else {
-        adapter.editMessage(chatId, this.toolStatusMessageId, text).catch(() => {});
+        adapter.editMessage(chatId, this.toolStatusMessageId, text)
+          .catch(e => this.logger.debug({ err: e }, "Failed to edit tool status message"));
       }
     }
   }
@@ -485,22 +508,15 @@ export class Daemon {
         fleetRequestId: fleetReqId,
       });
 
-      // Wait for fleet_schedule_response — same pattern as fleet_outbound_response
-      const cleanup = () => {
-        this.ipcServer?.removeListener("message", onResponse as (...a: unknown[]) => void);
-        clearTimeout(timeout);
-      };
-      const onResponse = (respMsg: Record<string, unknown>) => {
-        if (respMsg.type === "fleet_schedule_response" && respMsg.fleetRequestId === fleetReqId) {
-          cleanup();
-          respond(respMsg.result, respMsg.error as string | undefined);
-        }
-      };
+      // Wait for fleet_schedule_response via pending request map
       const timeout = setTimeout(() => {
-        cleanup();
+        this.pendingIpcRequests.delete(fleetReqId);
         respond(null, "Schedule operation timed out after 30s");
       }, 30_000);
-      this.ipcServer?.on("message", onResponse as (...a: unknown[]) => void);
+      this.pendingIpcRequests.set(fleetReqId, (respMsg) => {
+        clearTimeout(timeout);
+        respond(respMsg.result, respMsg.error as string | undefined);
+      });
       return;
     }
 
@@ -509,22 +525,16 @@ export class Daemon {
     if (adapters.length === 0) {
       // Topic mode: forward to fleet manager via IPC (fleet manager connected as IPC client)
       // The fleet manager's IPC client receives this and routes to shared adapter
+      const outboundKey = `fleet_out_${requestId}`;
       this.ipcServer?.broadcast({ type: "fleet_outbound", tool, args, requestId });
-      const cleanup = () => {
-        this.ipcServer?.removeListener("message", onResponse as (...a: unknown[]) => void);
-        clearTimeout(timeout);
-      };
-      const onResponse = (respMsg: Record<string, unknown>) => {
-        if (respMsg.type === "fleet_outbound_response" && respMsg.requestId === requestId) {
-          cleanup();
-          respond(respMsg.result, respMsg.error as string | undefined);
-        }
-      };
       const timeout = setTimeout(() => {
-        cleanup();
+        this.pendingIpcRequests.delete(outboundKey);
         respond(null, "Fleet outbound timed out after 30s");
       }, 30_000);
-      this.ipcServer?.on("message", onResponse as (...a: unknown[]) => void);
+      this.pendingIpcRequests.set(outboundKey, (respMsg) => {
+        clearTimeout(timeout);
+        respond(respMsg.result, respMsg.error as string | undefined);
+      });
       return;
     }
 
@@ -572,25 +582,17 @@ export class Daemon {
       const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       const timeout = setTimeout(() => {
-        cleanup();
+        this.pendingIpcRequests.delete(approvalId);
         resolve({ decision: "deny", respondedBy: { channelType: "timeout", userId: "" } });
       }, 120_000);
 
-      const onMessage = (msg: Record<string, unknown>) => {
-        if (msg.type === "fleet_approval_response" && msg.approvalId === approvalId) {
-          cleanup();
-          const d = msg.decision as string;
-          const decision = d === "deny" ? "deny" as const : d === "always_allow" ? "always_allow" as const : "approve" as const;
-          resolve({ decision, respondedBy: { channelType: "ipc", userId: "" } });
-        }
-      };
-
-      const cleanup = () => {
+      this.pendingIpcRequests.set(approvalId, (msg) => {
         clearTimeout(timeout);
-        this.ipcServer?.removeListener("message", onMessage as (...a: unknown[]) => void);
-      };
+        const d = msg.decision as string;
+        const decision = d === "deny" ? "deny" as const : d === "always_allow" ? "always_allow" as const : "approve" as const;
+        resolve({ decision, respondedBy: { channelType: "ipc", userId: "" } });
+      });
 
-      this.ipcServer?.on("message", onMessage as (...a: unknown[]) => void);
       this.ipcServer?.broadcast({
         type: "fleet_approval_request",
         approvalId,
