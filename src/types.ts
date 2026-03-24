@@ -101,6 +101,9 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
 export interface SandboxConfig {
   enabled: boolean;
   extra_mounts?: string[];
+  memory?: string;
+  cpus?: string;
+  network?: string;
 }
 
 export interface FleetConfig {

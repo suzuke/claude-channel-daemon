@@ -4,6 +4,10 @@ import { ContainerManager } from "../src/container-manager.js";
 vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
 }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => "/Users/me" };
+});
 import { execFile } from "node:child_process";
 
 const mockExecFile = vi.mocked(execFile);

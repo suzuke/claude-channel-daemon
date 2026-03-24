@@ -6,6 +6,10 @@ import { tmpdir } from "node:os";
 vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
 }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => "/Users/me" };
+});
 import { execFile } from "node:child_process";
 import { ContainerManager } from "../src/container-manager.js";
 
@@ -29,6 +33,7 @@ describe("sandbox integration", () => {
       dataDir: "/Users/me/.ccd",
       ccdInstallDir: "/Users/me/Hack/ccd",
       extraMounts: ["/Users/me/.ssh:/Users/me/.ssh:ro"],
+      network: "bridge",
     });
 
     const runArgs = mockExecFile.mock.calls[1][1] as string[];
@@ -41,7 +46,7 @@ describe("sandbox integration", () => {
     expect(mounts).toContain("/Users/me/Hack/ccd:/Users/me/Hack/ccd:ro");
     expect(mounts).toContain("/Users/me/.ssh:/Users/me/.ssh:ro");
 
-    // Verify host.docker.internal (for potential future use)
+    // Verify host.docker.internal is present when network is not "none"
     expect(runArgs).toContain("host.docker.internal:host-gateway");
   });
 
