@@ -3,7 +3,7 @@ import type {
   FleetManagerMeetingAPI, MeetingChannelOutput,
   RoundEntry, MeetingState,
 } from "./types.js";
-import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, roleLabel } from "./prompt-builder.js";
+import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, buildCollabSystemPrompt, buildCollabSummaryPrompt, roleLabel } from "./prompt-builder.js";
 import type { InboundMessage } from "../channel/types.js";
 
 const ROLE_EMOJI: Record<string, string> = { pro: "🟢", con: "🔴", arbiter: "⚖️" };
@@ -35,9 +35,12 @@ export class MeetingOrchestrator {
     // Spawn instances sequentially to avoid port/IPC race conditions
     for (const p of participantConfigs) {
       try {
+        const systemPrompt = this.config.mode === "collab"
+          ? buildCollabSystemPrompt(p.label, this.config.topic)
+          : buildSystemPrompt(p.role, this.config.topic);
         const instanceName = await this.fm.spawnEphemeralInstance(
           {
-            systemPrompt: buildSystemPrompt(p.role, this.config.topic),
+            systemPrompt,
             workingDirectory: this.config.mode === "collab" ? this.config.repo ?? "/tmp" : "/tmp",
             lightweight: this.config.mode === "debate",
             skipPermissions: this.config.mode === "debate",
@@ -66,11 +69,85 @@ export class MeetingOrchestrator {
     );
 
     try {
-      await this.runDebateLoop();
+      if (this.config.mode === "collab") {
+        await this.runCollabFlow();
+      } else {
+        await this.runDebateLoop();
+      }
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
       throw err;
     }
+  }
+
+  private async runCollabFlow(): Promise<void> {
+    // Phase 1: Discussion — each participant proposes their work plan
+    await this.output.postMessage("\n━━ 討論分工 ━━");
+
+    for (const participant of this.participants) {
+      if (this.cancelled) return;
+
+      while (this.state === "paused") {
+        await new Promise<void>(resolve => { this.resolveUserInput = resolve; });
+      }
+      if (this.cancelled) return;
+
+      try {
+        const prompt = `任務：${this.config.topic}\n\n團隊成員：${this.participants.map(p => p.label).join("、")}\n你是 ${participant.label}。請提出你的分工建議，說明你打算負責哪個部分。用 reply 工具回覆。`;
+        const reply = await this.fm.sendAndWaitReply(participant.instanceName, prompt, REPLY_TIMEOUT_MS);
+
+        const cappedReply = reply.length > REPLY_BUFFER_CAP
+          ? reply.slice(0, REPLY_BUFFER_CAP) + "\n[...truncated]"
+          : reply;
+
+        this.roundHistory.push({
+          round: 0, speaker: participant.label, role: participant.role, content: cappedReply,
+        });
+
+        await this.output.postMessage(`💬 ${participant.label}：\n${cappedReply}`);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") throw err;
+        await this.output.postMessage(`⚠️ ${participant.label} 回覆逾時`);
+      }
+    }
+
+    // Phase 2: Development — tell each participant to start working
+    await this.output.postMessage("\n━━ 開始開發 ━━");
+
+    // Collect all plans for context
+    const allPlans = this.roundHistory
+      .filter(e => e.round === 0)
+      .map(e => `[${e.speaker}] ${e.content}`)
+      .join("\n\n");
+
+    // Send development instruction to all participants in parallel
+    const devPromises = this.participants.map(async (participant) => {
+      if (this.cancelled) return;
+      try {
+        const prompt = `以下是所有人的分工計劃：\n\n${allPlans}\n\n請開始你負責的部分。完成後用 reply 工具回報你做了什麼（包含修改了哪些檔案、實作了什麼功能）。`;
+        const reply = await this.fm.sendAndWaitReply(participant.instanceName, prompt, 300_000); // 5 min timeout for dev work
+
+        const cappedReply = reply.length > REPLY_BUFFER_CAP
+          ? reply.slice(0, REPLY_BUFFER_CAP) + "\n[...truncated]"
+          : reply;
+
+        this.roundHistory.push({
+          round: 1, speaker: participant.label, role: participant.role, content: cappedReply,
+        });
+
+        await this.output.postMessage(`✅ ${participant.label} 完成：\n${cappedReply}`);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+        await this.output.postMessage(`⚠️ ${participant.label} 開發逾時或失敗`);
+      }
+    });
+
+    await Promise.allSettled(devPromises);
+
+    if (this.cancelled) return;
+
+    await this.generateSummary();
+    await this.cleanup();
   }
 
   private async runDebateLoop(): Promise<void> {
@@ -151,9 +228,12 @@ export class MeetingOrchestrator {
     if (!summaryGenerator) return;
 
     try {
+      const summaryPrompt = this.config.mode === "collab"
+        ? buildCollabSummaryPrompt(this.config.topic, this.roundHistory)
+        : buildSummaryPrompt(this.config.topic, this.roundHistory);
       const summary = await this.fm.sendAndWaitReply(
         summaryGenerator.instanceName,
-        buildSummaryPrompt(this.config.topic, this.roundHistory),
+        summaryPrompt,
         REPLY_TIMEOUT_MS,
       );
       await this.output.postMessage(summary);

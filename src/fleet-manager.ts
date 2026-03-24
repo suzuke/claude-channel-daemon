@@ -1287,6 +1287,16 @@ export class FleetManager {
       return;
     }
 
+    if (parsed.mode === "collab" && !parsed.repo) {
+      await this.adapter.sendText(msg.chatId, "⚠️ 協作模式需要指定 repo：/meets --collab --repo ~/app \"task\"");
+      return;
+    }
+
+    if (parsed.repo && !existsSync(join(parsed.repo, ".git"))) {
+      await this.adapter.sendText(msg.chatId, `⚠️ 不是 git repository: ${parsed.repo}`);
+      return;
+    }
+
     const maxParticipants = this.fleetConfig?.defaults?.meetings?.maxParticipants ?? 6;
     if (parsed.count > maxParticipants) {
       await this.adapter.sendText(msg.chatId, `⚠️ 超過參與者上限 (${maxParticipants})`);
@@ -1410,8 +1420,22 @@ export class FleetManager {
 
     if (signal?.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
 
+    // Create git worktree for collab mode when working in a real repo
+    let workDir = config.workingDirectory;
+    if (workDir !== "/tmp") {
+      if (!existsSync(join(workDir, ".git"))) {
+        throw new Error(`Not a git repository: ${workDir}`);
+      }
+      const worktreePath = join("/tmp", name);
+      const branchName = `meet/${name}`;
+      const { execSync } = await import("child_process");
+      execSync(`git worktree add "${worktreePath}" -b "${branchName}"`, { cwd: workDir, stdio: "pipe" });
+      workDir = worktreePath;
+      this.logger.info({ name, worktreePath, branchName }, "Created git worktree for collab instance");
+    }
+
     const instanceConfig: InstanceConfig = {
-      working_directory: config.workingDirectory,
+      working_directory: workDir,
       lightweight: config.lightweight,
       restart_policy: { max_retries: 0, backoff: "linear", reset_after: 0 },
       context_guardian: { threshold_percentage: 100, max_idle_wait_ms: 0, completion_timeout_ms: 0, grace_period_ms: 0, max_age_hours: 999 },
@@ -1448,6 +1472,22 @@ export class FleetManager {
       this.pendingMeetingReplies.delete(name);
     }
     await this.stopInstance(name);
+
+    // Clean up git worktree if it exists
+    const worktreePath = join("/tmp", name);
+    if (existsSync(worktreePath)) {
+      try {
+        const { execSync } = await import("child_process");
+        execSync(`git worktree remove --force "${worktreePath}"`, { stdio: "pipe" });
+        // Also try to delete the branch
+        try {
+          execSync(`git branch -D "meet/${name}"`, { stdio: "pipe" });
+        } catch { /* branch may not exist or already deleted */ }
+        this.logger.info({ name }, "Cleaned up git worktree");
+      } catch (err) {
+        this.logger.warn({ name, err }, "Failed to clean up worktree");
+      }
+    }
   }
 
   /** Create a Telegram forum topic for a meeting */

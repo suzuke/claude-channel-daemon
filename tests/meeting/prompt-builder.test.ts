@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, roleLabel } from "../../src/meeting/prompt-builder.js";
+import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, buildCollabSystemPrompt, buildCollabSummaryPrompt, roleLabel } from "../../src/meeting/prompt-builder.js";
 import type { RoundEntry } from "../../src/meeting/types.js";
 
 describe("roleLabel", () => {
@@ -66,5 +66,25 @@ describe("buildSummaryPrompt", () => {
     expect(prompt).toContain("arg2");
     expect(prompt).toContain("摘要");
     expect(prompt).toContain("reply");
+  });
+});
+
+describe("buildCollabSystemPrompt", () => {
+  it("includes participant label and topic", () => {
+    const prompt = buildCollabSystemPrompt("A", "Implement OAuth");
+    expect(prompt).toContain("A");
+    expect(prompt).toContain("Implement OAuth");
+    expect(prompt).toContain("reply");
+  });
+});
+
+describe("buildCollabSummaryPrompt", () => {
+  it("includes all entries", () => {
+    const history: RoundEntry[] = [
+      { round: 0, speaker: "A", role: "developer", content: "I'll do the frontend" },
+    ];
+    const prompt = buildCollabSummaryPrompt("task", history);
+    expect(prompt).toContain("frontend");
+    expect(prompt).toContain("摘要");
   });
 });

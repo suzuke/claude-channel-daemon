@@ -114,4 +114,47 @@ describe("MeetingOrchestrator", () => {
     const messages = (output.postMessage as any).mock.calls.map((c: any) => c[0]);
     expect(messages[messages.length - 1]).toBe("📋 會議結束");
   });
+
+  describe("collab mode", () => {
+    const collabConfig: MeetingConfig = {
+      meetingId: "collab-test", topic: "Implement OAuth", mode: "collab", maxRounds: 3, repo: "/tmp",
+    };
+    const collabParticipants: ParticipantConfig[] = [
+      { label: "A", role: "developer" },
+      { label: "B", role: "developer" },
+    ];
+
+    it("runs collab flow with discussion and development phases", async () => {
+      const orch = new MeetingOrchestrator(collabConfig, fm, output);
+      await orch.start(collabParticipants);
+
+      const messages = (output.postMessage as any).mock.calls.map((c: any) => c[0]);
+      expect(messages.some((p: string) => p.includes("討論分工"))).toBe(true);
+      expect(messages.some((p: string) => p.includes("開始開發"))).toBe(true);
+      expect(fm.destroyEphemeralInstance).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends discussion prompts then development prompts", async () => {
+      const orch = new MeetingOrchestrator(collabConfig, fm, output);
+      await orch.start(collabParticipants);
+
+      // 2 discussion + 2 development + 1 summary = 5 calls
+      expect(fm.sendAndWaitReply).toHaveBeenCalledTimes(5);
+    });
+
+    it("handles development timeout gracefully", async () => {
+      fm.sendAndWaitReply = vi.fn()
+        .mockResolvedValueOnce("Plan A") // discussion A
+        .mockResolvedValueOnce("Plan B") // discussion B
+        .mockRejectedValueOnce(new Error("timeout")) // dev A fails
+        .mockResolvedValueOnce("Done B") // dev B succeeds
+        .mockResolvedValue("Summary"); // summary
+
+      const orch = new MeetingOrchestrator(collabConfig, fm, output);
+      await orch.start(collabParticipants);
+
+      const messages = (output.postMessage as any).mock.calls.map((c: any) => c[0]);
+      expect(messages.some((m: string) => m.includes("開發逾時或失敗"))).toBe(true);
+    });
+  });
 });
