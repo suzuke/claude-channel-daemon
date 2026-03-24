@@ -71,6 +71,39 @@ describe("ClaudeCodeBackend", () => {
       const cmd = backend.buildCommand(makeConfig());
       expect(cmd).toContain("--dangerously-load-development-channels server:ccd-channel");
     });
+
+    it("does not include --dangerously-skip-permissions by default", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      const cmd = backend.buildCommand(makeConfig());
+      expect(cmd).not.toContain("--dangerously-skip-permissions");
+    });
+
+    it("does not include --system-prompt by default", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      const cmd = backend.buildCommand(makeConfig());
+      expect(cmd).not.toContain("--system-prompt");
+    });
+
+    it("includes --dangerously-skip-permissions when skipPermissions is true", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      const cmd = backend.buildCommand(makeConfig({ skipPermissions: true }));
+      expect(cmd).toContain("--dangerously-skip-permissions");
+    });
+
+    it("includes --system-prompt with path when systemPrompt is set", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      const cmd = backend.buildCommand(makeConfig({ systemPrompt: "You are a debater." }));
+      expect(cmd).toContain("--system-prompt");
+      expect(cmd).toContain("system-prompt.md");
+    });
+
+    it("writes system-prompt.md to instanceDir when systemPrompt is set", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      backend.buildCommand(makeConfig({ systemPrompt: "You are a debater." }));
+      const promptPath = join(TEST_DIR, "system-prompt.md");
+      expect(existsSync(promptPath)).toBe(true);
+      expect(readFileSync(promptPath, "utf-8")).toBe("You are a debater.");
+    });
   });
 
   describe("writeConfig", () => {
@@ -107,6 +140,22 @@ describe("ClaudeCodeBackend", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
       expect(existsSync(join(TEST_DIR, "statusline.sh"))).toBe(true);
+    });
+
+    it("writes simplified settings when skipPermissions is true", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      backend.writeConfig(makeConfig({ skipPermissions: true }));
+      const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
+      expect(settings.hooks).toBeUndefined();
+      expect(settings.permissions.allow).toContain("*");
+      expect(settings.permissions.deny).toHaveLength(0);
+    });
+
+    it("writes full settings (with hooks) when skipPermissions is false or unset", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      backend.writeConfig(makeConfig({ skipPermissions: false }));
+      const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
+      expect(settings.hooks.PreToolUse).toBeDefined();
     });
   });
 
