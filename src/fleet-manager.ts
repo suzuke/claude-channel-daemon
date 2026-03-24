@@ -634,6 +634,12 @@ export class FleetManager {
       return;
     }
 
+    // Auto-react 👀 so sender knows the message was received
+    if (this.adapter && msg.chatId && msg.messageId) {
+      this.adapter.react(msg.chatId, msg.messageId, "👀")
+        .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
+    }
+
     ipc.send({
       type: "fleet_inbound",
       content: text,

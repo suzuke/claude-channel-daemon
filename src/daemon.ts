@@ -141,6 +141,12 @@ export class Daemon {
           if (msg.chatId) this.lastChatId = msg.chatId;
           if (msg.threadId) this.lastThreadId = msg.threadId;
 
+          // Auto-react 👀 so sender knows the message was received
+          if (this.adapter && msg.chatId && msg.messageId) {
+            this.adapter.react(msg.chatId, msg.messageId, "👀")
+              .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
+          }
+
           let text = msg.text;
           const extraMeta: Record<string, string> = {};
 
