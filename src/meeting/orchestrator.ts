@@ -15,13 +15,13 @@ export class MeetingOrchestrator {
   private roundHistory: RoundEntry[] = [];
   private currentRound = 0;
   private state: MeetingState = "booting";
-
-  /** Check if ended — separate method so TS doesn't narrow away the possibility */
-  private isEnded(): boolean { return this.state === "ended"; }
   private userContext: string | undefined;
   private abortController = new AbortController();
   private resolveUserInput: (() => void) | null = null;
   private directAddress: { label: string; prompt: string } | null = null;
+
+  /** Cancellation signal — the single source of truth for "should we stop?" */
+  private get cancelled(): boolean { return this.abortController.signal.aborted; }
 
   constructor(
     private config: MeetingConfig,
@@ -32,7 +32,6 @@ export class MeetingOrchestrator {
   async start(participantConfigs: ParticipantConfig[]): Promise<void> {
     this.state = "booting";
 
-    // Spawn instances in parallel — use allSettled to handle partial failures
     const spawnResults = await Promise.allSettled(
       participantConfigs.map(async (p) => {
         const instanceName = await this.fm.spawnEphemeralInstance(
@@ -81,7 +80,7 @@ export class MeetingOrchestrator {
 
   private async runDebateLoop(): Promise<void> {
     for (let round = 1; round <= this.config.maxRounds; round++) {
-      if (this.isEnded()) return;
+      if (this.cancelled) return;
       this.currentRound = round;
 
       await this.output.postMessage(`\n━━ Round ${round} ━━`);
@@ -90,21 +89,18 @@ export class MeetingOrchestrator {
       const speakers = this.getSpeakingOrder();
 
       for (const participant of speakers) {
-        if (this.isEnded()) return;
+        if (this.cancelled) return;
 
-        // Check for pause
         while (this.state === "paused") {
           await new Promise<void>(resolve => { this.resolveUserInput = resolve; });
         }
-        if (this.isEnded()) return;
+        if (this.cancelled) return;
 
-        // Check for direct address override
         let prompt: string;
         if (this.directAddress && this.directAddress.label === participant.label) {
           prompt = this.directAddress.prompt;
           this.directAddress = null;
         } else if (this.directAddress) {
-          // Skip this participant if someone else was directly addressed
           continue;
         } else {
           prompt = buildRoundPrompt(this.config.topic, round, prevRound, this.userContext);
@@ -149,7 +145,7 @@ export class MeetingOrchestrator {
   }
 
   private async generateSummary(): Promise<void> {
-    if (this.isEnded()) return;
+    if (this.cancelled) return;
     this.state = "summarizing";
     await this.output.postMessage("\n━━ 會議摘要 ━━");
 
