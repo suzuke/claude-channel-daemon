@@ -8,7 +8,7 @@ import yaml from "js-yaml";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig } from "./types.js";
-import type { RouteTarget } from "./meeting/types.js";
+import type { RouteTarget, EphemeralInstanceConfig } from "./meeting/types.js";
 import { loadFleetConfig, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { TmuxManager } from "./tmux-manager.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
@@ -1234,5 +1234,111 @@ export class FleetManager {
     // 5. Remove PID file
     const pidPath = join(this.dataDir, "fleet.pid");
     try { unlinkSync(pidPath); } catch (e) { this.logger.debug({ err: e }, "Failed to remove fleet PID file"); }
+  }
+
+  // ===================== Meeting API =====================
+
+  /** Send a message to an instance and wait for its reply */
+  async sendAndWaitReply(instanceName: string, message: string, timeoutMs = 120_000): Promise<string> {
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (!ipc) throw new Error(`No IPC connection to ${instanceName}`);
+
+    return new Promise<string>((resolve, reject) => {
+      const entry = { resolve, reject, buffer: "", timer: null as ReturnType<typeof setTimeout> | null };
+
+      const timeout = setTimeout(() => {
+        this.pendingMeetingReplies.delete(instanceName);
+        reject(new Error(`sendAndWaitReply timeout for ${instanceName}`));
+      }, timeoutMs);
+
+      const origResolve = resolve;
+      entry.resolve = (text: string) => {
+        clearTimeout(timeout);
+        origResolve(text);
+      };
+
+      this.pendingMeetingReplies.set(instanceName, entry);
+
+      ipc.send({
+        type: "fleet_inbound",
+        content: message,
+        meta: {
+          chat_id: "meeting-internal",
+          message_id: `meet-${Date.now()}`,
+          user: "meeting-orchestrator",
+          user_id: "system",
+          ts: new Date().toISOString(),
+          thread_id: "",
+        },
+      });
+    });
+  }
+
+  /** Spawn an ephemeral Claude instance for meeting participation */
+  async spawnEphemeralInstance(config: EphemeralInstanceConfig, signal?: AbortSignal): Promise<string> {
+    const name = `meet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    if (signal?.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+
+    const instanceConfig: InstanceConfig = {
+      working_directory: config.workingDirectory,
+      lightweight: config.lightweight,
+      restart_policy: { max_retries: 0, backoff: "linear", reset_after: 0 },
+      context_guardian: { threshold_percentage: 100, max_idle_wait_ms: 0, completion_timeout_ms: 0, grace_period_ms: 0, max_age_hours: 999 },
+      memory: { auto_summarize: false, watch_memory_dir: false, backup_to_sqlite: false },
+      log_level: "info",
+      backend: config.backend,
+    };
+
+    const port = 18321 + this.daemons.size + 100;
+    instanceConfig.approval_port = port;
+
+    await this.startInstance(name, instanceConfig, port, true);
+
+    // Wait for IPC connection
+    const deadline = Date.now() + 30_000;
+    while (!this.instanceIpcClients.has(name)) {
+      if (Date.now() > deadline) throw new Error(`IPC timeout for ${name}`);
+      if (signal?.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    return name;
+  }
+
+  /** Destroy an ephemeral instance created for a meeting */
+  async destroyEphemeralInstance(name: string): Promise<void> {
+    // Clean up pending replies
+    const pending = this.pendingMeetingReplies.get(name);
+    if (pending) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject(Object.assign(new Error("Instance destroyed"), { name: "AbortError" }));
+      this.pendingMeetingReplies.delete(name);
+    }
+    await this.stopInstance(name);
+  }
+
+  /** Create a Telegram forum topic for a meeting */
+  async createMeetingChannel(title: string): Promise<{ channelId: number }> {
+    const threadId = await this.createForumTopic(title);
+    return { channelId: threadId };
+  }
+
+  /** Close a Telegram forum topic used for a meeting */
+  async closeMeetingChannel(channelId: number): Promise<void> {
+    const groupId = this.fleetConfig?.channel?.group_id;
+    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
+    if (!groupId || !botTokenEnv) return;
+    const botToken = process.env[botTokenEnv];
+    if (!botToken) return;
+
+    await fetch(
+      `https://api.telegram.org/bot${botToken}/closeForumTopic`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: groupId, message_thread_id: channelId }),
+      },
+    );
   }
 }
