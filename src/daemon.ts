@@ -234,133 +234,135 @@ export class Daemon {
 
     await this.spawnClaudeWindow();
 
-    // 3. Pipe-pane for prompt detection
-    const outputLog = join(this.instanceDir, "output.log");
-    await this.tmux.pipeOutput(outputLog);
-
-    // 4. Transcript monitor
-    this.transcriptMonitor = new TranscriptMonitor(this.instanceDir, this.logger);
-
-    // 5. Wire transcript events (tool status in Telegram disabled for now)
-    this.transcriptMonitor.on("tool_use", (name: string, _input: unknown) => {
-      this.logger.debug({ tool: name }, "Tool use");
-    });
-    this.transcriptMonitor.on("tool_result", (_name: string, _output: unknown) => {
-      // no-op
-    });
-    this.transcriptMonitor.on("assistant_text", (text: string) => {
-      this.logger.debug({ text: text.slice(0, 200) }, "Claude response");
-    });
-    this.transcriptMonitor.startPolling();
-
-    // 6. Approval server
     let port = this.config.approval_port ?? 18321;
-    if (this.approvalStrategyInstance) {
-      port = await this.approvalStrategyInstance.start();
-      this.logger.debug({ port }, "Approval strategy started");
-    }
+    if (!this.config.lightweight) {
+      // 3. Pipe-pane for prompt detection
+      const outputLog = join(this.instanceDir, "output.log");
+      await this.tmux.pipeOutput(outputLog);
 
-    // 7. Prompt detector
-    // In topic mode, messageBus has no adapters — must route via IPC like ApprovalServer does
-    const requestApproval = (prompt: string): Promise<ApprovalResponse> => {
-      if (this.topicMode && this.ipcServer) {
-        return this.requestApprovalViaIpc(prompt);
-      }
-      return this.messageBus.requestApproval(prompt);
-    };
-    this.promptDetector = new TmuxPromptDetector(
-      outputLog,
-      this.tmux,
-      requestApproval,
-      this.logger,
-      this.instanceDir,
-    );
-    this.promptDetector.startPolling();
+      // 4. Transcript monitor
+      this.transcriptMonitor = new TranscriptMonitor(this.instanceDir, this.logger);
 
-    // 8. Context guardian
-    const statusFile = join(this.instanceDir, "statusline.json");
-    this.guardian = new ContextGuardian(this.config.context_guardian, this.logger, statusFile);
-    this.guardian.startWatching();
-    this.guardian.startTimer();
+      // 5. Wire transcript events (tool status in Telegram disabled for now)
+      this.transcriptMonitor.on("tool_use", (name: string, _input: unknown) => {
+        this.logger.debug({ tool: name }, "Tool use");
+      });
+      this.transcriptMonitor.on("tool_result", (_name: string, _output: unknown) => {
+        // no-op
+      });
+      this.transcriptMonitor.on("assistant_text", (text: string) => {
+        this.logger.debug({ text: text.slice(0, 200) }, "Claude response");
+      });
+      this.transcriptMonitor.startPolling();
 
-    this.guardian.on("status_update", () => this.saveSessionId());
-    this.guardian.on("pending", async () => {
-      this.logger.info("Context rotation pending — waiting for transcript to settle");
-      await this.waitForTranscriptIdle(15000);
-      this.logger.info("Claude is idle — signaling");
-      this.guardian?.signalIdle();
-    });
-
-    this.guardian.on("request_handover", async () => {
-      this.logger.info("Sending handover prompt to Claude");
-      if (this.tmux) {
-        const reason = this.guardian?.rotationReason ?? "context_full";
-        const pct = this.readContextPercentage();
-        const reasonMsg = reason === "max_age"
-          ? `Scheduled rotation — session age limit reached (context usage: ${pct}%, NOT full).`
-          : `Context rotation — usage at ${pct}%, approaching threshold.`;
-        const prompt = `${reasonMsg} Use the reply tool to tell the user: quote the EXACT percentage ${pct}% and the reason (${reason === "max_age" ? "scheduled maintenance" : "context approaching limit"}). Do NOT change or invent numbers. Then save state to memory/handover.md`;
-        await this.tmux.sendKeys(prompt);
-        await new Promise(r => setTimeout(r, 500));
-        await this.tmux.sendSpecialKey("Enter");
+      // 6. Approval server
+      if (this.approvalStrategyInstance) {
+        port = await this.approvalStrategyInstance.start();
+        this.logger.debug({ port }, "Approval strategy started");
       }
 
-      this.waitForHandoverSignal();
-    });
+      // 7. Prompt detector
+      // In topic mode, messageBus has no adapters — must route via IPC like ApprovalServer does
+      const requestApproval = (prompt: string): Promise<ApprovalResponse> => {
+        if (this.topicMode && this.ipcServer) {
+          return this.requestApprovalViaIpc(prompt);
+        }
+        return this.messageBus.requestApproval(prompt);
+      };
+      this.promptDetector = new TmuxPromptDetector(
+        outputLog,
+        this.tmux,
+        requestApproval,
+        this.logger,
+        this.instanceDir,
+      );
+      this.promptDetector.startPolling();
 
-    this.guardian.on("rotate", async () => {
-      this.logger.info("Context rotation — killing and respawning Claude");
-      this.saveSessionId();
+      // 8. Context guardian
+      const statusFile = join(this.instanceDir, "statusline.json");
+      this.guardian = new ContextGuardian(this.config.context_guardian, this.logger, statusFile);
+      this.guardian.startWatching();
+      this.guardian.startTimer();
 
-      // Auto-bake: check if Claude installed new packages in the container
-      if (this.containerManager) {
-        const recordPath = join(this.instanceDir, "installed-packages.txt");
-        if (this.containerManager.shouldAutoBake(recordPath)) {
-          this.logger.info("Auto-baking new packages into sandbox image...");
-          try {
-            if (this.lastChatId) {
-              const meta: Record<string, string> = { chat_id: this.lastChatId };
-              if (this.lastThreadId) meta.thread_id = this.lastThreadId;
-              this.pushChannelMessage("📦 正在將新安裝的套件寫入 Dockerfile 並重建 sandbox image...", meta);
+      this.guardian.on("status_update", () => this.saveSessionId());
+      this.guardian.on("pending", async () => {
+        this.logger.info("Context rotation pending — waiting for transcript to settle");
+        await this.waitForTranscriptIdle(15000);
+        this.logger.info("Claude is idle — signaling");
+        this.guardian?.signalIdle();
+      });
+
+      this.guardian.on("request_handover", async () => {
+        this.logger.info("Sending handover prompt to Claude");
+        if (this.tmux) {
+          const reason = this.guardian?.rotationReason ?? "context_full";
+          const pct = this.readContextPercentage();
+          const reasonMsg = reason === "max_age"
+            ? `Scheduled rotation — session age limit reached (context usage: ${pct}%, NOT full).`
+            : `Context rotation — usage at ${pct}%, approaching threshold.`;
+          const prompt = `${reasonMsg} Use the reply tool to tell the user: quote the EXACT percentage ${pct}% and the reason (${reason === "max_age" ? "scheduled maintenance" : "context approaching limit"}). Do NOT change or invent numbers. Then save state to memory/handover.md`;
+          await this.tmux.sendKeys(prompt);
+          await new Promise(r => setTimeout(r, 500));
+          await this.tmux.sendSpecialKey("Enter");
+        }
+
+        this.waitForHandoverSignal();
+      });
+
+      this.guardian.on("rotate", async () => {
+        this.logger.info("Context rotation — killing and respawning Claude");
+        this.saveSessionId();
+
+        // Auto-bake: check if Claude installed new packages in the container
+        if (this.containerManager) {
+          const recordPath = join(this.instanceDir, "installed-packages.txt");
+          if (this.containerManager.shouldAutoBake(recordPath)) {
+            this.logger.info("Auto-baking new packages into sandbox image...");
+            try {
+              if (this.lastChatId) {
+                const meta: Record<string, string> = { chat_id: this.lastChatId };
+                if (this.lastThreadId) meta.thread_id = this.lastThreadId;
+                this.pushChannelMessage("📦 正在將新安裝的套件寫入 Dockerfile 並重建 sandbox image...", meta);
+              }
+              const dockerfilePath = join(__dirname, "..", "Dockerfile.sandbox");
+              const { packages } = await this.containerManager.autoBake(recordPath, dockerfilePath);
+              const summary = [
+                packages.apt.length > 0 ? `apt: ${packages.apt.join(", ")}` : "",
+                packages.pip.length > 0 ? `pip: ${packages.pip.join(", ")}` : "",
+                packages.cargo.length > 0 ? `cargo: ${packages.cargo.join(", ")}` : "",
+                packages.npm.length > 0 ? `npm: ${packages.npm.join(", ")}` : "",
+              ].filter(Boolean).join("; ");
+              this.logger.info({ summary }, "Auto-bake complete");
+            } catch (err) {
+              this.logger.warn({ err }, "Auto-bake failed — continuing rotation");
             }
-            const dockerfilePath = join(__dirname, "..", "Dockerfile.sandbox");
-            const { packages } = await this.containerManager.autoBake(recordPath, dockerfilePath);
-            const summary = [
-              packages.apt.length > 0 ? `apt: ${packages.apt.join(", ")}` : "",
-              packages.pip.length > 0 ? `pip: ${packages.pip.join(", ")}` : "",
-              packages.cargo.length > 0 ? `cargo: ${packages.cargo.join(", ")}` : "",
-              packages.npm.length > 0 ? `npm: ${packages.npm.join(", ")}` : "",
-            ].filter(Boolean).join("; ");
-            this.logger.info({ summary }, "Auto-bake complete");
-          } catch (err) {
-            this.logger.warn({ err }, "Auto-bake failed — continuing rotation");
           }
         }
+
+        await this.tmux?.killWindow();
+        this.transcriptMonitor?.resetOffset();
+        await this.spawnClaudeWindow();
+        this.guardian?.markRotationComplete();
+        this.logger.info("Context rotation complete — fresh Claude session started");
+      });
+
+      // 9. Memory layer
+      if (this.config.memory.watch_memory_dir || this.config.memory.backup_to_sqlite) {
+        const dbPath = join(this.instanceDir, "memory.db");
+        const db = new MemoryDb(dbPath);
+        db.pruneOldBackups();
+        const memDir =
+          this.config.memory_directory ??
+          join(
+            homedir(),
+            ".claude/projects",
+            this.config.working_directory.replace(/\//g, "-").replace(/^-/, ""),
+            "memory",
+          );
+        mkdirSync(memDir, { recursive: true });
+        this.memoryLayer = new MemoryLayer(memDir, db, this.logger);
+        await this.memoryLayer.start();
       }
-
-      await this.tmux?.killWindow();
-      this.transcriptMonitor?.resetOffset();
-      await this.spawnClaudeWindow();
-      this.guardian?.markRotationComplete();
-      this.logger.info("Context rotation complete — fresh Claude session started");
-    });
-
-    // 9. Memory layer
-    if (this.config.memory.watch_memory_dir || this.config.memory.backup_to_sqlite) {
-      const dbPath = join(this.instanceDir, "memory.db");
-      const db = new MemoryDb(dbPath);
-      db.pruneOldBackups();
-      const memDir =
-        this.config.memory_directory ??
-        join(
-          homedir(),
-          ".claude/projects",
-          this.config.working_directory.replace(/\//g, "-").replace(/^-/, ""),
-          "memory",
-        );
-      mkdirSync(memDir, { recursive: true });
-      this.memoryLayer = new MemoryLayer(memDir, db, this.logger);
-      await this.memoryLayer.start();
     }
 
     // Set CCD_SOCKET_PATH env for MCP server

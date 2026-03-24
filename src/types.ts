@@ -87,6 +87,14 @@ export interface InstanceConfig {
   backend?: string;
   /** @deprecated backward compat */
   channel_plugin?: string;
+  /** Skip non-essential subsystems (transcript monitor, context guardian, memory layer, approval server, prompt detector) */
+  lightweight?: boolean;
+}
+
+export interface MeetingDefaults {
+  maxConcurrent?: number;
+  maxParticipants?: number;
+  defaultRounds?: number;
 }
 
 export interface FleetDefaults extends Partial<InstanceConfig> {
@@ -96,6 +104,7 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
     retry_count?: number;
     retry_interval_ms?: number;
   };
+  meetings?: MeetingDefaults;
 }
 
 export interface SandboxConfig {

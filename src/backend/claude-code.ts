@@ -17,6 +17,16 @@ export class ClaudeCodeBackend implements CliBackend {
       if (sid) cmd += ` --resume ${sid}`;
     }
 
+    if (config.skipPermissions) {
+      cmd += ` --dangerously-skip-permissions`;
+    }
+
+    if (config.systemPrompt) {
+      const promptPath = join(this.instanceDir, "system-prompt.md");
+      writeFileSync(promptPath, config.systemPrompt);
+      cmd += ` --system-prompt "${promptPath}"`;
+    }
+
     // NOTE: sandbox shell (CLAUDE_CODE_SHELL) is handled by the daemon,
     // not the backend — it's shared across backends.
 
@@ -24,6 +34,21 @@ export class ClaudeCodeBackend implements CliBackend {
   }
 
   writeConfig(config: CliBackendConfig): void {
+    // If skipPermissions is true, write a simplified settings file (no hooks, all tools allowed)
+    if (config.skipPermissions) {
+      writeFileSync(
+        join(this.instanceDir, "claude-settings.json"),
+        JSON.stringify({
+          permissions: {
+            allow: ["*"],
+            deny: [],
+            defaultMode: "allowAll",
+          },
+        }),
+      );
+      return;
+    }
+
     // 1. Write .mcp.json
     const mcpConfigPath = join(config.workingDirectory, ".mcp.json");
     let mcpConfig: { mcpServers?: Record<string, unknown> } = {};

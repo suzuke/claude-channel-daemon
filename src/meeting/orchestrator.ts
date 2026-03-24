@@ -1,0 +1,250 @@
+import type {
+  MeetingConfig, ParticipantConfig, ActiveParticipant,
+  FleetManagerMeetingAPI, MeetingChannelOutput,
+  RoundEntry, MeetingState,
+} from "./types.js";
+import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, roleLabel } from "./prompt-builder.js";
+import type { InboundMessage } from "../channel/types.js";
+
+const ROLE_EMOJI: Record<string, string> = { pro: "🟢", con: "🔴", arbiter: "⚖️" };
+const REPLY_TIMEOUT_MS = 120_000;
+const REPLY_BUFFER_CAP = 32 * 1024;
+
+export class MeetingOrchestrator {
+  private participants: ActiveParticipant[] = [];
+  private roundHistory: RoundEntry[] = [];
+  private currentRound = 0;
+  private state: MeetingState = "booting";
+  private userContext: string | undefined;
+  private abortController = new AbortController();
+  private resolveUserInput: (() => void) | null = null;
+  private directAddress: { label: string; prompt: string } | null = null;
+
+  constructor(
+    private config: MeetingConfig,
+    private fm: FleetManagerMeetingAPI,
+    private output: MeetingChannelOutput,
+  ) {}
+
+  async start(participantConfigs: ParticipantConfig[]): Promise<void> {
+    this.state = "booting";
+
+    // Spawn instances in parallel — use allSettled to handle partial failures
+    const spawnResults = await Promise.allSettled(
+      participantConfigs.map(async (p) => {
+        const instanceName = await this.fm.spawnEphemeralInstance(
+          {
+            systemPrompt: buildSystemPrompt(p.role, this.config.topic),
+            workingDirectory: this.config.mode === "collab" ? this.config.repo ?? "/tmp" : "/tmp",
+            lightweight: this.config.mode === "debate",
+            skipPermissions: this.config.mode === "debate",
+          },
+          this.abortController.signal,
+        );
+        return { ...p, instanceName };
+      }),
+    );
+
+    for (const result of spawnResults) {
+      if (result.status === "fulfilled") {
+        this.participants.push(result.value);
+      } else {
+        await this.output.postMessage(`⚠️ Instance 啟動失敗: ${result.reason}`);
+      }
+    }
+
+    if (this.participants.length === 0) {
+      await this.output.postMessage("❌ 所有 instance 啟動失敗，會議結束");
+      await this.end();
+      return;
+    }
+
+    this.state = "running";
+
+    const participantList = this.participants
+      .map(p => `${p.label}（${roleLabel(p.role)}）`)
+      .join("、");
+    await this.output.postMessage(
+      `📋 會議：${this.config.topic}\n參與者：${participantList}\n輪次：${this.config.maxRounds} | 指令：/end /more /pause`,
+    );
+
+    try {
+      await this.runDebateLoop();
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      throw err;
+    }
+  }
+
+  private async runDebateLoop(): Promise<void> {
+    for (let round = 1; round <= this.config.maxRounds; round++) {
+      if (this.state === "ended") return;
+      this.currentRound = round;
+
+      await this.output.postMessage(`\n━━ Round ${round} ━━`);
+
+      const prevRound = this.roundHistory.filter(e => e.round === round - 1);
+      const speakers = this.getSpeakingOrder();
+
+      for (const participant of speakers) {
+        if (this.state === "ended") return;
+
+        // Check for pause
+        while (this.state === "paused") {
+          await new Promise<void>(resolve => { this.resolveUserInput = resolve; });
+        }
+        if (this.state === "ended") return;
+
+        // Check for direct address override
+        let prompt: string;
+        if (this.directAddress && this.directAddress.label === participant.label) {
+          prompt = this.directAddress.prompt;
+          this.directAddress = null;
+        } else if (this.directAddress) {
+          // Skip this participant if someone else was directly addressed
+          continue;
+        } else {
+          prompt = buildRoundPrompt(this.config.topic, round, prevRound, this.userContext);
+          this.userContext = undefined;
+        }
+
+        try {
+          const reply = await this.fm.sendAndWaitReply(
+            participant.instanceName, prompt, REPLY_TIMEOUT_MS,
+          );
+
+          const cappedReply = reply.length > REPLY_BUFFER_CAP
+            ? reply.slice(0, REPLY_BUFFER_CAP) + "\n[...truncated]"
+            : reply;
+
+          this.roundHistory.push({
+            round, speaker: participant.label, role: participant.role, content: cappedReply,
+          });
+
+          const emoji = ROLE_EMOJI[participant.role] ?? "💬";
+          await this.output.postMessage(
+            `${emoji} ${participant.label}（${roleLabel(participant.role)}）：\n${cappedReply}`,
+          );
+        } catch (err) {
+          if ((err as Error).name === "AbortError") throw err;
+          await this.output.postMessage(`⚠️ ${participant.label} 回覆逾時，跳過本輪`);
+        }
+      }
+    }
+
+    await this.generateSummary();
+    await this.cleanup();
+  }
+
+  private getSpeakingOrder(): ActiveParticipant[] {
+    const order: ActiveParticipant[] = [];
+    order.push(...this.participants.filter(p => p.role === "pro"));
+    order.push(...this.participants.filter(p => p.role === "con"));
+    order.push(...this.participants.filter(p => p.role === "arbiter"));
+    order.push(...this.participants.filter(p => !["pro", "con", "arbiter"].includes(p.role)));
+    return order;
+  }
+
+  private async generateSummary(): Promise<void> {
+    if (this.state === "ended") return;
+    this.state = "summarizing";
+    await this.output.postMessage("\n━━ 會議摘要 ━━");
+
+    const summaryGenerator =
+      this.participants.find(p => p.role === "arbiter") ??
+      this.participants[this.participants.length - 1];
+
+    if (!summaryGenerator) return;
+
+    try {
+      const summary = await this.fm.sendAndWaitReply(
+        summaryGenerator.instanceName,
+        buildSummaryPrompt(this.config.topic, this.roundHistory),
+        REPLY_TIMEOUT_MS,
+      );
+      await this.output.postMessage(summary);
+    } catch {
+      await this.output.postMessage("⚠️ 摘要產生失敗");
+    }
+  }
+
+  handleUserMessage(msg: InboundMessage): void {
+    const text = msg.text.trim();
+
+    if (text === "/end") {
+      this.state = "ended";
+      this.abortController.abort();
+      this.generateSummary().then(() => this.cleanup()).catch(() => this.cleanup());
+      return;
+    }
+
+    if (text === "/pause") { this.state = "paused"; return; }
+
+    if (text === "/resume") {
+      this.state = "running";
+      this.resolveUserInput?.();
+      this.resolveUserInput = null;
+      return;
+    }
+
+    const moreMatch = text.match(/^\/more(?:\s+(\d+))?$/);
+    if (moreMatch) {
+      this.config.maxRounds += parseInt(moreMatch[1] ?? "1", 10);
+      return;
+    }
+
+    const kickMatch = text.match(/^\/kick\s+(\S+)$/);
+    if (kickMatch) { this.removeParticipant(kickMatch[1]); return; }
+
+    const redirectMatch = text.match(/^\/redirect\s+(\S+)\s+"(.+)"$/);
+    if (redirectMatch) {
+      this.directAddress = { label: redirectMatch[1], prompt: redirectMatch[2] };
+      return;
+    }
+
+    const atMatch = text.match(/^@(\S+)\s+(.+)$/);
+    if (atMatch) {
+      this.directAddress = { label: atMatch[1], prompt: atMatch[2] };
+      return;
+    }
+
+    this.userContext = text;
+  }
+
+  async addParticipant(config: ParticipantConfig): Promise<void> {
+    const instanceName = await this.fm.spawnEphemeralInstance({
+      systemPrompt: buildSystemPrompt(config.role, this.config.topic),
+      workingDirectory: "/tmp",
+      lightweight: this.config.mode === "debate",
+      skipPermissions: this.config.mode === "debate",
+    });
+    this.participants.push({ ...config, instanceName });
+    await this.output.postMessage(`➕ ${config.label}（${roleLabel(config.role)}）加入會議`);
+  }
+
+  async removeParticipant(label: string): Promise<void> {
+    const idx = this.participants.findIndex(p => p.label === label);
+    if (idx === -1) return;
+    const [removed] = this.participants.splice(idx, 1);
+    await this.fm.destroyEphemeralInstance(removed.instanceName);
+    await this.output.postMessage(`➖ ${removed.label}（${roleLabel(removed.role)}）已離開會議`);
+  }
+
+  async end(): Promise<void> {
+    if (this.state !== "ended") {
+      await this.generateSummary();
+    }
+    await this.cleanup();
+  }
+
+  private async cleanup(): Promise<void> {
+    this.state = "ended";
+    this.abortController.abort();
+    await Promise.allSettled(
+      this.participants.map(p => this.fm.destroyEphemeralInstance(p.instanceName)),
+    );
+    await this.output.postMessage("📋 會議結束");
+  }
+
+  getState(): MeetingState { return this.state; }
+}

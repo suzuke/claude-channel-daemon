@@ -16,6 +16,8 @@ export interface CliBackendConfig {
   mcpServers: Record<string, McpServerEntry>;
   approvalStrategy: ApprovalStrategy;
   containerManager?: ContainerManager;
+  systemPrompt?: string;
+  skipPermissions?: boolean;
 }
 
 export interface CliBackend {

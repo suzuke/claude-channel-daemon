@@ -66,8 +66,8 @@ instances:
 `);
     fm.loadConfig(configPath);
     const table = fm.buildRoutingTable();
-    expect(table.get(42)).toBe("proj-a");
-    expect(table.get(87)).toBe("proj-b");
+    expect(table.get(42)).toEqual({ kind: "instance", name: "proj-a" });
+    expect(table.get(87)).toEqual({ kind: "instance", name: "proj-b" });
     expect(table.size).toBe(2); // proj-c has no topic_id
   });
 

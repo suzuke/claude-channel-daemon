@@ -40,6 +40,7 @@ vi.mock("grammy", () => {
         sendDocument: vi.fn().mockResolvedValue({ message_id: 3 }),
         setMessageReaction: vi.fn().mockResolvedValue(undefined),
         getFile: vi.fn().mockResolvedValue({ file_path: "photos/test.jpg" }),
+        closeForumTopic: vi.fn().mockResolvedValue(undefined),
       };
     }
 
@@ -382,6 +383,29 @@ describe("TelegramAdapter", () => {
     });
 
     expect(callback).toHaveBeenCalledWith("deny");
+  });
+
+  // ── closeForumTopic ───────────────────────────────────────────────────────
+
+  it("closeForumTopic calls bot.api.closeForumTopic with lastChatId and threadId", async () => {
+    const bot = (adapter as unknown as { bot: { api: Record<string, ReturnType<typeof vi.fn>> } }).bot;
+    adapter.setLastChatId("-100123456");
+    await adapter.closeForumTopic(55);
+    expect(bot.api.closeForumTopic).toHaveBeenCalledWith(-100123456, 55);
+  });
+
+  it("closeForumTopic is a no-op when lastChatId is not set", async () => {
+    const bot = (adapter as unknown as { bot: { api: Record<string, ReturnType<typeof vi.fn>> } }).bot;
+    // lastChatId defaults to null, so this should return without calling the API
+    await expect(adapter.closeForumTopic(99)).resolves.toBeUndefined();
+    expect(bot.api.closeForumTopic).not.toHaveBeenCalled();
+  });
+
+  it("closeForumTopic silently ignores API errors", async () => {
+    const bot = (adapter as unknown as { bot: { api: Record<string, ReturnType<typeof vi.fn>> } }).bot;
+    bot.api.closeForumTopic.mockRejectedValueOnce(new Error("TOPIC_CLOSED"));
+    adapter.setLastChatId("-100123456");
+    await expect(adapter.closeForumTopic(55)).resolves.toBeUndefined();
   });
 
   it("sendApproval does not invoke callback after signal abort", async () => {
