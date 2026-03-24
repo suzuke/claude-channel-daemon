@@ -10,6 +10,7 @@ export interface HookBasedApprovalOptions {
   ipcServer?: IpcServer | null;
   topicMode?: boolean;
   instanceName?: string;
+  installRecordPath?: string;
 }
 
 export class HookBasedApproval implements ApprovalStrategy {
@@ -22,6 +23,7 @@ export class HookBasedApproval implements ApprovalStrategy {
       ipcServer: opts.ipcServer,
       topicMode: opts.topicMode,
       instanceName: opts.instanceName,
+      installRecordPath: opts.installRecordPath,
     });
   }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { loadConfig } from "./config.js";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { SchedulerDb } from "./scheduler/db.js";
 import { Cron } from "croner";
 import {
@@ -12,9 +12,13 @@ import {
   mkdirSync,
 } from "node:fs";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const DATA_DIR = join(homedir(), ".claude-channel-daemon");
 const DEFAULT_CONFIG_PATH = join(DATA_DIR, "config.yaml");
@@ -623,6 +627,103 @@ schedule
   .argument("<id>", "Schedule ID")
   .action((id) => {
     console.log("Manual trigger requires fleet manager running. Use the Telegram interface instead.");
+  });
+
+// === Sandbox commands ===
+const sandbox = program
+  .command("sandbox")
+  .description("Manage Docker sandbox");
+
+sandbox
+  .command("bake")
+  .description("Bake recorded package installs into the Dockerfile and rebuild")
+  .option("--dry-run", "Show what would be added without modifying anything")
+  .option("--dockerfile <path>", "Path to Dockerfile.sandbox")
+  .action(async (opts) => {
+    const { readPendingPackages, clearPendingPackages } = await import("./install-recorder.js");
+    const { generateDockerfilePatch, ContainerManager } = await import("./container-manager.js");
+    const { readdirSync, existsSync: fsExists, writeFileSync: fsWriteFileSync } = await import("node:fs");
+
+    // Scan all instances for installed-packages.txt and merge
+    const instancesDir = join(DATA_DIR, "instances");
+    const merged = { apt: [] as string[], pip: [] as string[], cargo: [] as string[], npm: [] as string[], count: 0, oldestTs: null as Date | null };
+    const seen = new Set<string>();
+
+    if (fsExists(instancesDir)) {
+      for (const name of readdirSync(instancesDir)) {
+        const recordPath = join(instancesDir, name, "installed-packages.txt");
+        if (!fsExists(recordPath)) continue;
+        const pending = readPendingPackages(recordPath);
+        for (const type of ["apt", "pip", "cargo", "npm"] as const) {
+          for (const pkg of pending[type]) {
+            const key = `${type}|${pkg}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged[type].push(pkg);
+          }
+        }
+        if (pending.oldestTs && (!merged.oldestTs || pending.oldestTs < merged.oldestTs)) {
+          merged.oldestTs = pending.oldestTs;
+        }
+      }
+    }
+    merged.count = merged.apt.length + merged.pip.length + merged.cargo.length + merged.npm.length;
+
+    if (merged.count === 0) {
+      console.log("No pending packages to bake.");
+      return;
+    }
+
+    const patch = generateDockerfilePatch(merged);
+    console.log(`Found ${merged.count} packages to bake:`);
+    if (merged.apt.length) console.log(`  apt: ${merged.apt.join(", ")}`);
+    if (merged.pip.length) console.log(`  pip: ${merged.pip.join(", ")}`);
+    if (merged.cargo.length) console.log(`  cargo: ${merged.cargo.join(", ")}`);
+    if (merged.npm.length) console.log(`  npm: ${merged.npm.join(", ")}`);
+    console.log("\nDockerfile patch:");
+    console.log(patch);
+
+    if (opts.dryRun) {
+      console.log("Dry run — no changes made.");
+      return;
+    }
+
+    // Resolve dockerfile path
+    const dockerfilePath = opts.dockerfile ?? join(__dirname, "..", "Dockerfile.sandbox");
+    const cm = new ContainerManager();
+    try {
+      // Create a temporary merged record file
+      const tmpPath = join(DATA_DIR, "merged-packages.txt");
+      const lines: string[] = [];
+      for (const type of ["apt", "pip", "cargo", "npm"] as const) {
+        for (const pkg of merged[type]) {
+          lines.push(`${type}|${pkg}|${new Date().toISOString()}`);
+        }
+      }
+      fsWriteFileSync(tmpPath, lines.join("\n") + "\n");
+
+      await cm.autoBake(tmpPath, dockerfilePath);
+
+      // Clear all instance record files
+      for (const name of readdirSync(instancesDir)) {
+        const recordPath = join(instancesDir, name, "installed-packages.txt");
+        if (fsExists(recordPath)) clearPendingPackages(recordPath);
+      }
+      console.log("Sandbox image rebuilt successfully.");
+    } catch (err) {
+      console.error("Bake failed:", err);
+      process.exit(1);
+    }
+  });
+
+sandbox
+  .command("reset")
+  .description("Recreate sandbox container")
+  .action(async () => {
+    const { ContainerManager } = await import("./container-manager.js");
+    const cm = new ContainerManager();
+    await cm.destroy();
+    console.log("Sandbox container removed. Will recreate on next daemon start.");
   });
 
 program.parse();
