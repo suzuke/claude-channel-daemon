@@ -104,12 +104,15 @@ Bash commands run inside a shared Docker container. Claude Code itself stays on 
 # fleet.yaml
 sandbox:
   enabled: true
+  network: bridge    # "none" (default) = no network; "bridge" = full network (needed for apt/pip install)
   extra_mounts:
     - ~/.gitconfig:~/.gitconfig:ro
     - ~/.ssh:~/.ssh:ro
 ```
 
 **How it works:** The daemon sets `CLAUDE_CODE_SHELL` to a wrapper script (`sandbox-bash`) that forwards commands via `docker exec` to the shared container. All project directories are bind-mounted at their original absolute paths — zero path translation needed.
+
+**Auto-bake:** When Claude installs packages inside the container (pip, apt, cargo, npm), the daemon records these commands. During context rotation, if enough packages have accumulated, it automatically appends them to `Dockerfile.sandbox` and rebuilds the image — so packages persist across container rebuilds. Run `ccd sandbox bake --dry-run` to preview, or `ccd sandbox bake` to trigger manually.
 
 **What's isolated:**
 | Visible inside sandbox | NOT visible |

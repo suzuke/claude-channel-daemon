@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
+import { join, dirname, basename, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
@@ -1248,7 +1248,10 @@ export class FleetManager {
 
     const repoMatch = topic.match(/--repo\s+(\S+)/);
     if (repoMatch) {
-      repo = repoMatch[1];
+      // Expand ~ to homedir since Node.js doesn't do shell expansion
+      repo = repoMatch[1].startsWith("~")
+        ? join(homedir(), repoMatch[1].slice(1))
+        : resolve(repoMatch[1]);
       topic = topic.replace(repoMatch[0], "").trim();
     }
 
@@ -1426,10 +1429,10 @@ export class FleetManager {
       if (!existsSync(join(workDir, ".git"))) {
         throw new Error(`Not a git repository: ${workDir}`);
       }
-      const worktreePath = join("/tmp", name);
+      const worktreePath = join("/tmp", `ccd-collab-${name}`);
       const branchName = `meet/${name}`;
-      const { execSync } = await import("child_process");
-      execSync(`git worktree add "${worktreePath}" -b "${branchName}"`, { cwd: workDir, stdio: "pipe" });
+      const { execFileSync } = await import("child_process");
+      execFileSync("git", ["worktree", "add", worktreePath, "-b", branchName], { cwd: workDir, stdio: "pipe" });
       workDir = worktreePath;
       this.logger.info({ name, worktreePath, branchName }, "Created git worktree for collab instance");
     }
@@ -1474,15 +1477,17 @@ export class FleetManager {
     await this.stopInstance(name);
 
     // Clean up git worktree if it exists
-    const worktreePath = join("/tmp", name);
+    const worktreePath = join("/tmp", `ccd-collab-${name}`);
     if (existsSync(worktreePath)) {
       try {
-        const { execSync } = await import("child_process");
-        execSync(`git worktree remove --force "${worktreePath}"`, { stdio: "pipe" });
-        // Also try to delete the branch
+        const { execFileSync } = await import("child_process");
+        // Resolve main repo from worktree before removing it
+        const mainRepo = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath, stdio: "pipe" }).toString().trim();
+        const mainRepoDir = dirname(mainRepo); // .git -> parent dir
+        execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: mainRepoDir, stdio: "pipe" });
         try {
-          execSync(`git branch -D "meet/${name}"`, { stdio: "pipe" });
-        } catch { /* branch may not exist or already deleted */ }
+          execFileSync("git", ["branch", "-D", `meet/${name}`], { cwd: mainRepoDir, stdio: "pipe" });
+        } catch { /* branch may not exist */ }
         this.logger.info({ name }, "Cleaned up git worktree");
       } catch (err) {
         this.logger.warn({ name, err }, "Failed to clean up worktree");
