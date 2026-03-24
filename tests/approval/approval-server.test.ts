@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ApprovalServer } from "../../src/approval/approval-server.js";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("ApprovalServer", () => {
   let server: ApprovalServer;
@@ -65,5 +68,46 @@ describe("ApprovalServer", () => {
       body: JSON.stringify({ tool_name: "Bash", tool_input: { command: "sudo npm publish" } }),
     });
     expect(mockBus.requestApproval).toHaveBeenCalled();
+  });
+
+  it("records install commands when approved", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "approval-test-"));
+    const recordPath = join(tmpDir, "installs.log");
+    const mockBus = { requestApproval: vi.fn() };
+    server = new ApprovalServer({ messageBus: mockBus as any, port: 0, installRecordPath: recordPath });
+    const port = await server.start();
+    const token = server.getToken();
+
+    // Send an install command (non-dangerous, so auto-approved)
+    const res = await fetch(`http://127.0.0.1:${port}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ tool_name: "Bash", tool_input: { command: "pip install requests flask" } }),
+    });
+    const body = await res.json();
+    expect(body.hookSpecificOutput.permissionDecision).toBe("allow");
+
+    // Verify the install was recorded
+    const content = readFileSync(recordPath, "utf-8");
+    expect(content).toContain("pip|requests|");
+    expect(content).toContain("pip|flask|");
+
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("does not record install commands when no installRecordPath", async () => {
+    const mockBus = { requestApproval: vi.fn() };
+    server = new ApprovalServer({ messageBus: mockBus as any, port: 0 });
+    const port = await server.start();
+    const token = server.getToken();
+
+    // Should not throw even without installRecordPath
+    const res = await fetch(`http://127.0.0.1:${port}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ tool_name: "Bash", tool_input: { command: "pip install requests" } }),
+    });
+    const body = await res.json();
+    expect(body.hookSpecificOutput.permissionDecision).toBe("allow");
   });
 });

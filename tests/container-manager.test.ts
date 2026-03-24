@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ContainerManager } from "../src/container-manager.js";
+import { ContainerManager, generateDockerfilePatch } from "../src/container-manager.js";
+import type { PendingPackages } from "../src/install-recorder.js";
 
 vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
@@ -95,5 +96,71 @@ describe("ContainerManager", () => {
       expect(args).toContain("-f");
       expect(args).toContain("ccd-shared");
     });
+  });
+
+  describe("shouldAutoBake", () => {
+    it("returns false with no packages", () => {
+      const tmp = `/tmp/test-bake-empty-${Date.now()}.txt`;
+      expect(mgr.shouldAutoBake(tmp)).toBe(false);
+    });
+
+    it("returns true with >= 3 packages", async () => {
+      const { writeFileSync } = await import("node:fs");
+      const tmp = `/tmp/test-bake-count-${Date.now()}.txt`;
+      const now = new Date().toISOString();
+      writeFileSync(tmp, `apt|curl|${now}\napt|wget|${now}\napt|jq|${now}\n`);
+      expect(mgr.shouldAutoBake(tmp)).toBe(true);
+    });
+
+    it("returns true with old records (>= 24h)", async () => {
+      const { writeFileSync } = await import("node:fs");
+      const tmp = `/tmp/test-bake-old-${Date.now()}.txt`;
+      const oldDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      writeFileSync(tmp, `apt|curl|${oldDate}\n`);
+      expect(mgr.shouldAutoBake(tmp)).toBe(true);
+    });
+
+    it("returns false with few recent packages", async () => {
+      const { writeFileSync } = await import("node:fs");
+      const tmp = `/tmp/test-bake-recent-${Date.now()}.txt`;
+      const now = new Date().toISOString();
+      writeFileSync(tmp, `apt|curl|${now}\n`);
+      expect(mgr.shouldAutoBake(tmp)).toBe(false);
+    });
+  });
+});
+
+describe("generateDockerfilePatch", () => {
+  it("generates correct output with sudo for apt", () => {
+    const pending: PendingPackages = {
+      apt: ["curl", "wget"],
+      pip: ["requests"],
+      cargo: [],
+      npm: ["typescript"],
+      count: 4,
+      oldestTs: new Date(),
+    };
+    const patch = generateDockerfilePatch(pending);
+    expect(patch).toContain("# Auto-baked from Claude's install history");
+    expect(patch).toContain("RUN sudo apt-get update && sudo apt-get install -y --no-install-recommends curl wget && sudo rm -rf /var/lib/apt/lists/*");
+    expect(patch).toContain("RUN pip3 install --break-system-packages requests");
+    expect(patch).toContain("RUN npm install -g typescript");
+    expect(patch).not.toContain("cargo");
+  });
+
+  it("generates cargo lines when present", () => {
+    const pending: PendingPackages = {
+      apt: [],
+      pip: [],
+      cargo: ["ripgrep", "fd-find"],
+      npm: [],
+      count: 2,
+      oldestTs: new Date(),
+    };
+    const patch = generateDockerfilePatch(pending);
+    expect(patch).toContain("RUN cargo install ripgrep fd-find");
+    expect(patch).not.toContain("apt");
+    expect(patch).not.toContain("pip");
+    expect(patch).not.toContain("npm");
   });
 });

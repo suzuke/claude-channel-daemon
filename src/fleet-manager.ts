@@ -129,6 +129,7 @@ export class FleetManager {
       topicMode,
       instanceName: name,
       ipcServer: null,
+      installRecordPath: this.containerManager ? join(instanceDir, "installed-packages.txt") : undefined,
     });
     const daemon = new Daemon(name, config, instanceDir, topicMode, this.containerManager ?? undefined, backend, approval);
     await daemon.start();

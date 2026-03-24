@@ -306,6 +306,32 @@ export class Daemon {
       this.logger.info("Context rotation — killing and respawning Claude");
       this.saveSessionId();
 
+      // Auto-bake: check if Claude installed new packages in the container
+      if (this.containerManager) {
+        const recordPath = join(this.instanceDir, "installed-packages.txt");
+        if (this.containerManager.shouldAutoBake(recordPath)) {
+          this.logger.info("Auto-baking new packages into sandbox image...");
+          try {
+            if (this.lastChatId) {
+              const meta: Record<string, string> = { chat_id: this.lastChatId };
+              if (this.lastThreadId) meta.thread_id = this.lastThreadId;
+              this.pushChannelMessage("📦 正在將新安裝的套件寫入 Dockerfile 並重建 sandbox image...", meta);
+            }
+            const dockerfilePath = join(__dirname, "..", "Dockerfile.sandbox");
+            const { packages } = await this.containerManager.autoBake(recordPath, dockerfilePath);
+            const summary = [
+              packages.apt.length > 0 ? `apt: ${packages.apt.join(", ")}` : "",
+              packages.pip.length > 0 ? `pip: ${packages.pip.join(", ")}` : "",
+              packages.cargo.length > 0 ? `cargo: ${packages.cargo.join(", ")}` : "",
+              packages.npm.length > 0 ? `npm: ${packages.npm.join(", ")}` : "",
+            ].filter(Boolean).join("; ");
+            this.logger.info({ summary }, "Auto-bake complete");
+          } catch (err) {
+            this.logger.warn({ err }, "Auto-bake failed — continuing rotation");
+          }
+        }
+      }
+
       await this.tmux?.killWindow();
       this.transcriptMonitor?.resetOffset();
       await this.spawnClaudeWindow();
