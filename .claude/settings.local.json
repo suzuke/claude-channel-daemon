@@ -1,11 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Skill(claudeception)"
+      "Skill(claudeception)",
+      "mcp__plugin_telegram_telegram__reply",
+      "mcp__ccd-channel__reply"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "ccd-channel"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

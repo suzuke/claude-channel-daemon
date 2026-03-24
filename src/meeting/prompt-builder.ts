@@ -37,6 +37,19 @@ export function buildRoundPrompt(topic: string, round: number, previousRounds: R
   return parts.join("\n");
 }
 
+export function buildCollabSystemPrompt(label: string, topic: string): string {
+  return `你是協作任務的參與者「${label}」。任務：「${topic}」。你在獨立的 git branch 上工作。先討論分工，確認後開始開發。完成後用 reply 工具回報進度。`;
+}
+
+export function buildCollabSummaryPrompt(topic: string, allRounds: RoundEntry[]): string {
+  const parts: string[] = [`請為以下協作任務產出一份工作摘要。`, `任務：${topic}`, ""];
+  for (const entry of allRounds) {
+    parts.push(`[${entry.speaker}] ${entry.content}`);
+  }
+  parts.push("\n請總結：1) 各參與者完成了什麼 2) 未完成的工作 3) 需要注意的衝突或問題。用 reply 工具回覆摘要。");
+  return parts.join("\n");
+}
+
 export function buildSummaryPrompt(topic: string, allRounds: RoundEntry[]): string {
   const parts: string[] = [`請為以下辯論產出一份會議摘要。`, `議題：${topic}`, ""];
   let currentRound = 0;

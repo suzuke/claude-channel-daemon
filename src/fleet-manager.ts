@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
+import { join, dirname, basename, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
@@ -1248,7 +1248,10 @@ export class FleetManager {
 
     const repoMatch = topic.match(/--repo\s+(\S+)/);
     if (repoMatch) {
-      repo = repoMatch[1];
+      // Expand ~ to homedir since Node.js doesn't do shell expansion
+      repo = repoMatch[1].startsWith("~")
+        ? join(homedir(), repoMatch[1].slice(1))
+        : resolve(repoMatch[1]);
       topic = topic.replace(repoMatch[0], "").trim();
     }
 
@@ -1284,6 +1287,16 @@ export class FleetManager {
     const parsed = this.parseMeetsArgs(msg.text);
     if (!parsed) {
       await this.adapter.sendText(msg.chatId, '用法：/meets "議題"\n例如：/meets -n 3 "要不要拆 monorepo？"');
+      return;
+    }
+
+    if (parsed.mode === "collab" && !parsed.repo) {
+      await this.adapter.sendText(msg.chatId, "⚠️ 協作模式需要指定 repo：/meets --collab --repo ~/app \"task\"");
+      return;
+    }
+
+    if (parsed.repo && !existsSync(join(parsed.repo, ".git"))) {
+      await this.adapter.sendText(msg.chatId, `⚠️ 不是 git repository: ${parsed.repo}`);
       return;
     }
 
@@ -1410,8 +1423,22 @@ export class FleetManager {
 
     if (signal?.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
 
+    // Create git worktree for collab mode when working in a real repo
+    let workDir = config.workingDirectory;
+    if (workDir !== "/tmp") {
+      if (!existsSync(join(workDir, ".git"))) {
+        throw new Error(`Not a git repository: ${workDir}`);
+      }
+      const worktreePath = join("/tmp", `ccd-collab-${name}`);
+      const branchName = `meet/${name}`;
+      const { execFileSync } = await import("child_process");
+      execFileSync("git", ["worktree", "add", worktreePath, "-b", branchName], { cwd: workDir, stdio: "pipe" });
+      workDir = worktreePath;
+      this.logger.info({ name, worktreePath, branchName }, "Created git worktree for collab instance");
+    }
+
     const instanceConfig: InstanceConfig = {
-      working_directory: config.workingDirectory,
+      working_directory: workDir,
       lightweight: config.lightweight,
       restart_policy: { max_retries: 0, backoff: "linear", reset_after: 0 },
       context_guardian: { threshold_percentage: 100, max_idle_wait_ms: 0, completion_timeout_ms: 0, grace_period_ms: 0, max_age_hours: 999 },
@@ -1448,6 +1475,24 @@ export class FleetManager {
       this.pendingMeetingReplies.delete(name);
     }
     await this.stopInstance(name);
+
+    // Clean up git worktree if it exists
+    const worktreePath = join("/tmp", `ccd-collab-${name}`);
+    if (existsSync(worktreePath)) {
+      try {
+        const { execFileSync } = await import("child_process");
+        // Resolve main repo from worktree before removing it
+        const mainRepo = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath, stdio: "pipe" }).toString().trim();
+        const mainRepoDir = dirname(mainRepo); // .git -> parent dir
+        execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: mainRepoDir, stdio: "pipe" });
+        try {
+          execFileSync("git", ["branch", "-D", `meet/${name}`], { cwd: mainRepoDir, stdio: "pipe" });
+        } catch { /* branch may not exist */ }
+        this.logger.info({ name }, "Cleaned up git worktree");
+      } catch (err) {
+        this.logger.warn({ name, err }, "Failed to clean up worktree");
+      }
+    }
   }
 
   /** Create a Telegram forum topic for a meeting */

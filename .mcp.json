@@ -3,7 +3,7 @@
     "ccd-channel": {
       "command": "node",
       "args": [
-        "/Users/suzuke/Documents/Hack/claude-channel-daemon/.worktrees/multi-channel/dist/channel/mcp-server.js"
+        "/Users/suzuke/Documents/Hack/claude-channel-daemon/dist/channel/mcp-server.js"
       ],
       "env": {
         "CCD_SOCKET_PATH": "/Users/suzuke/.claude-channel-daemon/instances/claude-channel-daemon/channel.sock"
