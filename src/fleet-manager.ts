@@ -303,12 +303,13 @@ export class FleetManager {
             commands: [
               { command: "open", description: "Open an existing project" },
               { command: "new", description: "Create a new project" },
+              { command: "meets", description: "Start a multi-instance meeting" },
             ],
             scope: { type: "chat", chat_id: groupId },
           }),
         },
       );
-      this.logger.info("Registered bot commands: /open, /new");
+      this.logger.info("Registered bot commands: /open, /new, /meets");
     } catch (err) {
       this.logger.warn({ err }, "Failed to register bot commands (non-fatal)");
     }
@@ -1421,13 +1422,15 @@ export class FleetManager {
 
     await this.startInstance(name, instanceConfig, port, true);
 
-    // Wait for IPC connection
+    // Wait for socket file, then connect IPC (same pattern as bindAndStart)
     const deadline = Date.now() + 30_000;
-    while (!this.instanceIpcClients.has(name)) {
+    const sockPath = join(this.getInstanceDir(name), "channel.sock");
+    while (!existsSync(sockPath)) {
       if (Date.now() > deadline) throw new Error(`IPC timeout for ${name}`);
       if (signal?.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
       await new Promise(r => setTimeout(r, 500));
     }
+    await this.connectIpcToInstance(name);
 
     return name;
   }
