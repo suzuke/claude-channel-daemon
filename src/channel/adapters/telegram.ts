@@ -483,6 +483,16 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   // ── Pairing ───────────────────────────────────────────────────────────────
 
+  async closeForumTopic(threadId: number): Promise<void> {
+    const chatId = this.getLastChatId();
+    if (!chatId) return;
+    try {
+      await this.bot.api.closeForumTopic(Number(chatId), threadId);
+    } catch {
+      // Best-effort — topic may already be closed
+    }
+  }
+
   async handlePairing(chatId: string, userId: string): Promise<string> {
     const code = this.accessManager.generateCode(Number(userId));
     return code;
