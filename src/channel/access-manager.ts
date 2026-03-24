@@ -19,6 +19,7 @@ export class AccessManager {
   private config: AccessConfig;
   private statePath: string;
   private state: AccessState;
+  private failedAttempts: Map<string, { count: number; lastAttempt: number }> = new Map();
 
   constructor(config: AccessConfig, statePath: string) {
     this.config = config;
@@ -108,11 +109,46 @@ export class AccessManager {
     return code;
   }
 
-  confirmCode(code: string): boolean {
+  confirmCode(code: string, callerUserId?: string): boolean {
     this.pruneExpired();
+
+    // Rate limit: check per-userId failures (10 failures in 60 seconds)
+    if (callerUserId) {
+      const record = this.failedAttempts.get(callerUserId);
+      if (record) {
+        const elapsed = Date.now() - record.lastAttempt;
+        if (elapsed > 60_000) {
+          // Reset window
+          this.failedAttempts.delete(callerUserId);
+        } else if (record.count >= 10) {
+          return false;
+        }
+      }
+    }
 
     const entry = this.state.pending_codes.find((p) => p.code === code);
     if (!entry) {
+      // Increment attempts on all pending codes that were checked
+      for (const pending of this.state.pending_codes) {
+        pending.attempts++;
+      }
+      // Auto-invalidate codes that have been tried too many times
+      this.state.pending_codes = this.state.pending_codes.filter(
+        (p) => p.attempts < 5,
+      );
+
+      // Track per-userId failures
+      if (callerUserId) {
+        const record = this.failedAttempts.get(callerUserId);
+        if (record) {
+          record.count++;
+          record.lastAttempt = Date.now();
+        } else {
+          this.failedAttempts.set(callerUserId, { count: 1, lastAttempt: Date.now() });
+        }
+      }
+
+      this.persist();
       return false;
     }
 

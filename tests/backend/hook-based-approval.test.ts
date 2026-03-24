@@ -24,4 +24,12 @@ describe("HookBasedApproval", () => {
     expect(hooks[0].hooks[0].command).toContain("permissionDecision");
     expect(hooks[0].hooks[0].command).toContain("deny");
   });
+
+  it("setup() hook command includes Authorization header with token", () => {
+    const bus = new MessageBus();
+    const approval = new HookBasedApproval({ messageBus: bus, port: 18500 });
+    const result = approval.setup(18500);
+    const hooks = result.hooks!.PreToolUse as Array<{ matcher: string; hooks: Array<{ command: string }> }>;
+    expect(hooks[0].hooks[0].command).toContain("Authorization: Bearer ");
+  });
 });

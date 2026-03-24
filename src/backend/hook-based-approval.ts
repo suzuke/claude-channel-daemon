@@ -26,6 +26,7 @@ export class HookBasedApproval implements ApprovalStrategy {
   }
 
   setup(port: number): { hooks: Record<string, unknown> } {
+    const token = this.server.getToken();
     return {
       hooks: {
         PreToolUse: [
@@ -34,7 +35,7 @@ export class HookBasedApproval implements ApprovalStrategy {
             hooks: [
               {
                 type: "command",
-                command: `curl -s -X POST http://127.0.0.1:${port}/approve -H 'Content-Type: application/json' -d @- --max-time 130 --connect-timeout 1 || echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"approval server unreachable"}}'`,
+                command: `curl -s -X POST http://127.0.0.1:${port}/approve -H 'Content-Type: application/json' -H 'Authorization: Bearer ${token}' -d @- --max-time 130 --connect-timeout 1 || echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"approval server unreachable"}}'`,
                 timeout: 135000,
               },
             ],

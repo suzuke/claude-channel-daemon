@@ -166,7 +166,7 @@ export class TmuxPromptDetector {
     private outputLogPath: string,
     private tmux: TmuxManager,
     private approvalFn: (prompt: string) => Promise<ApprovalResponse>,
-    private logger: { info(...args: any[]): void; warn(...args: any[]): void },
+    private logger: { info(...args: any[]): void; warn(...args: any[]): void; error(...args: any[]): void },
     private instanceDir?: string,
   ) {}
 
@@ -179,6 +179,8 @@ export class TmuxPromptDetector {
     } catch { /* file may not exist yet */ }
 
     this.pollTimer = setInterval(async () => {
+      // Read new content from log file
+      let newContent: string;
       try {
         const stat = statSync(this.outputLogPath);
         const fileSize = stat.size;
@@ -191,9 +193,15 @@ export class TmuxPromptDetector {
         closeSync(fd);
         if (bytesRead <= 0) return;
 
-        const newContent = buf.subarray(0, bytesRead).toString("utf8");
+        newContent = buf.subarray(0, bytesRead).toString("utf8");
         this.byteOffset += bytesRead;
+      } catch {
+        // File may not exist yet (ENOENT); silently ignore
+        return;
+      }
 
+      // Detect and handle prompts
+      try {
         if (!detectInteractivePrompt(newContent) || this.pendingApproval) return;
 
         const promptType = classifyPrompt(newContent);
@@ -260,15 +268,16 @@ export class TmuxPromptDetector {
               } else {
                 await selectOption(this.tmux, 1);
               }
-            } catch {
+            } catch (err) {
+              this.logger.error({ err }, "Unknown prompt approval error");
               await pressEscape(this.tmux);
             } finally {
               this.pendingApproval = false;
             }
             break;
         }
-      } catch {
-        // File may not exist yet; ignore
+      } catch (err) {
+        this.logger.error({ err }, "Prompt detection error");
       }
     }, intervalMs);
   }

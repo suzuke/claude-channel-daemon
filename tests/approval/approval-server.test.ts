@@ -16,9 +16,10 @@ describe("ApprovalServer", () => {
     const mockBus = { requestApproval: vi.fn() };
     server = new ApprovalServer({ messageBus: mockBus as any, port: 0 });
     const port = await server.start();
+    const token = server.getToken();
     const res = await fetch(`http://127.0.0.1:${port}/approve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ tool_name: "Read", tool_input: { file_path: "/tmp/foo" } }),
     });
     const body = await res.json();
@@ -26,13 +27,26 @@ describe("ApprovalServer", () => {
     expect(mockBus.requestApproval).not.toHaveBeenCalled();
   });
 
-  it("forwards dangerous bash commands to messageBus for approval", async () => {
-    const mockBus = { requestApproval: vi.fn().mockResolvedValue({ decision: "deny", respondedBy: { channelType: "mock", userId: "1" } }) };
+  it("rejects requests without valid token", async () => {
+    const mockBus = { requestApproval: vi.fn() };
     server = new ApprovalServer({ messageBus: mockBus as any, port: 0 });
     const port = await server.start();
     const res = await fetch(`http://127.0.0.1:${port}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool_name: "Read", tool_input: { file_path: "/tmp/foo" } }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("forwards dangerous bash commands to messageBus for approval", async () => {
+    const mockBus = { requestApproval: vi.fn().mockResolvedValue({ decision: "deny", respondedBy: { channelType: "mock", userId: "1" } }) };
+    server = new ApprovalServer({ messageBus: mockBus as any, port: 0 });
+    const port = await server.start();
+    const token = server.getToken();
+    const res = await fetch(`http://127.0.0.1:${port}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ tool_name: "Bash", tool_input: { command: "rm -rf /" } }),
     });
     const body = await res.json();
@@ -44,9 +58,10 @@ describe("ApprovalServer", () => {
     const mockBus = { requestApproval: vi.fn().mockResolvedValue({ decision: "approve", respondedBy: { channelType: "tg", userId: "1" } }) };
     server = new ApprovalServer({ messageBus: mockBus as any, port: 0 });
     const port = await server.start();
+    const token = server.getToken();
     const res = await fetch(`http://127.0.0.1:${port}/approve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ tool_name: "Bash", tool_input: { command: "sudo npm publish" } }),
     });
     expect(mockBus.requestApproval).toHaveBeenCalled();

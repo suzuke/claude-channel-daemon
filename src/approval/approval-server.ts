@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { randomBytes } from "node:crypto";
 import type { MessageBus } from "../channel/message-bus.js";
 import type { IpcServer } from "../channel/ipc-bridge.js";
 
@@ -18,6 +19,9 @@ const DANGER_PATTERNS = [
   /\bkill\b/,
   /\bpkill\b/,
   /(?<!\d)>\s*\/(?:etc|usr|var|bin|sbin|lib|opt|root|System|Library)\b/,  // redirect to system paths (not /tmp, not 2>/dev/null)
+  /(?:\/usr)?\/s?bin\/(rm|chmod|chown|mkfs|dd)\b/,  // full path variants
+  /\b(?:command|env|builtin)\s+(rm|chmod|chown|sudo)\b/,  // command wrappers
+  /\$\(.*\b(rm|dd|mkfs)\b/,  // command substitution with dangerous commands
 ];
 
 function isSafeTool(toolName: string): boolean {
@@ -48,6 +52,7 @@ export class ApprovalServer {
   private ipcServer: IpcServer | null;
   private topicMode: boolean;
   private instanceName: string;
+  private token: string;
 
   constructor(opts: ApprovalOptions) {
     this.messageBus = opts.messageBus;
@@ -55,11 +60,22 @@ export class ApprovalServer {
     this.ipcServer = opts.ipcServer ?? null;
     this.topicMode = opts.topicMode ?? false;
     this.instanceName = opts.instanceName ?? "";
+    this.token = randomBytes(32).toString("hex");
+  }
+
+  getToken(): string {
+    return this.token;
   }
 
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
       this.server = createServer(async (req, res) => {
+        if (req.headers.authorization !== `Bearer ${this.token}`) {
+          res.writeHead(401);
+          res.end(JSON.stringify({ error: "Unauthorized" }));
+          return;
+        }
+
         if (req.method !== "POST" || req.url !== "/approve") {
           res.writeHead(404);
           res.end(JSON.stringify({ error: "Not found" }));
