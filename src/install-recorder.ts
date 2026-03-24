@@ -60,6 +60,11 @@ const INSTALL_PATTERNS: Array<{
   },
 ];
 
+/** Strip shell syntax (pipes, redirects, semicolons) from end of command */
+function stripShellSuffix(cmd: string): string {
+  return cmd.replace(/\s*(?:\||\d*>[>&]?\s*\S+|;).*$/, "");
+}
+
 /**
  * Parse a shell command and detect if it's a package install command.
  * For multiline / chained commands (&&), each segment is checked.
@@ -69,8 +74,8 @@ export function parseInstallCommand(command: string): InstallCommand | null {
   // Split on && to handle chained commands like "apt-get update && apt-get install -y ffmpeg"
   const segments = command.split(/\s*&&\s*/);
   for (const segment of segments) {
-    // Strip leading sudo
-    const stripped = segment.replace(/^\s*sudo\s+/, "");
+    // Strip leading sudo and trailing shell syntax (pipes, redirects)
+    const stripped = stripShellSuffix(segment.replace(/^\s*sudo\s+/, ""));
     for (const { type, pattern, extract } of INSTALL_PATTERNS) {
       const match = stripped.match(pattern);
       if (match) {
