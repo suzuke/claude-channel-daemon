@@ -8,6 +8,7 @@ import yaml from "js-yaml";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig } from "./types.js";
+import type { RouteTarget } from "./meeting/types.js";
 import { loadFleetConfig, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { TmuxManager } from "./tmux-manager.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
@@ -36,7 +37,8 @@ export class FleetManager {
   private daemons: Map<string, InstanceType<typeof import("./daemon.js").Daemon>> = new Map();
   private fleetConfig: FleetConfig | null = null;
   private adapter: ChannelAdapter | null = null;
-  private routingTable: Map<number, string> = new Map();
+  private routingTable: Map<number, RouteTarget> = new Map();
+  private pendingMeetingReplies: Map<string, { resolve: (text: string) => void; reject: (err: Error) => void; buffer: string; timer: ReturnType<typeof setTimeout> | null }> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
   private openSessions: Map<string, { paths: string[]; createdAt: number }> = new Map();
   private scheduler: Scheduler | null = null;
@@ -52,13 +54,13 @@ export class FleetManager {
     return this.fleetConfig;
   }
 
-  /** Build topic routing table: { topicId -> instanceName } */
-  buildRoutingTable(): Map<number, string> {
-    const table = new Map<number, string>();
+  /** Build topic routing table: { topicId -> RouteTarget } */
+  buildRoutingTable(): Map<number, RouteTarget> {
+    const table = new Map<number, RouteTarget>();
     if (!this.fleetConfig) return table;
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
       if (inst.topic_id != null) {
-        table.set(inst.topic_id, name);
+        table.set(inst.topic_id, { kind: "instance", name });
       }
     }
     return table;
@@ -206,7 +208,7 @@ export class FleetManager {
     if (topicMode && fleet.channel) {
       await this.autoCreateTopics(fleet);
       this.routingTable = this.buildRoutingTable();
-      const routeSummary = [...this.routingTable.entries()].map(([tid, name]) => `#${tid}→${name}`).join(", ");
+      const routeSummary = [...this.routingTable.entries()].map(([tid, target]) => `#${tid}→${target.kind === "instance" ? target.name : "meeting"}`).join(", ");
       this.logger.info(`Routes: ${routeSummary}`);
 
       // Initialize scheduler
@@ -577,11 +579,17 @@ export class FleetManager {
       return;
     }
 
-    const instanceName = this.routingTable.get(threadId);
-    if (!instanceName) {
+    const target = this.routingTable.get(threadId);
+    if (!target) {
       this.handleUnboundTopic(msg, threadId);
       return;
     }
+    if (target.kind === "meeting") {
+      // Meeting topics handled by orchestrator
+      (target.orchestrator as any).handleUserMessage(msg);
+      return;
+    }
+    const instanceName = target.name;
 
     let text = msg.text;
     const extraMeta: Record<string, string> = {};
@@ -662,6 +670,29 @@ export class FleetManager {
     const tool = msg.tool as string;
     const args = (msg.args ?? {}) as Record<string, unknown>;
     const requestId = msg.requestId as number;
+
+    // Intercept replies from instances participating in a meeting
+    if (tool === "reply") {
+      const pending = this.pendingMeetingReplies.get(instanceName);
+      if (pending) {
+        const text = (args as Record<string, unknown>)?.text as string ?? "";
+        pending.buffer += text;
+        if (pending.buffer.length > 32 * 1024) {
+          if (pending.timer) clearTimeout(pending.timer);
+          pending.resolve(pending.buffer);
+          this.pendingMeetingReplies.delete(instanceName);
+        } else {
+          if (pending.timer) clearTimeout(pending.timer);
+          pending.timer = setTimeout(() => {
+            pending.resolve(pending.buffer);
+            this.pendingMeetingReplies.delete(instanceName);
+          }, 5000);
+        }
+        const ipc = this.instanceIpcClients.get(instanceName);
+        ipc?.send({ type: "fleet_outbound_response", requestId, result: { messageId: "meeting-internal", chatId: "", threadId: "" } });
+        return;
+      }
+    }
 
     const chatId = args.chat_id as string ?? "";
     const respond = (result: unknown, error?: string) => {
@@ -993,8 +1024,14 @@ export class FleetManager {
 
   /** Handle topic deletion — stop daemon and remove from config */
   private async handleTopicDeleted(threadId: number): Promise<void> {
-    const instanceName = this.routingTable.get(threadId);
-    if (!instanceName) return;
+    const target = this.routingTable.get(threadId);
+    if (!target) return;
+    if (target.kind === "meeting") {
+      // Meeting topics: just remove from routing table
+      this.routingTable.delete(threadId);
+      return;
+    }
+    const instanceName = target.name;
 
     this.logger.info({ instanceName, threadId }, "Topic deleted — auto-unbinding");
 
@@ -1051,7 +1088,7 @@ export class FleetManager {
     };
 
     this.saveFleetConfig();
-    this.routingTable.set(topicId, instanceName);
+    this.routingTable.set(topicId, { kind: "instance", name: instanceName });
 
     const ports = this.allocatePorts(this.fleetConfig.instances);
     await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
