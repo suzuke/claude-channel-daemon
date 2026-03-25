@@ -16,18 +16,6 @@ describe("FleetManager", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("allocates ports automatically", () => {
-    const fm = new FleetManager(tmpDir);
-    const ports = fm.allocatePorts({
-      "a": {},
-      "b": {},
-      "c": { approval_port: 19000 },
-    } as any);
-    expect(ports.a).toBe(18400);
-    expect(ports.b).toBe(18401);
-    expect(ports.c).toBe(19000);
-  });
-
   it("detects stopped instance (no PID)", () => {
     const fm = new FleetManager(tmpDir);
     mkdirSync(join(tmpDir, "instances/test"), { recursive: true });

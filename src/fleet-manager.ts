@@ -20,9 +20,6 @@ import { transcribe } from "./stt.js";
 import { Scheduler } from "./scheduler/index.js";
 import type { Schedule, SchedulerConfig } from "./scheduler/index.js";
 import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
-const BASE_PORT = 18400; // Start above 18321 to avoid conflict with official telegram plugin
-const EPHEMERAL_PORT_BASE = BASE_PORT + 100; // Ephemeral instances use a separate port range
-const EPHEMERAL_PORT_POOL = 200; // Wrap around after this many ports
 const TMUX_SESSION = "ccd";
 
 /** Sanitize a directory name into a valid instance name. Keeps Unicode letters (incl. CJK). */
@@ -44,8 +41,6 @@ export class FleetManager {
   private scheduler: Scheduler | null = null;
   private configPath: string = "";
   private logger = createLogger("info");
-  private static ephemeralPortCounter = 0;
-
   constructor(private dataDir: string) {}
 
   /** Load fleet.yaml and build routing table */
@@ -66,29 +61,6 @@ export class FleetManager {
     return table;
   }
 
-  /** Allocate approval ports — use explicit port if set, otherwise auto-increment (skip collisions) */
-  allocatePorts(instances: Record<string, Partial<InstanceConfig>>): Record<string, number> {
-    const ports: Record<string, number> = {};
-    // First pass: collect explicit ports
-    const usedPorts = new Set<number>();
-    for (const config of Object.values(instances)) {
-      if (config.approval_port) usedPorts.add(config.approval_port);
-    }
-    // Second pass: assign
-    let auto = BASE_PORT;
-    for (const [name, config] of Object.entries(instances)) {
-      if (config.approval_port) {
-        ports[name] = config.approval_port;
-      } else {
-        while (usedPorts.has(auto)) auto++;
-        ports[name] = auto;
-        usedPorts.add(auto);
-        auto++;
-      }
-    }
-    return ports;
-  }
-
   getInstanceDir(name: string): string {
     return join(this.dataDir, "instances", name);
   }
@@ -105,7 +77,7 @@ export class FleetManager {
     }
   }
 
-  async startInstance(name: string, config: InstanceConfig, port: number, topicMode: boolean): Promise<void> {
+  async startInstance(name: string, config: InstanceConfig, topicMode: boolean): Promise<void> {
     // Guard: already running
     if (this.daemons.has(name)) {
       this.logger.info({ name }, "Instance already running, skipping");
@@ -115,24 +87,13 @@ export class FleetManager {
     const instanceDir = this.getInstanceDir(name);
     mkdirSync(instanceDir, { recursive: true });
 
-    config.approval_port = port;
-
     // Import Daemon dynamically to avoid circular deps
     const { Daemon } = await import("./daemon.js");
     const { createBackend } = await import("./backend/factory.js");
-    const { HookBasedApproval } = await import("./backend/hook-based-approval.js");
-    const { MessageBus } = await import("./channel/message-bus.js");
 
     const backendName = config.backend ?? this.fleetConfig?.defaults?.backend ?? "claude-code";
     const backend = createBackend(backendName, instanceDir);
-    const approval = new HookBasedApproval({
-      messageBus: new MessageBus(),
-      port,
-      topicMode,
-      instanceName: name,
-      ipcServer: null,
-    });
-    const daemon = new Daemon(name, config, instanceDir, topicMode, backend, approval);
+    const daemon = new Daemon(name, config, instanceDir, topicMode, backend);
     await daemon.start();
     this.daemons.set(name, daemon);
   }
@@ -177,7 +138,6 @@ export class FleetManager {
     this.loadEnvFile();
     const fleet = this.loadConfig(configPath);
     const topicMode = fleet.channel?.mode === "topic";
-    const ports = this.allocatePorts(fleet.instances);
 
     // Ensure tmux session exists
     await TmuxManager.ensureSession(TMUX_SESSION);
@@ -188,7 +148,7 @@ export class FleetManager {
 
     // Start all daemon instances
     for (const [name, config] of Object.entries(fleet.instances)) {
-      await this.startInstance(name, config, ports[name], topicMode && !config.channel);
+      await this.startInstance(name, config, topicMode && !config.channel);
     }
 
     // Topic mode: auto-create topics for instances without topic_id, then start adapter
@@ -753,7 +713,7 @@ export class FleetManager {
       return;
     }
 
-    const prompt = `[${instanceName}] ${msg.prompt as string}`;
+    const prompt = msg.prompt as { tool_name: string; description: string; input_preview?: string };
     const approvalId = msg.approvalId as string;
     const instanceConfig = this.fleetConfig?.instances[instanceName];
     const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
@@ -768,7 +728,7 @@ export class FleetManager {
     });
   }
 
-  private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "always_allow" | "deny"): void {
+  private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "deny"): void {
     this.logger.debug({ instanceName, approvalId, decision }, "Sending approval response to daemon");
     const ipc = this.instanceIpcClients.get(instanceName);
     ipc?.send({ type: "fleet_approval_response", approvalId, decision });
@@ -1095,8 +1055,7 @@ export class FleetManager {
     this.saveFleetConfig();
     this.routingTable.set(topicId, { kind: "instance", name: instanceName });
 
-    const ports = this.allocatePorts(this.fleetConfig.instances);
-    await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
+    await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], true);
 
     await new Promise(r => setTimeout(r, 5000));
     await this.connectIpcToInstance(instanceName);
@@ -1172,7 +1131,6 @@ export class FleetManager {
       (toSave.instances as Record<string, unknown>)[name] = {
         working_directory: inst.working_directory,
         topic_id: inst.topic_id,
-        ...(inst.approval_port ? { approval_port: inst.approval_port } : {}),
       };
     }
     writeFileSync(this.configPath, yaml.dump(toSave, { lineWidth: 120 }));
@@ -1492,10 +1450,7 @@ export class FleetManager {
       backend: config.backend,
     };
 
-    const port = EPHEMERAL_PORT_BASE + (FleetManager.ephemeralPortCounter++ % EPHEMERAL_PORT_POOL);
-    instanceConfig.approval_port = port;
-
-    await this.startInstance(name, instanceConfig, port, true);
+    await this.startInstance(name, instanceConfig, true);
 
     // Wait for socket file, then connect IPC (same pattern as bindAndStart)
     const deadline = Date.now() + 60_000;

@@ -82,7 +82,6 @@ export interface InstanceConfig {
   memory: DaemonConfig["memory"];
   memory_directory?: string;
   log_level: DaemonConfig["log_level"];
-  approval_port?: number;
   /** CLI backend to use. Default: "claude-code" */
   backend?: string;
   /** @deprecated backward compat */
