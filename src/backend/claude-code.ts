@@ -75,6 +75,7 @@ export class ClaudeCodeBackend implements CliBackend {
           "mcp__ccd-channel__edit_message", "mcp__ccd-channel__download_attachment",
           "mcp__ccd-channel__create_schedule", "mcp__ccd-channel__list_schedules",
           "mcp__ccd-channel__update_schedule", "mcp__ccd-channel__delete_schedule",
+          "mcp__ccd-channel__send_to_instance", "mcp__ccd-channel__list_instances",
         ],
         deny: [
           "Bash(rm -rf /)", "Bash(rm -rf /*)",
