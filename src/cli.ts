@@ -233,6 +233,25 @@ fleet
   });
 
 fleet
+  .command("restart")
+  .description("Graceful restart: wait for instances to idle, then restart")
+  .action(async () => {
+    const pidPath = join(DATA_DIR, "fleet.pid");
+    if (!existsSync(pidPath)) {
+      console.error("Fleet is not running (no PID file found)");
+      process.exit(1);
+    }
+    const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+    try {
+      process.kill(pid, "SIGUSR2");
+      console.log("Graceful restart signal sent — fleet will restart when all instances are idle");
+    } catch {
+      console.error("Failed to send restart signal (process may have exited)");
+      process.exit(1);
+    }
+  });
+
+fleet
   .command("status")
   .description("Show fleet status")
   .action(async () => {

@@ -135,3 +135,70 @@ ipc.send({ type: "fleet_outbound_response", fleetRequestId, result, error });
 ```
 
 `from_instance` 欄位可用來識別訊息來源是其他 instance 而非人類使用者。
+
+## Graceful Restart
+
+開發 daemon 功能時，修改 code 後需要重啟 daemon 才能生效。
+
+### `ccd fleet restart`
+
+發送 SIGUSR2 給 fleet manager process，觸發 graceful restart：
+
+1. 等待所有 instance idle（10 秒無 transcript activity）
+2. Stop 所有 instances
+3. 重新載入 fleet config
+4. Start 所有 instances
+5. 重建 IPC connections
+
+Fleet manager process 本身不會重啟 — adapter、scheduler 保持運作。
+
+```bash
+npm run build && ccd fleet restart
+```
+
+Telegram group 會收到通知：
+- `🔄 Graceful restart initiated — waiting for all instances to idle...`
+- `✅ Graceful restart complete — 8 instances running`
+
+### 注意事項
+
+- Fleet manager 的 SIGUSR2 handler 需要在 fleet manager 啟動後才生效。第一次部署新的 restart 功能時，仍需手動 `ccd fleet stop && ccd fleet start`。
+- Restart 後所有 instance 的 Claude session 重新開始（使用 `--resume` 恢復 session state）。
+- 如果某個 instance 長時間不 idle（例如正在跑長任務），restart 會一直等待。
+
+## 外部 Session 協同開發模式
+
+外部 Claude Code session 可以透過跨 instance 通訊與 daemon instances 協同開發：
+
+```
+外部 Session                                    Daemon Instances
+     │                                               │
+     │  1. 修改 daemon 程式碼                          │
+     │  2. npm run build                              │
+     │  3. ccd fleet restart                          │
+     │     (等 idle → stop → start)                    │
+     │                                               │
+     │  4. send_to_instance("ccplugin",               │
+     │     "restart 後功能正常嗎？")                     │
+     │ ──────────────────────────────────────────────►│
+     │                                               │
+     │◄──────────────────────────────────────────────│
+     │  5. 收到 channel notification:                  │
+     │     "restart OK"                               │
+     │                                               │
+     │  6. 繼續開發下一個功能...                         │
+```
+
+### 啟動方式
+
+```bash
+claude --dangerously-load-development-channels server:ccd-channel
+```
+
+### 能力
+
+- 修改 daemon code 並 build
+- 用 `ccd fleet restart` 重啟 daemon
+- 用 `send_to_instance` 請 daemon instance 驗證功能
+- 收到 daemon instance 的回覆（channel notification）
+- 全程不離開 terminal session

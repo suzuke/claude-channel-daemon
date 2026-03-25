@@ -185,6 +185,14 @@ export class FleetManager {
       this.logger.info("Received SIGHUP, reloading scheduler...");
       this.scheduler?.reload();
     });
+
+    // SIGUSR2: graceful restart
+    process.on("SIGUSR2", () => {
+      this.logger.info("Received SIGUSR2, initiating graceful restart...");
+      this.restartInstances().catch(err => {
+        this.logger.error({ err }, "Graceful restart failed");
+      });
+    });
   }
 
   /** Start the shared Telegram adapter for topic mode */
@@ -1227,6 +1235,77 @@ export class FleetManager {
     // 5. Remove PID file
     const pidPath = join(this.dataDir, "fleet.pid");
     try { unlinkSync(pidPath); } catch (e) { this.logger.debug({ err: e }, "Failed to remove fleet PID file"); }
+  }
+
+  /**
+   * Graceful restart: wait for all instances to be idle, then stop and start them.
+   * Fleet manager process stays alive — only instances are restarted.
+   */
+  async restartInstances(): Promise<void> {
+    if (!this.configPath) {
+      this.logger.error("Cannot restart: no config path (was startAll called?)");
+      return;
+    }
+    const instanceNames = [...this.daemons.keys()];
+    if (instanceNames.length === 0) {
+      this.logger.info("No instances to restart");
+      return;
+    }
+
+    this.logger.info(`Graceful restart: waiting for ${instanceNames.length} instances to idle...`);
+
+    // Notify all instances about pending restart
+    const groupId = this.fleetConfig?.channel?.group_id;
+    if (groupId && this.adapter) {
+      await this.adapter.sendText(String(groupId), `🔄 Graceful restart initiated — waiting for all instances to idle...`).catch(() => {});
+    }
+
+    // Wait for all instances to be idle (no transcript activity for 10s)
+    await Promise.all(
+      instanceNames.map(async (name) => {
+        const daemon = this.daemons.get(name);
+        if (daemon) {
+          this.logger.info(`Waiting for ${name} to idle...`);
+          await daemon.waitForIdle(10_000);
+          this.logger.info(`${name} is idle`);
+        }
+      })
+    );
+
+    this.logger.info("All instances idle — restarting...");
+
+    // Close IPC connections first
+    for (const [, ipc] of this.instanceIpcClients) {
+      await ipc.close();
+    }
+    this.instanceIpcClients.clear();
+
+    // Stop all instances
+    await Promise.allSettled(
+      instanceNames.map(name => this.stopInstance(name))
+    );
+
+    // Reload config (may have changed)
+    const fleet = this.loadConfig(this.configPath);
+    this.fleetConfig = fleet;
+    const topicMode = fleet.channel?.mode === "topic";
+
+    // Restart instances
+    for (const [name, config] of Object.entries(fleet.instances)) {
+      await this.startInstance(name, config, topicMode && !config.channel);
+    }
+
+    // Reconnect IPC
+    if (topicMode) {
+      this.routingTable = this.buildRoutingTable();
+      await new Promise(r => setTimeout(r, 3000));
+      await this.connectToInstances(fleet);
+    }
+
+    this.logger.info("Graceful restart complete");
+    if (groupId && this.adapter) {
+      await this.adapter.sendText(String(groupId), `✅ Graceful restart complete — ${this.daemons.size} instances running`).catch(() => {});
+    }
   }
 
   // ===================== /meets Command =====================

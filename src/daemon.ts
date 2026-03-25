@@ -716,6 +716,11 @@ export class Daemon {
     return this.backend?.getContextUsage() ?? 0;
   }
 
+  /** Public wrapper for graceful restart — wait for instance to be idle. */
+  waitForIdle(quietMs = 5000): Promise<void> {
+    return this.waitForTranscriptIdle(quietMs);
+  }
+
   /** Debounce-based idle: resolves when no transcript events for `quietMs`. */
   private waitForTranscriptIdle(quietMs = 5000): Promise<void> {
     return new Promise((resolve) => {
