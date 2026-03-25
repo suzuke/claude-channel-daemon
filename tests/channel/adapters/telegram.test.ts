@@ -87,6 +87,7 @@ vi.mock("grammy", () => {
 
 import { TelegramAdapter } from "../../../src/channel/adapters/telegram.js";
 import { AccessManager } from "../../../src/channel/access-manager.js";
+import type { PermissionPrompt } from "../../../src/channel/types.js";
 
 // ── Test helpers ──────────────────────────────────────────────────────────
 
@@ -331,7 +332,8 @@ describe("TelegramAdapter", () => {
 
   it("sendApproval returns an ApprovalHandle with cancel()", async () => {
     const callback = vi.fn();
-    const handle = await adapter.sendApproval("Allow action?", callback);
+    const prompt: PermissionPrompt = { tool_name: "Bash", description: "Allow action?" };
+    const handle = await adapter.sendApproval(prompt, callback);
     expect(handle).toHaveProperty("cancel");
     expect(typeof handle.cancel).toBe("function");
     handle.cancel(); // should not throw
@@ -341,11 +343,12 @@ describe("TelegramAdapter", () => {
     const requests: unknown[] = [];
     adapter.on("approval_request", (r) => requests.push(r));
 
-    await adapter.sendApproval("Run rm -rf?", vi.fn());
+    const prompt: PermissionPrompt = { tool_name: "Bash", description: "Run rm -rf?" };
+    await adapter.sendApproval(prompt, vi.fn());
 
     expect(requests).toHaveLength(1);
     const req = requests[0] as Record<string, unknown>;
-    expect(req.prompt).toBe("Run rm -rf?");
+    expect(typeof req.prompt).toBe("string");
     expect(req.nonce).toBeDefined();
   });
 
@@ -357,7 +360,8 @@ describe("TelegramAdapter", () => {
       capturedNonce = (r as Record<string, string>).nonce;
     });
 
-    await adapter.sendApproval("Do it?", callback);
+    const prompt: PermissionPrompt = { tool_name: "Bash", description: "Do it?" };
+    await adapter.sendApproval(prompt, callback);
 
     adapter.emit("callback_query", {
       callbackData: `approval:approve:${capturedNonce}`,
@@ -375,7 +379,8 @@ describe("TelegramAdapter", () => {
       capturedNonce = (r as Record<string, string>).nonce;
     });
 
-    await adapter.sendApproval("Do it?", callback);
+    const prompt: PermissionPrompt = { tool_name: "Bash", description: "Do it?" };
+    await adapter.sendApproval(prompt, callback);
 
     adapter.emit("callback_query", {
       callbackData: `approval:deny:${capturedNonce}`,
@@ -414,7 +419,8 @@ describe("TelegramAdapter", () => {
 
     adapter.on("approval_request", () => {});
 
-    await adapter.sendApproval("Abort me?", callback, controller.signal);
+    const prompt: PermissionPrompt = { tool_name: "Bash", description: "Abort me?" };
+    await adapter.sendApproval(prompt, callback, controller.signal);
     controller.abort();
 
     // A subsequent callback_query with a mismatched nonce should be ignored anyway

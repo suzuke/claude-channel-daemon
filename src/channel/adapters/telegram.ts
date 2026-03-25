@@ -4,7 +4,7 @@ import { join, extname, basename } from "node:path";
 import { Bot, GrammyError, InputFile } from "grammy";
 import type { Context, InlineKeyboard as InlineKeyboardType } from "grammy";
 import { InlineKeyboard } from "grammy";
-import type { ChannelAdapter, ApprovalHandle, SendOpts, SentMessage } from "../types.js";
+import type { ChannelAdapter, ApprovalHandle, SendOpts, SentMessage, PermissionPrompt } from "../types.js";
 import type { AccessManager } from "../access-manager.js";
 import { MessageQueue } from "../message-queue.js";
 
@@ -368,20 +368,29 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
   // ── Approval ─────────────────────────────────────────────────────────────
 
   async sendApproval(
-    prompt: string,
-    callback: (decision: "approve" | "always_allow" | "deny") => void,
+    prompt: PermissionPrompt,
+    callback: (decision: "approve" | "deny") => void,
     signal?: AbortSignal,
     threadId?: string,
   ): Promise<ApprovalHandle> {
     const nonce = Math.random().toString(36).slice(2, 10);
     const approveData = `approval:approve:${nonce}`;
-    const alwaysData = `approval:always_allow:${nonce}`;
     const denyData = `approval:deny:${nonce}`;
 
     const keyboard = new InlineKeyboard()
-      .text("✅ Approve", approveData)
-      .text("✅ Always", alwaysData)
+      .text("✅ Allow", approveData)
       .text("❌ Deny", denyData);
+
+    // Format the permission message
+    let text = `⚠️ *Permission Request*\nTool: \`${prompt.tool_name}\``;
+    if (prompt.input_preview) {
+      const preview = prompt.input_preview.length > 200
+        ? prompt.input_preview.slice(0, 200) + "…"
+        : prompt.input_preview;
+      text += `\n\`\`\`\n${preview}\n\`\`\``;
+    } else if (prompt.description) {
+      text += `\n${prompt.description}`;
+    }
 
     const cleanup = () => {
       this.off("callback_query", handler);
@@ -390,55 +399,45 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     const handler = (query: { callbackData?: string; chatId?: string; messageId?: string }) => {
       if (!query.callbackData) return;
       const isApprove = query.callbackData === approveData;
-      const isAlways = query.callbackData === alwaysData;
       const isDeny = query.callbackData === denyData;
-      if (!isApprove && !isAlways && !isDeny) return;
+      if (!isApprove && !isDeny) return;
 
       cleanup();
-      // Update the message to show the decision (remove buttons)
       if (query.chatId && query.messageId) {
-        const label = isAlways ? "✅ Always Allowed" : isApprove ? "✅ Approved" : "❌ Denied";
+        const label = isApprove ? "✅ Allowed" : "❌ Denied";
         this.bot.api.editMessageText(
           Number(query.chatId), Number(query.messageId),
-          `${label}\n${prompt}`,
-        ).catch(() => { /* UI update only — safe to ignore */ });
+          `${label}\nTool: \`${prompt.tool_name}\``,
+        ).catch(() => { /* UI update only */ });
       }
-      callback(isAlways ? "always_allow" : isApprove ? "approve" : "deny");
+      callback(isApprove ? "approve" : "deny");
     };
 
     this.on("callback_query", handler);
 
     if (signal) {
-      signal.addEventListener("abort", () => {
-        cleanup();
-      });
+      signal.addEventListener("abort", () => cleanup());
     }
 
-    // Send the approval message directly if we have a chatId (topic mode via fleet)
-    // Otherwise emit event for DM mode host to handle
     if (threadId) {
-      // Topic mode: send directly to the group chat + thread
       const chatId = this.getLastChatId();
       if (chatId) {
-        await this.bot.api.sendMessage(Number(chatId), prompt, {
+        await this.bot.api.sendMessage(Number(chatId), text, {
           message_thread_id: Number(threadId),
           reply_markup: keyboard,
           parse_mode: "Markdown",
         }).catch(() => {
-          // Fallback: try without markdown
-          return this.bot.api.sendMessage(Number(chatId), prompt, {
+          return this.bot.api.sendMessage(Number(chatId), text, {
             message_thread_id: Number(threadId),
             reply_markup: keyboard,
           });
         });
       }
     } else {
-      this.emit("approval_request", { prompt, keyboard, nonce });
+      this.emit("approval_request", { prompt: text, keyboard, nonce });
     }
 
-    return {
-      cancel: cleanup,
-    };
+    return { cancel: cleanup };
   }
 
   /** Get the last known chatId (group ID for topic mode) */
