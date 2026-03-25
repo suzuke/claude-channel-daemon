@@ -2,20 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ClaudeCodeBackend } from "../../src/backend/claude-code.js";
-import { MessageBus } from "../../src/channel/message-bus.js";
-import { HookBasedApproval } from "../../src/backend/hook-based-approval.js";
 import type { CliBackendConfig } from "../../src/backend/types.js";
 
 const TEST_DIR = "/tmp/ccd-test-claude-backend";
 const WORK_DIR = "/tmp/ccd-test-workdir";
 
 function makeConfig(overrides?: Partial<CliBackendConfig>): CliBackendConfig {
-  const bus = new MessageBus();
   return {
     workingDirectory: WORK_DIR,
     instanceDir: TEST_DIR,
     instanceName: "test",
-    approvalPort: 18400,
     mcpServers: {
       "ccd-channel": {
         command: "node",
@@ -23,7 +19,6 @@ function makeConfig(overrides?: Partial<CliBackendConfig>): CliBackendConfig {
         env: { CCD_SOCKET_PATH: "/tmp/test.sock" },
       },
     },
-    approvalStrategy: new HookBasedApproval({ messageBus: bus, port: 18400 }),
     ...overrides,
   };
 }
@@ -72,7 +67,7 @@ describe("ClaudeCodeBackend", () => {
       expect(cmd).toContain("--dangerously-load-development-channels server:ccd-channel");
     });
 
-    it("does not include --dangerously-skip-permissions by default", () => {
+    it("does not include --dangerously-skip-permissions", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig());
       expect(cmd).not.toContain("--dangerously-skip-permissions");
@@ -82,12 +77,6 @@ describe("ClaudeCodeBackend", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig());
       expect(cmd).not.toContain("--system-prompt");
-    });
-
-    it("includes --dangerously-skip-permissions when skipPermissions is true", () => {
-      const backend = new ClaudeCodeBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig({ skipPermissions: true }));
-      expect(cmd).toContain("--dangerously-skip-permissions");
     });
 
     it("includes --system-prompt with path when systemPrompt is set", () => {
@@ -126,36 +115,36 @@ describe("ClaudeCodeBackend", () => {
       expect(mcpConfig.mcpServers["ccd-channel"]).toBeDefined();
     });
 
-    it("writes claude-settings.json with hooks and permissions", () => {
+    it("writes claude-settings.json with permissions allow/deny lists", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
       const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
-      expect(settings.hooks.PreToolUse).toBeDefined();
+      expect(settings.hooks).toBeUndefined();
       expect(settings.permissions.allow).toContain("Read");
       expect(settings.permissions.allow).toContain("Bash(*)");
+      expect(settings.permissions.deny).toContain("Bash(rm -rf /)");
+      expect(settings.permissions.defaultMode).toBe("default");
       expect(settings.statusLine).toBeDefined();
+    });
+
+    it("writes all expected MCP tool permissions", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      backend.writeConfig(makeConfig());
+      const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__reply");
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__react");
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__edit_message");
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__download_attachment");
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__create_schedule");
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__list_schedules");
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__update_schedule");
+      expect(settings.permissions.allow).toContain("mcp__ccd-channel__delete_schedule");
     });
 
     it("writes statusline script", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
       expect(existsSync(join(TEST_DIR, "statusline.sh"))).toBe(true);
-    });
-
-    it("writes simplified settings when skipPermissions is true", () => {
-      const backend = new ClaudeCodeBackend(TEST_DIR);
-      backend.writeConfig(makeConfig({ skipPermissions: true }));
-      const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
-      expect(settings.hooks).toBeUndefined();
-      expect(settings.permissions.allow).toContain("*");
-      expect(settings.permissions.deny).toHaveLength(0);
-    });
-
-    it("writes full settings (with hooks) when skipPermissions is false or unset", () => {
-      const backend = new ClaudeCodeBackend(TEST_DIR);
-      backend.writeConfig(makeConfig({ skipPermissions: false }));
-      const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
-      expect(settings.hooks.PreToolUse).toBeDefined();
     });
   });
 
