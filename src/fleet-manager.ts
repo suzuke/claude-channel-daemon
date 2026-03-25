@@ -1474,9 +1474,15 @@ export class FleetManager {
       if (!existsSync(join(workDir, ".git"))) {
         throw new Error(`Not a git repository: ${workDir}`);
       }
+      const { execFileSync } = await import("child_process");
+      // Ensure repo has at least one commit (worktree requires HEAD)
+      try {
+        execFileSync("git", ["rev-parse", "HEAD"], { cwd: workDir, stdio: "pipe" });
+      } catch {
+        execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: workDir, stdio: "pipe" });
+      }
       const worktreePath = join("/tmp", `ccd-collab-${name}`);
       const branchName = `meet/${name}`;
-      const { execFileSync } = await import("child_process");
       execFileSync("git", ["worktree", "add", worktreePath, "-b", branchName], { cwd: workDir, stdio: "pipe" });
       workDir = worktreePath;
       this.logger.info({ name, worktreePath, branchName }, "Created git worktree for collab instance");
