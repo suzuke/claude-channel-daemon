@@ -306,14 +306,15 @@ export class FleetManager {
             commands: [
               { command: "open", description: "Open an existing project" },
               { command: "new", description: "Create a new project" },
-              { command: "meets", description: "Start a multi-instance debate" },
+              { command: "meets", description: "Start a multi-angle discussion" },
+              { command: "debate", description: "Start a pro/con debate" },
               { command: "collab", description: "Start collaborative coding with worktrees" },
             ],
             scope: { type: "chat", chat_id: groupId },
           }),
         },
       );
-      this.logger.info("Registered bot commands: /open, /new, /meets, /collab");
+      this.logger.info("Registered bot commands: /open, /new, /meets, /debate, /collab");
     } catch (err) {
       this.logger.warn({ err }, "Failed to register bot commands (non-fatal)");
     }
@@ -373,6 +374,11 @@ export class FleetManager {
     }
 
     if (text === "/meets" || text === "/meets@" || text.startsWith("/meets ") || text.startsWith("/meets@")) {
+      await this.handleMeetsCommand(msg, "discussion");
+      return;
+    }
+
+    if (text === "/debate" || text === "/debate@" || text.startsWith("/debate ") || text.startsWith("/debate@")) {
       await this.handleMeetsCommand(msg, "debate");
       return;
     }
@@ -1237,15 +1243,16 @@ export class FleetManager {
 
   // ===================== /meets Command =====================
 
-  private parseMeetsArgs(text: string): { topic: string; mode: "debate" | "collab"; count: number; rounds?: number; names?: string[]; repo?: string } | null {
-    const args = text.replace(/^\/(meets|collab)(@\S+)?\s*/, "").trim();
+  private parseMeetsArgs(text: string): { topic: string; mode: "debate" | "collab" | "discussion"; count: number; rounds?: number; names?: string[]; repo?: string; angles?: string[] } | null {
+    const args = text.replace(/^\/(meets|collab|debate)(@\S+)?\s*/, "").trim();
     if (!args) return null;
 
-    let mode: "debate" | "collab" = "debate";
+    let mode: "debate" | "collab" | "discussion" = "discussion";
     let count = 2;
     let rounds: number | undefined;
     let names: string[] | undefined;
     let repo: string | undefined;
+    let angles: string[] | undefined;
     let topic = args;
 
     const repoMatch = topic.match(/--repo\s+(\S+)/);
@@ -1274,13 +1281,24 @@ export class FleetManager {
       topic = topic.replace(namesMatch[0], "").trim();
     }
 
+    const anglesMatch = topic.match(/--angles\s+"([^"]+)"/);
+    if (anglesMatch) {
+      angles = anglesMatch[1].split(",").map(a => a.trim());
+      topic = topic.replace(anglesMatch[0], "").trim();
+    }
+
+    if (topic.includes("--debate")) {
+      mode = "debate";
+      topic = topic.replace("--debate", "").trim();
+    }
+
     topic = topic.replace(/^["']|["']$/g, "").trim();
     if (!topic) return null;
 
-    return { topic, mode, count, rounds, names, repo };
+    return { topic, mode, count, rounds, names, repo, angles };
   }
 
-  private async handleMeetsCommand(msg: InboundMessage, forceMode?: "debate" | "collab"): Promise<void> {
+  private async handleMeetsCommand(msg: InboundMessage, forceMode?: "debate" | "collab" | "discussion"): Promise<void> {
     if (!this.adapter) return;
 
     // Check resource limits
@@ -1328,17 +1346,18 @@ export class FleetManager {
       return;
     }
 
-    await this.startMeeting(msg.chatId, parsed.topic, parsed.mode, parsed.count, parsed.names, parsed.repo, parsed.rounds);
+    await this.startMeeting(msg.chatId, parsed.topic, parsed.mode, parsed.count, parsed.names, parsed.repo, parsed.rounds, parsed.angles);
   }
 
   private async startMeeting(
     chatId: string,
     topic: string,
-    mode: "debate" | "collab",
+    mode: "debate" | "collab" | "discussion",
     count: number,
     customNames?: string[],
     repo?: string,
     rounds?: number,
+    angles?: string[],
   ): Promise<void> {
     const { MeetingOrchestrator } = await import("./meeting/orchestrator.js");
     const { assignRoles } = await import("./meeting/role-assigner.js");
@@ -1370,7 +1389,12 @@ export class FleetManager {
       },
     };
 
-    const config: MeetingConfig = { meetingId, topic, mode, maxRounds: rounds ?? this.fleetConfig?.defaults?.meetings?.defaultRounds ?? 3, repo };
+    if (mode === "discussion" && !angles) {
+      const defaultAngles = ["技術面", "成本效益", "使用者體驗", "風險與挑戰", "組織影響", "長期策略"];
+      angles = defaultAngles.slice(0, count);
+    }
+
+    const config: MeetingConfig = { meetingId, topic, mode, maxRounds: rounds ?? this.fleetConfig?.defaults?.meetings?.defaultRounds ?? 3, repo, angles };
     const fmApi: FleetManagerMeetingAPI = {
       spawnEphemeralInstance: this.spawnEphemeralInstance.bind(this),
       destroyEphemeralInstance: this.destroyEphemeralInstance.bind(this),

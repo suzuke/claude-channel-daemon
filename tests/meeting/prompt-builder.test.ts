@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, buildCollabSystemPrompt, buildCollabSummaryPrompt, roleLabel } from "../../src/meeting/prompt-builder.js";
+import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, buildCollabSystemPrompt, buildCollabSummaryPrompt, buildDiscussionSystemPrompt, buildIndependentAnalysisPrompt, buildCrossDiscussionPrompt, buildConsensusPrompt, buildAngleGenerationPrompt, roleLabel } from "../../src/meeting/prompt-builder.js";
 import type { RoundEntry } from "../../src/meeting/types.js";
 
 describe("roleLabel", () => {
@@ -86,5 +86,62 @@ describe("buildCollabSummaryPrompt", () => {
     const prompt = buildCollabSummaryPrompt("task", history);
     expect(prompt).toContain("frontend");
     expect(prompt).toContain("摘要");
+  });
+});
+
+describe("buildAngleGenerationPrompt", () => {
+  it("includes topic and count", () => {
+    const prompt = buildAngleGenerationPrompt("AI 導入", 3);
+    expect(prompt).toContain("AI 導入");
+    expect(prompt).toContain("3");
+  });
+});
+
+describe("buildDiscussionSystemPrompt", () => {
+  it("includes label, angle, and topic", () => {
+    const prompt = buildDiscussionSystemPrompt("A", "技術面", "要不要導入 AI?");
+    expect(prompt).toContain("A");
+    expect(prompt).toContain("技術面");
+    expect(prompt).toContain("要不要導入 AI?");
+    expect(prompt).toContain("reply");
+  });
+});
+
+describe("buildIndependentAnalysisPrompt", () => {
+  it("includes angle and topic", () => {
+    const prompt = buildIndependentAnalysisPrompt("要不要導入 AI?", "成本效益");
+    expect(prompt).toContain("成本效益");
+    expect(prompt).toContain("要不要導入 AI?");
+    expect(prompt).toContain("獨立分析");
+  });
+});
+
+describe("buildCrossDiscussionPrompt", () => {
+  it("includes all analyses and own angle", () => {
+    const analyses: RoundEntry[] = [
+      { round: 0, speaker: "A", role: "技術面", content: "技術分析" },
+      { round: 0, speaker: "B", role: "成本面", content: "成本分析" },
+    ];
+    const prompt = buildCrossDiscussionPrompt("topic", "技術面", analyses);
+    expect(prompt).toContain("技術面");
+    expect(prompt).toContain("技術分析");
+    expect(prompt).toContain("成本分析");
+    expect(prompt).toContain("reply");
+  });
+});
+
+describe("buildConsensusPrompt", () => {
+  it("includes all rounds and asks for consensus", () => {
+    const history: RoundEntry[] = [
+      { round: 0, speaker: "A", role: "技術面", content: "分析1" },
+      { round: 0, speaker: "B", role: "成本面", content: "分析2" },
+      { round: 1, speaker: "A", role: "技術面", content: "回應1" },
+      { round: 1, speaker: "B", role: "成本面", content: "回應2" },
+    ];
+    const prompt = buildConsensusPrompt("topic", history);
+    expect(prompt).toContain("獨立分析");
+    expect(prompt).toContain("交叉討論 Round 1");
+    expect(prompt).toContain("共識");
+    expect(prompt).toContain("reply");
   });
 });

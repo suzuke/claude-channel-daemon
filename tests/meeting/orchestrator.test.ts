@@ -157,4 +157,53 @@ describe("MeetingOrchestrator", () => {
       expect(messages.some((m: string) => m.includes("開發逾時或失敗"))).toBe(true);
     });
   });
+
+  describe("discussion mode", () => {
+    const discussionConfig: MeetingConfig = {
+      meetingId: "disc-test", topic: "要不要導入 AI?", mode: "discussion",
+      maxRounds: 1, angles: ["技術面", "成本面"],
+    };
+    const participants: ParticipantConfig[] = [
+      { label: "A", role: "技術面" },
+      { label: "B", role: "成本面" },
+    ];
+
+    it("runs independent analysis then cross discussion then consensus", async () => {
+      const posted: string[] = [];
+      output.postMessage = vi.fn().mockImplementation(async (text: string) => { posted.push(text); return "m"; });
+      const orch = new MeetingOrchestrator(discussionConfig, fm, output);
+      await orch.start(participants);
+      expect(posted.some(p => p.includes("獨立分析"))).toBe(true);
+      expect(posted.some(p => p.includes("交叉討論"))).toBe(true);
+      expect(posted.some(p => p.includes("收斂結論"))).toBe(true);
+      expect(fm.destroyEphemeralInstance).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends correct number of prompts", async () => {
+      const orch = new MeetingOrchestrator(discussionConfig, fm, output);
+      await orch.start(participants);
+      // 2 independent analysis + 2 cross discussion (1 round) + 1 consensus = 5
+      expect(fm.sendAndWaitReply).toHaveBeenCalledTimes(5);
+    });
+
+    it("shows angles in header", async () => {
+      const posted: string[] = [];
+      output.postMessage = vi.fn().mockImplementation(async (text: string) => { posted.push(text); return "m"; });
+      const orch = new MeetingOrchestrator(discussionConfig, fm, output);
+      await orch.start(participants);
+      expect(posted.some(p => p.includes("技術面") && p.includes("成本面") && p.includes("討論"))).toBe(true);
+    });
+
+    it("handles analysis timeout gracefully", async () => {
+      fm.sendAndWaitReply = vi.fn()
+        .mockResolvedValueOnce("Analysis A")
+        .mockRejectedValueOnce(new Error("timeout"))
+        .mockResolvedValue("Reply");
+      const posted: string[] = [];
+      output.postMessage = vi.fn().mockImplementation(async (text: string) => { posted.push(text); return "m"; });
+      const orch = new MeetingOrchestrator(discussionConfig, fm, output);
+      await orch.start(participants);
+      expect(posted.some(p => p.includes("分析逾時"))).toBe(true);
+    });
+  });
 });

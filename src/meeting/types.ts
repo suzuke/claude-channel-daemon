@@ -1,7 +1,7 @@
 import type { InboundMessage } from "../channel/types.js";
 
 export type MeetingRole = "pro" | "con" | "arbiter" | (string & {});
-export type MeetingMode = "debate" | "collab";
+export type MeetingMode = "debate" | "collab" | "discussion";
 export type MeetingState = "booting" | "running" | "paused" | "summarizing" | "ended";
 
 export interface MeetingConfig {
@@ -10,6 +10,7 @@ export interface MeetingConfig {
   mode: MeetingMode;
   maxRounds: number;
   repo?: string;
+  angles?: string[];  // discussion mode: analysis angles for each participant
 }
 
 export interface ParticipantConfig {

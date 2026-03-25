@@ -3,7 +3,7 @@ import type {
   FleetManagerMeetingAPI, MeetingChannelOutput,
   RoundEntry, MeetingState,
 } from "./types.js";
-import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, buildCollabSystemPrompt, buildCollabSummaryPrompt, roleLabel } from "./prompt-builder.js";
+import { buildSystemPrompt, buildRoundPrompt, buildSummaryPrompt, buildCollabSystemPrompt, buildCollabSummaryPrompt, buildDiscussionSystemPrompt, buildIndependentAnalysisPrompt, buildCrossDiscussionPrompt, buildConsensusPrompt, roleLabel } from "./prompt-builder.js";
 import type { InboundMessage } from "../channel/types.js";
 
 const ROLE_EMOJI: Record<string, string> = { pro: "🟢", con: "🔴", arbiter: "⚖️" };
@@ -33,17 +33,20 @@ export class MeetingOrchestrator {
     this.state = "booting";
 
     // Spawn instances sequentially to avoid port/IPC race conditions
-    for (const p of participantConfigs) {
+    for (let i = 0; i < participantConfigs.length; i++) {
+      const p = participantConfigs[i];
       try {
         const systemPrompt = this.config.mode === "collab"
           ? buildCollabSystemPrompt(p.label, this.config.topic)
+          : this.config.mode === "discussion"
+          ? buildDiscussionSystemPrompt(p.label, this.config.angles?.[i] ?? "general", this.config.topic)
           : buildSystemPrompt(p.role, this.config.topic);
         const instanceName = await this.fm.spawnEphemeralInstance(
           {
             systemPrompt,
             workingDirectory: this.config.mode === "collab" ? this.config.repo ?? "/tmp" : "/tmp",
-            lightweight: this.config.mode === "debate",
-            skipPermissions: this.config.mode === "debate",
+            lightweight: this.config.mode === "debate" || this.config.mode === "discussion",
+            skipPermissions: this.config.mode === "debate" || this.config.mode === "discussion",
           },
           this.abortController.signal,
         );
@@ -61,16 +64,19 @@ export class MeetingOrchestrator {
 
     this.state = "running";
 
-    const participantList = this.participants
-      .map(p => `${p.label}（${roleLabel(p.role)}）`)
-      .join("、");
+    const participantList = this.config.mode === "discussion"
+      ? this.participants.map((p, i) => `${p.label}（${this.config.angles?.[i] ?? "general"}）`).join("、")
+      : this.participants.map(p => `${p.label}（${roleLabel(p.role)}）`).join("、");
+    const modeLabel = this.config.mode === "discussion" ? "討論" : this.config.mode === "collab" ? "協作" : "辯論";
     await this.output.postMessage(
-      `📋 會議：${this.config.topic}\n參與者：${participantList}\n輪次：${this.config.maxRounds} | 指令：/end /more /pause`,
+      `📋 ${modeLabel}：${this.config.topic}\n參與者：${participantList}\n輪次：${this.config.maxRounds} | 指令：/end /more /pause`,
     );
 
     try {
       if (this.config.mode === "collab") {
         await this.runCollabFlow();
+      } else if (this.config.mode === "discussion") {
+        await this.runDiscussionFlow();
       } else {
         await this.runDebateLoop();
       }
@@ -147,6 +153,77 @@ export class MeetingOrchestrator {
     if (this.cancelled) return;
 
     await this.generateSummary();
+    await this.cleanup();
+  }
+
+  private async runDiscussionFlow(): Promise<void> {
+    const angles = this.config.angles ?? this.participants.map((_, i) => `角度 ${i + 1}`);
+
+    // Phase 1: Independent analysis (parallel)
+    await this.output.postMessage("\n━━ 獨立分析 ━━");
+
+    const analysisPromises = this.participants.map(async (participant, i) => {
+      if (this.cancelled) return;
+      try {
+        const prompt = buildIndependentAnalysisPrompt(this.config.topic, angles[i]);
+        const reply = await this.fm.sendAndWaitReply(participant.instanceName, prompt, REPLY_TIMEOUT_MS);
+        const cappedReply = reply.length > REPLY_BUFFER_CAP ? reply.slice(0, REPLY_BUFFER_CAP) + "\n[...truncated]" : reply;
+        this.roundHistory.push({ round: 0, speaker: participant.label, role: angles[i], content: cappedReply });
+        await this.output.postMessage(`💬 ${participant.label}（${angles[i]}）：\n${cappedReply}`);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+        await this.output.postMessage(`⚠️ ${participant.label} 分析逾時`);
+      }
+    });
+    await Promise.allSettled(analysisPromises);
+
+    if (this.cancelled) return;
+
+    // Phase 2: Cross discussion (sequential rounds)
+    const independentAnalyses = this.roundHistory.filter(e => e.round === 0);
+
+    for (let round = 1; round <= this.config.maxRounds; round++) {
+      if (this.cancelled) return;
+      this.currentRound = round;
+
+      await this.output.postMessage(`\n━━ 交叉討論 Round ${round} ━━`);
+
+      for (let i = 0; i < this.participants.length; i++) {
+        const participant = this.participants[i];
+        if (this.cancelled) return;
+
+        while (this.state === "paused") {
+          await new Promise<void>(resolve => { this.resolveUserInput = resolve; });
+        }
+        if (this.cancelled) return;
+
+        try {
+          const prevRoundEntries = round === 1 ? independentAnalyses : this.roundHistory.filter(e => e.round === round - 1);
+          const prompt = buildCrossDiscussionPrompt(this.config.topic, angles[i], prevRoundEntries);
+          const reply = await this.fm.sendAndWaitReply(participant.instanceName, prompt, REPLY_TIMEOUT_MS);
+          const cappedReply = reply.length > REPLY_BUFFER_CAP ? reply.slice(0, REPLY_BUFFER_CAP) + "\n[...truncated]" : reply;
+          this.roundHistory.push({ round, speaker: participant.label, role: angles[i], content: cappedReply });
+          await this.output.postMessage(`💬 ${participant.label}（${angles[i]}）：\n${cappedReply}`);
+        } catch (err) {
+          if ((err as Error).name === "AbortError") throw err;
+          await this.output.postMessage(`⚠️ ${participant.label} 回覆逾時`);
+        }
+      }
+    }
+
+    // Phase 3: Consensus
+    await this.output.postMessage("\n━━ 收斂結論 ━━");
+    const lastParticipant = this.participants[this.participants.length - 1];
+    if (lastParticipant) {
+      try {
+        const prompt = buildConsensusPrompt(this.config.topic, this.roundHistory);
+        const reply = await this.fm.sendAndWaitReply(lastParticipant.instanceName, prompt, REPLY_TIMEOUT_MS);
+        await this.output.postMessage(reply);
+      } catch {
+        await this.output.postMessage("⚠️ 結論產生失敗");
+      }
+    }
+
     await this.cleanup();
   }
 
