@@ -479,6 +479,7 @@ export class Daemon {
     };
 
     // Schedule tools → route to fleet manager
+    const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances"]);
     const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
 
     if (SCHEDULE_TOOLS.has(tool)) {
@@ -508,6 +509,30 @@ export class Daemon {
         clearTimeout(timeout);
         respond(respMsg.result, respMsg.error as string | undefined);
       });
+      return;
+    }
+
+    if (CROSS_INSTANCE_TOOLS.has(tool)) {
+      // Route to fleet manager via IPC (topic mode only)
+      if (this.topicMode && this.ipcServer) {
+        const outboundKey = `fleet_out_${requestId}`;
+        this.ipcServer.broadcast({
+          type: "fleet_outbound",
+          tool,
+          args,
+          requestId,
+        });
+        const timeout = setTimeout(() => {
+          this.pendingIpcRequests.delete(outboundKey);
+          respond(null, "Cross-instance operation timed out after 30s");
+        }, 30_000);
+        this.pendingIpcRequests.set(outboundKey, (respMsg) => {
+          clearTimeout(timeout);
+          respond(respMsg.result, respMsg.error as string | undefined);
+        });
+      } else {
+        respond(null, "Cross-instance messaging requires topic mode");
+      }
       return;
     }
 

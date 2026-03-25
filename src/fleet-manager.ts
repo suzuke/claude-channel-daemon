@@ -672,6 +672,43 @@ export class FleetManager {
           .then(path => respond(path))
           .catch(e => respond(null, e.message));
         break;
+      case "send_to_instance": {
+        const targetName = args.instance_name as string;
+        const message = args.message as string;
+        const targetIpc = this.instanceIpcClients.get(targetName);
+
+        if (!targetIpc) {
+          respond(null, `Instance not found or not running: ${targetName}`);
+          break;
+        }
+
+        // Send as fleet_inbound to the target instance
+        // Mark as cross-instance so target knows it's from another instance, not a user
+        targetIpc.send({
+          type: "fleet_inbound",
+          content: message,
+          meta: {
+            chat_id: "cross-instance",
+            message_id: `xmsg-${Date.now()}`,
+            user: `instance:${instanceName}`,
+            user_id: `instance:${instanceName}`,
+            ts: new Date().toISOString(),
+            thread_id: "",
+            from_instance: instanceName,
+          },
+        });
+
+        this.logger.info(`✉ ${instanceName} → ${targetName}: ${message.slice(0, 100)}`);
+        respond({ sent: true, target: targetName });
+        break;
+      }
+
+      case "list_instances": {
+        const instances = [...this.daemons.keys()].filter(name => name !== instanceName);
+        respond({ instances });
+        break;
+      }
+
       default:
         respond(null, `Unknown tool: ${tool}`);
     }

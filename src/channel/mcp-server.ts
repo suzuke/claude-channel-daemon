@@ -211,6 +211,7 @@ const mcp = new Server(
       "Use react to add emoji reactions, edit_message for progress updates, and download_attachment for file attachments.",
       "If the inbound meta has image_path, Read that file — it is a photo the sender attached.",
       "If the inbound meta has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path.",
+      "Use send_to_instance to communicate with other Claude instances. Messages are passive — the recipient sees them but is not forced to respond. Use list_instances to discover available instances.",
     ].join("\n"),
   },
 );
@@ -345,6 +346,32 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           id: { type: "string", description: "Schedule ID to delete" },
         },
         required: ["id"],
+      },
+    },
+    {
+      name: "send_to_instance",
+      description: "Send a message to another Claude instance. The message appears in their channel as a passive notification — they decide whether to respond. Use this to share information, request reviews, or coordinate work across instances.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          instance_name: {
+            type: "string",
+            description: "Name of the target instance (e.g., 'ccplugin', 'blog-t1385'). Use list_instances to see available instances.",
+          },
+          message: {
+            type: "string",
+            description: "The message to send to the target instance.",
+          },
+        },
+        required: ["instance_name", "message"],
+      },
+    },
+    {
+      name: "list_instances",
+      description: "List all currently running instances that you can send messages to.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
       },
     },
   ],
