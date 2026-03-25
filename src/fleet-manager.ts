@@ -1309,8 +1309,12 @@ export class FleetManager {
     }
 
     if (parsed.repo && !existsSync(join(parsed.repo, ".git"))) {
-      await this.adapter.sendText(msg.chatId, `⚠️ 不是 git repository: ${parsed.repo}`);
-      return;
+      // Auto-create repo if path doesn't exist or isn't a git repo
+      const { mkdirSync } = await import("node:fs");
+      const { execFileSync } = await import("child_process");
+      mkdirSync(parsed.repo, { recursive: true });
+      execFileSync("git", ["init"], { cwd: parsed.repo, stdio: "pipe" });
+      this.logger.info({ repo: parsed.repo }, "Auto-initialized git repo for collab");
     }
 
     const maxParticipants = this.fleetConfig?.defaults?.meetings?.maxParticipants ?? 6;
