@@ -196,7 +196,7 @@ function ipcPermissionRequest(
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: "ccd-channel", version: "0.1.0" },
+  { name: "ccd-channel", version: "0.2.0" },
   {
     capabilities: {
       tools: {},

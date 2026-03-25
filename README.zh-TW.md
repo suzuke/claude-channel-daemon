@@ -111,6 +111,29 @@ NORMAL → PENDING → HANDING_OVER → ROTATING → GRACE
 
 也會在 `max_age_hours`（預設 8h）後不管 context 用量直接輪替。
 
+### 跨 Instance 訊息
+
+Instance 之間可以透過 MCP tools 溝通：
+
+- `send_to_instance` — 傳訊息給另一個執行中的 instance（被動通知）
+- `list_instances` — 查看所有執行中的 instance
+
+訊息會同時顯示在發送者和接收者的 Telegram topic 裡。
+
+### 優雅重啟
+
+`ccd fleet restart` 發送 SIGUSR2 給 fleet manager。它會等所有 instance 空閒（10 秒無 transcript 活動）後逐一重啟。5 分鐘超時防止卡住。
+
+### Telegram 指令
+
+Topic 模式下，bot 在 General topic 回應以下指令：
+
+- `/open [關鍵字]` — 瀏覽並綁定現有專案目錄到新 topic
+- `/new <名稱>` — 建新專案目錄 + git init + 綁定到 topic
+- `/meets "議題"` — 用 Agent Teams 開啟多角度討論
+- `/debate "議題"` — 開啟正反方辯論
+- `/collab --repo ~/app "任務"` — 用 git worktree 開啟協作開發
+
 ### 權限系統
 
 使用 Claude Code 原生的 permission relay——權限請求會以 Telegram inline 按鈕（允許／拒絕）轉發給你。當 Claude 要求使用敏感工具時，daemon 會在 Telegram 上提示你，並等待你的回應後才繼續執行。
@@ -146,12 +169,17 @@ ccd fleet start
 ccd init                  互動式設定精靈
 ccd fleet start           啟動所有 instance
 ccd fleet stop            停止所有 instance
+ccd fleet restart         優雅重啟（等空閒後重啟）
 ccd fleet status          看 instance 狀態
 ccd fleet logs <name>     看 instance log
 ccd fleet start <name>    啟動特定 instance
 ccd fleet stop <name>     停止特定 instance
 ccd schedule list         列出所有排程
+ccd schedule add          從 CLI 新增排程
 ccd schedule delete <id>  刪除排程
+ccd schedule enable <id>  啟用排程
+ccd schedule disable <id> 停用排程
+ccd schedule history <id> 看排程執行記錄
 ccd topic list            列出 topic 綁定
 ccd topic bind <n> <tid>  綁定 instance 到 topic
 ccd topic unbind <n>      解除 topic 綁定

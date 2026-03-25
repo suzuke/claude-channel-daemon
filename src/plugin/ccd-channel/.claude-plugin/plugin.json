@@ -1,5 +1,5 @@
 {
   "name": "ccd-channel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Built-in channel server for claude-channel-daemon"
 }

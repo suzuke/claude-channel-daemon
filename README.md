@@ -111,6 +111,29 @@ NORMAL → PENDING → HANDING_OVER → ROTATING → GRACE
 
 Also rotates after `max_age_hours` (default 8h) regardless of context usage.
 
+### Cross-instance messaging
+
+Instances can communicate with each other via MCP tools:
+
+- `send_to_instance` — send a message to another running instance (passive notification)
+- `list_instances` — discover all running instances
+
+Messages are posted to both sender and recipient Telegram topics for visibility.
+
+### Graceful restart
+
+`ccd fleet restart` sends SIGUSR2 to the fleet manager. It waits for all instances to go idle (no transcript activity for 10s), then restarts them one by one. A 5-minute timeout prevents hanging on stuck instances.
+
+### Telegram commands
+
+In topic mode, the bot responds to commands in the General topic:
+
+- `/open [keyword]` — browse and bind an existing project directory to a new topic
+- `/new <name>` — create a new project directory + git init + bind to topic
+- `/meets "topic"` — start a multi-angle discussion using Agent Teams
+- `/debate "topic"` — start a pro/con debate
+- `/collab --repo ~/app "task"` — start collaborative coding with git worktrees
+
 ### Permission system
 
 Uses Claude Code's native permission relay — permission requests are forwarded to Telegram as inline buttons (Allow/Deny). When Claude requests a sensitive tool use, the daemon surfaces it to you in Telegram and waits for your response before proceeding.
@@ -146,12 +169,17 @@ ccd fleet start
 ccd init                  Interactive setup wizard
 ccd fleet start           Start all instances
 ccd fleet stop            Stop all instances
+ccd fleet restart         Graceful restart (wait for idle)
 ccd fleet status          Show instance status
 ccd fleet logs <name>     Show instance logs
 ccd fleet start <name>    Start specific instance
 ccd fleet stop <name>     Stop specific instance
 ccd schedule list         List all schedules
+ccd schedule add          Add a schedule from CLI
 ccd schedule delete <id>  Delete a schedule
+ccd schedule enable <id>  Enable a schedule
+ccd schedule disable <id> Disable a schedule
+ccd schedule history <id> Show schedule run history
 ccd topic list            List topic bindings
 ccd topic bind <n> <tid>  Bind instance to topic
 ccd topic unbind <n>      Unbind instance from topic
