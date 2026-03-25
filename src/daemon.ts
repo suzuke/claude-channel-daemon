@@ -590,6 +590,14 @@ export class Daemon {
         requestId,
         result: { request_id, behavior },
       });
+
+      // If denied due to timeout, inform Claude so it can distinguish from explicit rejection
+      if (behavior === "deny" && result.respondedBy?.channelType === "timeout") {
+        this.pushChannelMessage(
+          `[System] Permission request for \`${prompt.tool_name}\` timed out — user may be away.`,
+          { chat_id: this.lastChatId ?? "", ts: new Date().toISOString() },
+        );
+      }
     } catch (err) {
       this.ipcServer?.send(socket, {
         requestId,
