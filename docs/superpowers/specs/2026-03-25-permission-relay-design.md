@@ -174,6 +174,26 @@ Tool: Bash
 - No multi-adapter simultaneous permission request race (reuse existing MessageBus pattern)
 - No custom danger pattern detection
 
+## Known Issues
+
+### Timeout vs explicit deny ordering (2026-03-25)
+
+When a permission request times out, the daemon sends two things:
+1. `deny` IPC response → MCP server → Claude (direct response, fast)
+2. `[System] timed out` channel message → IPC broadcast → MCP server → Claude (extra hop, slower)
+
+The channel message may arrive after Claude has already processed the deny. In practice Claude correlates both messages within the same context, but the ordering is not guaranteed.
+
+Possible improvement: send the channel message before the deny response with a small delay. Trade-off: adds latency to every timeout.
+
+### Dual-path race behavior
+
+Permission relay uses a dual-path race: terminal prompt and channel (Telegram) run simultaneously, first responder wins. Claude Code generates different rejection messages depending on which path responds:
+- Terminal wins → `"The user doesn't want to proceed with this tool use."`
+- Channel wins → `"Denied via channel ccd-channel"`
+
+This is Claude Code's native behavior, not controllable by us.
+
 ## Testing
 
 - Unit test: MCP server permission notification round-trip
