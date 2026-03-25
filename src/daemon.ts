@@ -12,12 +12,10 @@ import { MemoryDb } from "./db.js";
 import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
-import { TmuxPromptDetector } from "./approval/tmux-prompt-detector.js";
 import type { CliBackend, CliBackendConfig } from "./backend/types.js";
-import type { ApprovalStrategy } from "./backend/approval-strategy.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
-import type { ChannelAdapter, InboundMessage, ApprovalResponse } from "./channel/types.js";
+import type { ChannelAdapter, InboundMessage, ApprovalResponse, PermissionPrompt } from "./channel/types.js";
 import { transcribe } from "./stt.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,7 +28,6 @@ export class Daemon {
   private messageBus: MessageBus;
   private transcriptMonitor: TranscriptMonitor | null = null;
   private toolTracker: ToolTracker | null = null;
-  private promptDetector: TmuxPromptDetector | null = null;
   private guardian: ContextGuardian | null = null;
   private memoryLayer: MemoryLayer | null = null;
   private adapter: ChannelAdapter | null = null;
@@ -51,7 +48,6 @@ export class Daemon {
     private instanceDir: string,
     private topicMode = false,
     private backend?: CliBackend,
-    private approvalStrategyInstance?: ApprovalStrategy,
   ) {
     this.logger = createLogger(config.log_level);
     this.messageBus = new MessageBus();
@@ -95,6 +91,8 @@ export class Daemon {
       if (msg.type === "tool_call") {
         // MCP server forwarding a Claude tool call (reply, react, edit, download)
         this.handleToolCall(msg, socket);
+      } else if (msg.type === "permission_request") {
+        this.handlePermissionRequest(msg, socket);
       } else if (msg.type === "mcp_ready") {
         this.logger.debug("MCP channel server connected and ready");
         // Notify FleetManager's IPC client that MCP is ready
@@ -237,7 +235,6 @@ export class Daemon {
 
     await this.spawnClaudeWindow();
 
-    let port = this.config.approval_port ?? 18321;
     if (!this.config.lightweight) {
       // 3. Pipe-pane for prompt detection
       const outputLog = join(this.instanceDir, "output.log");
@@ -266,29 +263,6 @@ export class Daemon {
         ackIfPending();
       });
       this.transcriptMonitor.startPolling();
-
-      // 6. Approval server
-      if (this.approvalStrategyInstance) {
-        port = await this.approvalStrategyInstance.start();
-        this.logger.debug({ port }, "Approval strategy started");
-      }
-
-      // 7. Prompt detector
-      // In topic mode, messageBus has no adapters — must route via IPC like ApprovalServer does
-      const requestApproval = (prompt: string): Promise<ApprovalResponse> => {
-        if (this.topicMode && this.ipcServer) {
-          return this.requestApprovalViaIpc(prompt);
-        }
-        return this.messageBus.requestApproval(prompt);
-      };
-      this.promptDetector = new TmuxPromptDetector(
-        outputLog,
-        this.tmux,
-        requestApproval,
-        this.logger,
-        this.instanceDir,
-      );
-      this.promptDetector.startPolling();
 
       // 8. Context guardian
       const statusFile = join(this.instanceDir, "statusline.json");
@@ -353,17 +327,15 @@ export class Daemon {
     // Set CCD_SOCKET_PATH env for MCP server
     process.env.CCD_SOCKET_PATH = sockPath;
 
-    this.logger.info(`${this.name} ready (port ${port})`);
+    this.logger.info(`${this.name} ready`);
   }
 
   async stop(): Promise<void> {
     this.logger.info("Stopping daemon instance");
-    this.promptDetector?.stop();
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.memoryLayer) await this.memoryLayer.stop();
     if (this.adapter) await this.adapter.stop();
-    await this.approvalStrategyInstance?.stop();
     await this.ipcServer?.close();
     // Strategy A: kill window on stop, resume via --resume on next start
     // MCP server has no reconnection → keeping window alive would leave
@@ -595,8 +567,39 @@ export class Daemon {
     }
   }
 
-  /** Topic mode: forward approval request to fleet manager via IPC (mirrors ApprovalServer logic) */
-  private requestApprovalViaIpc(prompt: string): Promise<ApprovalResponse> {
+  /** Handle a permission_request IPC message from the MCP server */
+  private async handlePermissionRequest(msg: Record<string, unknown>, socket: import("node:net").Socket): Promise<void> {
+    const requestId = msg.requestId as number;
+    const request_id = msg.request_id as string;
+    const prompt: PermissionPrompt = {
+      tool_name: msg.tool_name as string,
+      description: msg.description as string,
+      input_preview: msg.input_preview as string | undefined,
+    };
+
+    try {
+      let result: ApprovalResponse;
+      if (this.topicMode && this.ipcServer) {
+        result = await this.requestApprovalViaIpc(prompt);
+      } else {
+        result = await this.messageBus.requestApproval(prompt);
+      }
+
+      const behavior = result.decision === "approve" ? "allow" : "deny";
+      this.ipcServer?.send(socket, {
+        requestId,
+        result: { request_id, behavior },
+      });
+    } catch (err) {
+      this.ipcServer?.send(socket, {
+        requestId,
+        result: { request_id, behavior: "deny" },
+      });
+    }
+  }
+
+  /** Topic mode: forward approval request to fleet manager via IPC */
+  private requestApprovalViaIpc(prompt: PermissionPrompt): Promise<ApprovalResponse> {
     return new Promise((resolve) => {
       const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -607,9 +610,8 @@ export class Daemon {
 
       this.pendingIpcRequests.set(approvalId, (msg) => {
         clearTimeout(timeout);
-        const d = msg.decision as string;
-        const decision = d === "deny" ? "deny" as const : d === "always_allow" ? "always_allow" as const : "approve" as const;
-        resolve({ decision, respondedBy: { channelType: "ipc", userId: "" } });
+        const decision = msg.decision === "approve" ? "approve" as const : "deny" as const;
+        resolve({ decision, respondedBy: { channelType: "fleet", userId: "" } });
       });
 
       this.ipcServer?.broadcast({
@@ -633,7 +635,6 @@ export class Daemon {
       workingDirectory: this.config.working_directory,
       instanceDir: this.instanceDir,
       instanceName: this.name,
-      approvalPort: this.config.approval_port ?? 18321,
       mcpServers: {
         "ccd-channel": {
           command: "node",
@@ -641,7 +642,6 @@ export class Daemon {
           env: { CCD_SOCKET_PATH: sockPath },
         },
       },
-      approvalStrategy: this.approvalStrategyInstance!,
       systemPrompt: this.config.systemPrompt,
       skipPermissions: this.config.skipPermissions,
     };
