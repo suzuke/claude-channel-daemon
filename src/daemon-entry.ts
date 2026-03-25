@@ -10,9 +10,7 @@ function getArg(name: string): string {
 
 const name = getArg("--instance");
 const instanceDir = getArg("--instance-dir");
-const port = parseInt(getArg("--port"), 10);
 const config: InstanceConfig = JSON.parse(getArg("--config"));
-config.approval_port = port;
 
 const topicMode = args.includes("--topic-mode");
 const daemon = new Daemon(name, config, instanceDir, topicMode);
