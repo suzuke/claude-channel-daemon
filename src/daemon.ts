@@ -595,7 +595,11 @@ export class Daemon {
       if (behavior === "deny" && result.respondedBy?.channelType === "timeout") {
         this.pushChannelMessage(
           `[System] Permission request for \`${prompt.tool_name}\` timed out — user may be away.`,
-          { chat_id: this.lastChatId ?? "", ts: new Date().toISOString() },
+          {
+            chat_id: this.lastChatId ?? "",
+            ts: new Date().toISOString(),
+            ...(this.lastThreadId ? { thread_id: this.lastThreadId } : {}),
+          },
         );
       }
     } catch (err) {
