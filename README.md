@@ -4,11 +4,11 @@
 [![Node.js >= 20](https://img.shields.io/badge/Node.js-%3E%3D%2020-green.svg)](https://nodejs.org)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-compatible-blueviolet.svg)](https://docs.anthropic.com/en/docs/claude-code)
 
-**Run a fleet of Claude Code agents from your phone.** One Telegram bot, unlimited projects — each Forum Topic is an independent Claude session with Docker sandbox, crash recovery, and zero babysitting.
+**Run a fleet of Claude Code agents from your phone.** One Telegram bot, unlimited projects — each Forum Topic is an independent Claude session with crash recovery and zero babysitting.
 
 [繁體中文](README.zh-TW.md)
 
-> **⚠️** The daemon pre-approves most tools. Dangerous Bash commands (rm, sudo, git push...) are forwarded to Telegram for manual approval. If the approval server is unreachable, dangerous commands are denied. See [Permission Architecture](#approval-system).
+> **⚠️** The daemon uses Claude Code's native permission relay — permission requests are forwarded to Telegram as inline buttons (Allow/Deny). See [Permission System](#permission-system).
 
 ## Why this exists
 
@@ -20,10 +20,9 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 |---------|:-:|:-:|
 | Multiple projects simultaneously | — | **N sessions, 1 bot** |
 | Survives terminal close / SSH disconnect | — | **tmux persistence** |
-| Docker-sandboxed Bash execution | — | **Built-in** |
 | Cron-based scheduled tasks | — | **Built-in** |
 | Auto context rotation (prevent stale sessions) | — | **Built-in** |
-| Dangerous command approval via Telegram | — | **Inline buttons** |
+| Permission requests via Telegram | — | **Inline buttons** |
 | Voice messages → Claude | — | **Groq Whisper** |
 | Create topic = auto-bind project | — | **Built-in** |
 | Install as system service (launchd/systemd) | — | **One command** |
@@ -34,7 +33,7 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 - **Solo developers** who want Claude working on multiple repos around the clock
 - **Small teams** sharing a single bot — each team member gets their own Forum Topic
 - **CI/CD power users** who want cron-scheduled Claude tasks (daily PR reviews, deploy checks)
-- **Security-conscious users** who need sandboxed execution and explicit approval for dangerous commands
+- **Security-conscious users** who need explicit permission approval for tool use
 - Anyone who's tired of keeping a terminal window open just to talk to Claude
 
 ## How it compares
@@ -43,10 +42,9 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 |---|:-:|:-:|:-:|:-:|
 | Runs headless (no IDE/terminal) | **Yes** | Needs terminal | No | No |
 | Multi-project fleet | **Yes** | 1 session | 1 window | 1 window |
-| Docker sandbox | **Yes** | No | No | No |
 | Scheduled tasks | **Yes** | No | No | No |
 | Context auto-rotation | **Yes** | No | N/A | No |
-| Command approval flow | **Yes** | No | N/A | Limited |
+| Permission approval flow | **Yes** | No | N/A | Limited |
 | Mobile-first (Telegram) | **Yes** | Yes | No | No |
 | Voice input | **Yes** | No | No | No |
 | System service | **Yes** | No | N/A | N/A |
@@ -65,7 +63,8 @@ Telegram ◄──long-poll──► │  TelegramAdapter (Grammy)     Scheduler
                           │       │                          │                      │
                           │  ┌────┴────┐  ┌────┴────┐  ┌────┴────┐                 │
                           │  │Daemon A  │  │Daemon B  │  │Daemon C  │                │
-                          │  │Approval  │  │Approval  │  │Approval  │                │
+                          │  │Permission│  │Permission│  │Permission│                │
+                          │  │Relay     │  │Relay     │  │Relay     │                │
                           │  │Context   │  │Context   │  │Context   │                │
                           │  │Guardian  │  │Guardian  │  │Guardian  │                │
                           │  └────┬─────┘  └────┬─────┘  └────┬─────┘                │
@@ -74,20 +73,8 @@ Telegram ◄──long-poll──► │  TelegramAdapter (Grammy)     Scheduler
                           │  │tmux win  │  │tmux win  │  │tmux win  │               │
                           │  │Claude    │  │Claude    │  │Claude    │               │
                           │  │+MCP srv  │  │+MCP srv  │  │+MCP srv  │               │
-                          │  └────┬─────┘  └────┴─────┘  └────┴─────┘               │
-                          └───────┼─────────────────────────────────────────────────┘
-                                  │ CLAUDE_CODE_SHELL
-                                  ▼
-                          ┌─────────────────────────────────────────┐
-                          │         Docker Container (ccd-shared)   │
-                          │                                         │
-                          │  All Bash commands execute here          │
-                          │  ~/projects/ (bind mount)               │
-                          │  ~/.claude/ (bind mount)                │
-                          │                                         │
-                          │  Isolated from: ~/Desktop, ~/Downloads  │
-                          │  /etc, /usr, host processes             │
-                          └─────────────────────────────────────────┘
+                          │  └──────────┘  └──────────┘  └──────────┘               │
+                          └─────────────────────────────────────────────────────────┘
 ```
 
 ## Key features
@@ -95,34 +82,6 @@ Telegram ◄──long-poll──► │  TelegramAdapter (Grammy)     Scheduler
 ### Fleet mode — one bot, many projects
 
 Each Telegram Forum Topic maps to an independent Claude Code session. Create a topic, pick a project directory, and Claude starts working. Delete the topic, instance stops. Scale to as many projects as your machine can handle.
-
-### Docker sandbox
-
-Bash commands run inside a shared Docker container. Claude Code itself stays on the host (preserving Keychain auth, tmux attach, hooks). Only shell execution is sandboxed.
-
-```yaml
-# fleet.yaml
-sandbox:
-  enabled: true
-  network: bridge    # "none" (default) = no network; "bridge" = full network (needed for apt/pip install)
-  extra_mounts:
-    - ~/.gitconfig:~/.gitconfig:ro
-    - ~/.ssh:~/.ssh:ro
-```
-
-**How it works:** The daemon sets `CLAUDE_CODE_SHELL` to a wrapper script (`sandbox-bash`) that forwards commands via `docker exec` to the shared container. All project directories are bind-mounted at their original absolute paths — zero path translation needed.
-
-**Auto-bake:** When Claude installs packages inside the container (pip, apt, cargo, npm), the daemon records these commands. During context rotation, if enough packages have accumulated, it automatically appends them to `Dockerfile.sandbox` and rebuilds the image — so packages persist across container rebuilds. Run `ccd sandbox bake --dry-run` to preview, or `ccd sandbox bake` to trigger manually.
-
-**What's isolated:**
-| Visible inside sandbox | NOT visible |
-|----------------------|-------------|
-| `project_roots` directories (rw) | `~/Desktop`, `~/Downloads` |
-| `~/.claude/` (sessions, auth) | `/etc`, `/usr` (host) |
-| `~/.gitconfig`, `~/.ssh` (ro) | Host processes |
-| `$TMPDIR` (cwd tracking) | Other user directories |
-
-**What's NOT sandboxed:** Claude's built-in file tools (Read, Write, Edit, Glob, Grep) operate directly on the host filesystem — only Bash tool commands go through Docker.
 
 ### Scheduled tasks
 
@@ -152,25 +111,9 @@ NORMAL → PENDING → HANDING_OVER → ROTATING → GRACE
 
 Also rotates after `max_age_hours` (default 8h) regardless of context usage.
 
-### Approval system
+### Permission system
 
-A PreToolUse hook forwards every Bash command to the approval server:
-
-| Command | Result |
-|---------|--------|
-| `ls`, `cat`, `npm install`, `git status` | Auto-approved |
-| `rm`, `mv`, `sudo`, `kill`, `git push/reset/clean` | → Telegram inline buttons |
-| `rm -rf /`, `dd`, `mkfs` | Hard-denied in settings |
-| Approval server unreachable | Denied (fail-closed) |
-
-```
-Claude calls Bash tool
-  → PreToolUse hook fires (on host, not in Docker)
-  → curl POST to approval server (127.0.0.1:PORT)
-  → safe? → allow
-  → dangerous? → IPC → fleet manager → Telegram inline buttons → you decide
-  → server down? → deny
-```
+Uses Claude Code's native permission relay — permission requests are forwarded to Telegram as inline buttons (Allow/Deny). When Claude requests a sensitive tool use, the daemon surfaces it to you in Telegram and waits for your response before proceeding.
 
 ### Voice transcription
 
@@ -189,28 +132,12 @@ npm install && npm link
 
 # Prerequisites
 brew install tmux        # macOS
-# Docker Desktop or OrbStack (for sandbox mode)
 
 # Interactive setup
 ccd init
 
 # Start the fleet
 ccd fleet start
-```
-
-### Docker sandbox setup
-
-```bash
-# Build the sandbox image (one-time)
-docker build -f Dockerfile.sandbox -t ccd-sandbox:latest \
-  --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) .
-
-# Add to fleet.yaml:
-#   sandbox:
-#     enabled: true
-
-# Restart fleet — container is created automatically
-ccd fleet stop && ccd fleet start
 ```
 
 ## Commands
@@ -245,12 +172,6 @@ ccd uninstall             Remove system service
 Fleet config at `~/.claude-channel-daemon/fleet.yaml`:
 
 ```yaml
-sandbox:
-  enabled: true
-  extra_mounts:
-    - /Users/me/.gitconfig:/Users/me/.gitconfig:ro
-    - /Users/me/.ssh:/Users/me/.ssh:ro
-
 project_roots:
   - ~/Projects
 
@@ -298,7 +219,6 @@ GROQ_API_KEY=gsk_...          # optional, for voice transcription
 | `instances/<name>/session-id` | Session UUID for `--resume` |
 | `instances/<name>/statusline.json` | Latest Claude status line |
 | `instances/<name>/channel.sock` | IPC Unix socket |
-| `instances/<name>/sandbox-bash` | Sandbox shell wrapper (when enabled) |
 | `instances/<name>/claude-settings.json` | Per-instance Claude settings |
 | `instances/<name>/memory.db` | Memory file backup (SQLite) |
 | `instances/<name>/output.log` | Claude tmux output capture |
@@ -309,14 +229,11 @@ GROQ_API_KEY=gsk_...          # optional, for voice transcription
 - tmux
 - Claude Code CLI (`claude`)
 - Telegram bot token ([@BotFather](https://t.me/BotFather))
-- Docker Desktop or OrbStack (optional, for sandbox mode)
 - Groq API key (optional, for voice transcription)
 
 ## Known limitations
 
-- Only tested on macOS (Docker sandbox uses macOS-specific paths)
-- Sandbox only isolates Bash tool — Read/Write/Edit/Glob/Grep operate on host filesystem
-- `~/.ssh` is mounted read-only into sandbox — Claude can read but not modify SSH keys
+- Only tested on macOS
 - Official telegram plugin in global `enabledPlugins` causes 409 polling conflicts (daemon retries with backoff)
 
 ## License
