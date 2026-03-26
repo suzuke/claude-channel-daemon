@@ -111,7 +111,13 @@ export class Daemon extends EventEmitter {
         const sessionName = msg.sessionName as string | undefined;
         if (sessionName) {
           this.socketSessionNames.set(socket, sessionName);
-          socket.on("close", () => { this.socketSessionNames.delete(socket); });
+          socket.on("close", () => {
+            this.socketSessionNames.delete(socket);
+            // Notify fleet manager so it can clean up sessionRegistry
+            if (sessionName !== this.name) {
+              this.ipcServer?.broadcast({ type: "session_disconnected", sessionName });
+            }
+          });
         }
         this.logger.debug({ sessionName }, "MCP channel server connected and ready");
         // Notify FleetManager's IPC client that MCP is ready

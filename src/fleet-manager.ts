@@ -402,6 +402,12 @@ export class FleetManager implements FleetContext {
             this.sessionRegistry.set(sessionName, name);
             this.logger.info({ sessionName, instanceName: name }, "Registered external session");
           }
+        } else if (msg.type === "session_disconnected") {
+          const sessionName = msg.sessionName as string | undefined;
+          if (sessionName && this.sessionRegistry.has(sessionName)) {
+            this.sessionRegistry.delete(sessionName);
+            this.logger.info({ sessionName, instanceName: name }, "Unregistered external session");
+          }
         } else if (msg.type === "fleet_outbound") {
           // Auto-register external session on first outbound message — covers the
           // race where mcp_ready arrived before fleet manager connected and query_sessions
