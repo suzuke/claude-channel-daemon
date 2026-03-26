@@ -20,14 +20,14 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 |---------|:-:|:-:|
 | Multiple projects simultaneously | — | **N sessions, 1 bot** |
 | Survives terminal close / SSH disconnect | — | **tmux persistence** |
-| Cron-based scheduled tasks | — | **Built-in** |
+| Cron-based scheduled tasks | Session-scoped (expires in 3 days) | **Persistent (SQLite-backed)** |
 | Auto context rotation (prevent stale sessions) | — | **Built-in** |
-| Permission requests via Telegram | — | **Inline buttons** |
+| Permission requests via Telegram | Text-based reply | **Inline buttons** |
 | Voice messages → Claude | — | **Groq Whisper** |
 | Create topic = auto-bind project | — | **Built-in** |
 | Install as system service (launchd/systemd) | — | **One command** |
 | Crash recovery | — | **Auto-restart** |
-| Cost guard (daily spending limits) | — | **Built-in** |
+| Cost guard (daily spending limits) | Platform-level (`--max-budget-usd`) | **Per-instance daily limits** |
 | Fleet status from Telegram | — | **/status command** |
 | Daily fleet summary | — | **Scheduled report** |
 | Hang detection | — | **Auto-detect + notify** |
@@ -47,13 +47,13 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 |---|:-:|:-:|:-:|:-:|
 | Runs headless (no IDE/terminal) | **Yes** | Needs terminal | No | No |
 | Multi-project fleet | **Yes** | 1 session | 1 window | 1 window |
-| Scheduled tasks | **Yes** | No | No | No |
+| Scheduled tasks | **Persistent** | Session-scoped | No | No |
 | Context auto-rotation | **Yes** | No | N/A | No |
-| Permission approval flow | **Yes** | No | N/A | Limited |
+| Permission approval flow | **Inline buttons** | Text-based | N/A | Limited |
 | Mobile-first (Telegram) | **Yes** | Yes | No | No |
 | Voice input | **Yes** | No | No | No |
 | System service | **Yes** | No | N/A | N/A |
-| Cost controls | **Yes** | No | N/A | N/A |
+| Cost controls | **Per-instance** | Platform-level | N/A | N/A |
 | Crash recovery | **Yes** | No | N/A | N/A |
 
 ## Architecture
