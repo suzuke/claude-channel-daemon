@@ -401,6 +401,14 @@ export async function runSetupWizard(): Promise<void> {
     costGuardLimit = parseFloat(limitStr);
     costGuardTimezone = await ask(rl, "Timezone", {
       default: costGuardTimezone,
+      validate: (v) => {
+        try {
+          Intl.DateTimeFormat(undefined, { timeZone: v });
+          return null;
+        } catch {
+          return `Invalid timezone: "${v}". Use IANA format (e.g. Asia/Taipei, America/New_York)`;
+        }
+      },
     });
   }
 
@@ -493,7 +501,7 @@ export async function runSetupWizard(): Promise<void> {
     },
     context_guardian: {
       threshold_percentage: 40,
-      max_age_hours: 4,
+      max_age_hours: 8,
       strategy: "hybrid",
     },
     memory: {

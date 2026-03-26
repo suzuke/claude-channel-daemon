@@ -165,8 +165,15 @@ export class ClaudeCodeBackend implements CliBackend {
 
   private writeStatusLineScript(): string {
     const statusFile = join(this.instanceDir, "statusline.json");
-    const script = `#!/bin/bash\nINPUT=$(cat)\necho "$INPUT" > "${statusFile}"\necho "ok"`;
-    const scriptPath = join(this.instanceDir, "statusline.sh");
+    // Use a Node.js script instead of bash to avoid shell injection via statusFile path
+    const script = [
+      "#!/usr/bin/env node",
+      "const fs = require('fs');",
+      "let input = '';",
+      "process.stdin.on('data', d => input += d);",
+      `process.stdin.on('end', () => { fs.writeFileSync(${JSON.stringify(statusFile)}, input); console.log('ok'); });`,
+    ].join("\n");
+    const scriptPath = join(this.instanceDir, "statusline.js");
     writeFileSync(scriptPath, script, { mode: 0o755 });
     return scriptPath;
   }

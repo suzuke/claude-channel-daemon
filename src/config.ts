@@ -100,6 +100,15 @@ function validateConfig(config: DaemonConfig): void {
   }
 }
 
+/** Validate IANA timezone string. Throws if invalid. */
+export function validateTimezone(tz: string, field: string): void {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+  } catch {
+    throw new Error(`${field}: invalid timezone "${tz}". Use IANA format (e.g. Asia/Taipei)`);
+  }
+}
+
 export function loadConfig(configPath: string): DaemonConfig {
   if (!existsSync(configPath)) {
     return { ...DEFAULT_CONFIG };
