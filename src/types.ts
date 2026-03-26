@@ -93,6 +93,7 @@ export interface ChannelConfig {
 export interface InstanceConfig {
   working_directory: string;
   topic_id?: number;
+  general_topic?: boolean;
   channel?: ChannelConfig;
   restart_policy: DaemonConfig["restart_policy"];
   context_guardian: DaemonConfig["context_guardian"];

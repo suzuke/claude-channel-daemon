@@ -8,7 +8,7 @@ import { DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { formatCents } from "./cost-guard.js";
 
 /** Sanitize a directory name into a valid instance name. Keeps Unicode letters (incl. CJK). */
-function sanitizeInstanceName(name: string): string {
+export function sanitizeInstanceName(name: string): string {
   const sanitized = name.toLowerCase().replace(/[^\p{L}\d-]/gu, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   return sanitized || "project";
 }

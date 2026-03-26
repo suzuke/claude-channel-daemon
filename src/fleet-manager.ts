@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -8,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig, CostGuardConfig, DailySummaryConfig } from "./types.js";
 import type { RouteTarget } from "./meeting/types.js";
-import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY } from "./config.js";
+import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { EventLog } from "./event-log.js";
 import { CostGuard, formatCents } from "./cost-guard.js";
 import { TmuxManager } from "./tmux-manager.js";
@@ -23,7 +24,7 @@ import { Scheduler } from "./scheduler/index.js";
 import type { Schedule, SchedulerConfig } from "./scheduler/index.js";
 import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
 import type { FleetContext } from "./fleet-context.js";
-import { TopicCommands } from "./topic-commands.js";
+import { TopicCommands, sanitizeInstanceName } from "./topic-commands.js";
 import { MeetingManager } from "./meeting-manager.js";
 import type { HangDetector } from "./hang-detector.js";
 import { DailySummary } from "./daily-summary.js";
@@ -211,6 +212,46 @@ export class FleetManager implements FleetContext {
     });
     this.dailySummary.start();
 
+    // Auto-create general instance if none configured
+    const hasGeneralTopic = Object.values(fleet.instances).some(inst => inst.general_topic === true);
+    if (!hasGeneralTopic) {
+      this.logger.info("Auto-creating general instance for General Topic");
+      const generalDir = join(homedir(), ".claude-channel-daemon", "general");
+      mkdirSync(generalDir, { recursive: true });
+      const claudeMdPath = join(generalDir, "CLAUDE.md");
+      if (!existsSync(claudeMdPath)) {
+        writeFileSync(claudeMdPath, `# General Assistant
+
+你是這個 CCD fleet 的通用入口。
+
+## 行為準則
+
+- 簡單任務（搜尋、翻譯、一般問答）：自己處理。
+- 屬於特定專案的任務：用 list_instances() 找到對應 agent，需要時用 start_instance() 啟動，再用 send_to_instance() 委派。
+- 需要多個 agent 協作的任務：協調各 agent 並行或串行執行，收集結果後彙整。
+- 使用者想開新的專案 agent：用 create_instance() 建立。
+- 收到其他 instance 委派的任務時，完成後一定要用 send_to_instance() 回報結果。
+
+## 委派原則
+
+只在有具體理由時才委派：
+- 任務需要存取特定專案的檔案
+- 任務可以從多 agent 平行執行中受益
+- 保留自己的 context 更重要，把不相關的工作交出去
+- 絕不把任務回委給委派你的 instance
+
+自己能做的，就自己做。
+`, "utf-8");
+      }
+      const generalConfig: InstanceConfig = {
+        ...DEFAULT_INSTANCE_CONFIG,
+        working_directory: generalDir,
+        general_topic: true,
+      };
+      fleet.instances["general"] = generalConfig;
+      this.saveFleetConfig();
+    }
+
     for (const [name, config] of Object.entries(fleet.instances)) {
       await this.startInstance(name, config, topicMode && !config.channel);
     }
@@ -370,7 +411,7 @@ export class FleetManager implements FleetContext {
             this.sessionRegistry.set(sender, name);
             this.logger.info({ sessionName: sender, instanceName: name }, "Registered external session");
           }
-          this.handleOutboundFromInstance(name, msg);
+          this.handleOutboundFromInstance(name, msg).catch(err => this.logger.error({ err }, "handleOutboundFromInstance error"));
         } else if (msg.type === "fleet_approval_request") {
           this.handleApprovalFromInstance(name, msg);
         } else if (msg.type === "fleet_tool_status") {
@@ -393,12 +434,50 @@ export class FleetManager implements FleetContext {
   }
 
   /** Handle inbound message — transcribe voice if present, then route */
+  private findGeneralInstance(): string | undefined {
+    if (!this.fleetConfig) return undefined;
+    for (const [name, config] of Object.entries(this.fleetConfig.instances)) {
+      if (config.general_topic === true) {
+        return this.daemons.has(name) ? name : undefined;
+      }
+    }
+    return undefined;
+  }
+
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
     const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
     if (threadId == null) {
       // General topic: try topic commands first, then meeting commands
       if (await this.topicCommands.handleGeneralCommand(msg)) return;
       if (await this.meetingManager.handleCommand(msg)) return;
+
+      // Forward to General Topic instance if configured
+      const generalInstance = this.findGeneralInstance();
+      if (generalInstance) {
+        const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, generalInstance);
+        const ipc = this.instanceIpcClients.get(generalInstance);
+        if (ipc) {
+          if (this.adapter && msg.chatId && msg.messageId) {
+            this.adapter.react(msg.chatId, msg.messageId, "👀")
+              .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
+          }
+          ipc.send({
+            type: "fleet_inbound",
+            content: text,
+            targetSession: generalInstance,
+            meta: {
+              chat_id: msg.chatId,
+              message_id: msg.messageId,
+              user: msg.username,
+              user_id: msg.userId,
+              ts: msg.timestamp.toISOString(),
+              thread_id: "",
+              ...extraMeta,
+            },
+          });
+          this.logger.info(`← ${generalInstance} ${msg.username}: ${(text ?? "").slice(0, 100)}`);
+        }
+      }
       return;
     }
 
@@ -440,7 +519,7 @@ export class FleetManager implements FleetContext {
   }
 
   /** Handle outbound tool calls from a daemon instance */
-  private handleOutboundFromInstance(instanceName: string, msg: Record<string, unknown>): void {
+  private async handleOutboundFromInstance(instanceName: string, msg: Record<string, unknown>): Promise<void> {
     if (!this.adapter) return;
     const tool = msg.tool as string;
     const args = (msg.args ?? {}) as Record<string, unknown>;
@@ -494,7 +573,13 @@ export class FleetManager implements FleetContext {
         }
 
         if (!targetIpc) {
-          respond(null, `Instance or session not found: ${targetName}`);
+          // Check if instance exists in config but is stopped
+          const existsInConfig = targetName in (this.fleetConfig?.instances ?? {});
+          if (existsInConfig) {
+            respond(null, `Instance '${targetName}' is stopped. Use start_instance('${targetName}') to start it first.`);
+          } else {
+            respond(null, `Instance or session not found: ${targetName}`);
+          }
           break;
         }
 
@@ -543,19 +628,122 @@ export class FleetManager implements FleetContext {
 
       case "list_instances": {
         const senderLabel = senderSessionName ?? instanceName;
-        const instances = [...this.daemons.keys()]
-          .filter(name => name !== instanceName && name !== senderLabel)
-          .map(name => {
-            const config = this.fleetConfig?.instances[name];
-            return { name, type: "instance" as const, topic_id: config?.topic_id ?? null };
-          });
-        // Include external sessions (excluding self)
-        const sessions = [...this.sessionRegistry.entries()]
-          .filter(([sessionName]) => sessionName !== senderLabel)
-          .map(([sessionName, hostInstance]) => ({
-            name: sessionName, type: "session" as const, host: hostInstance,
+        const allInstances = Object.entries(this.fleetConfig?.instances ?? {})
+          .filter(([name]) => name !== instanceName && name !== senderLabel)
+          .map(([name, config]) => ({
+            name,
+            type: "instance" as const,
+            status: this.daemons.has(name) ? "running" : "stopped",
+            working_directory: config.working_directory,
+            topic_id: config.topic_id ?? null,
           }));
-        respond({ instances: [...instances, ...sessions] });
+        // Include external sessions (excluding self)
+        const externalSessions = [...this.sessionRegistry.entries()]
+          .filter(([sessName]) => sessName !== senderLabel)
+          .map(([sessName, hostInstance]) => ({
+            name: sessName, type: "session" as const, host: hostInstance,
+          }));
+        respond({ instances: allInstances, external_sessions: externalSessions });
+        break;
+      }
+
+      case "start_instance": {
+        const targetName = args.name as string;
+
+        // Already running?
+        if (this.daemons.has(targetName)) {
+          respond({ success: true, status: "already_running" });
+          break;
+        }
+
+        // Exists in config?
+        const targetConfig = this.fleetConfig?.instances[targetName];
+        if (!targetConfig) {
+          respond(null, `Instance '${targetName}' not found in fleet config`);
+          break;
+        }
+
+        try {
+          await this.startInstance(targetName, targetConfig, true);
+          await this.connectIpcToInstance(targetName);
+          respond({ success: true, status: "started" });
+        } catch (err) {
+          respond(null, `Failed to start instance '${targetName}': ${(err as Error).message}`);
+        }
+        break;
+      }
+
+      case "create_instance": {
+        const directory = (args.directory as string).replace(/^~/, process.env.HOME || "~");
+        const topicName = (args.topic_name as string) || basename(directory);
+
+        // Validate directory exists
+        try {
+          await access(directory);
+        } catch {
+          respond(null, `Directory does not exist: ${directory}`);
+          break;
+        }
+
+        // Check if already bound (normalize ~ in config paths for comparison)
+        const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
+        const existingInstance = Object.entries(this.fleetConfig?.instances ?? {})
+          .find(([_, config]) => expandHome(config.working_directory) === directory);
+        if (existingInstance) {
+          const [eName, eConfig] = existingInstance;
+          respond({
+            success: true,
+            status: "already_exists",
+            name: eName,
+            topic_id: eConfig.topic_id,
+            running: this.daemons.has(eName),
+          });
+          break;
+        }
+
+        // Sequential steps with rollback
+        let createdTopicId: number | undefined;
+        let newInstanceName: string | undefined;
+
+        try {
+          // Step a: Create Telegram topic
+          createdTopicId = await this.createForumTopic(topicName);
+
+          // Step b: Register in config
+          newInstanceName = `${sanitizeInstanceName(basename(directory))}-t${createdTopicId}`;
+          const instanceConfig = {
+            ...this.fleetConfig!.defaults,
+            working_directory: directory,
+            topic_id: createdTopicId,
+          } as InstanceConfig;
+          this.fleetConfig!.instances[newInstanceName] = instanceConfig;
+          this.routingTable.set(createdTopicId, { kind: "instance", name: newInstanceName });
+          this.saveFleetConfig();
+
+          // Step c: Start instance
+          await this.startInstance(newInstanceName, instanceConfig, true);
+          await this.connectIpcToInstance(newInstanceName);
+
+          respond({
+            success: true,
+            name: newInstanceName,
+            topic_id: createdTopicId,
+          });
+        } catch (err) {
+          // Rollback in reverse order
+          if (newInstanceName && this.daemons.has(newInstanceName)) {
+            await this.stopInstance(newInstanceName).catch(() => {});
+          }
+          if (newInstanceName && this.fleetConfig?.instances[newInstanceName]) {
+            delete this.fleetConfig.instances[newInstanceName];
+            if (createdTopicId) this.routingTable.delete(createdTopicId);
+            this.saveFleetConfig();
+          }
+          if (createdTopicId) {
+            await this.deleteForumTopic(createdTopicId);
+          }
+          respond(null, `Failed to create instance: ${(err as Error).message}`);
+        }
         break;
       }
 
@@ -752,6 +940,27 @@ export class FleetManager implements FleetContext {
     return data.result.message_thread_id;
   }
 
+  private async deleteForumTopic(topicId: number): Promise<void> {
+    try {
+      const groupId = this.fleetConfig?.channel?.group_id;
+      const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
+      if (!groupId || !botTokenEnv) return;
+      const botToken = process.env[botTokenEnv];
+      if (!botToken) return;
+
+      await fetch(
+        `https://api.telegram.org/bot${botToken}/deleteForumTopic`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: groupId, message_thread_id: topicId }),
+        },
+      );
+    } catch (err) {
+      this.logger.warn({ err, topicId }, "Failed to delete forum topic during rollback");
+    }
+  }
+
   private topicCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Periodically check if bound topics still exist */
@@ -789,10 +998,14 @@ export class FleetManager implements FleetContext {
     if (Object.keys(this.fleetConfig.defaults).length > 0) toSave.defaults = this.fleetConfig.defaults;
     toSave.instances = {};
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
-      (toSave.instances as Record<string, unknown>)[name] = {
+      const serialized: Record<string, unknown> = {
         working_directory: inst.working_directory,
         topic_id: inst.topic_id,
       };
+      if (inst.general_topic) {
+        serialized.general_topic = true;
+      }
+      (toSave.instances as Record<string, unknown>)[name] = serialized;
     }
     writeFileSync(this.configPath, yaml.dump(toSave, { lineWidth: 120 }));
     this.logger.info({ path: this.configPath }, "Saved fleet config");
