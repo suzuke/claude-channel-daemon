@@ -45,6 +45,7 @@ export class FleetManager implements FleetContext {
   eventLog: EventLog | null = null;
   costGuard: CostGuard | null = null;
   private statuslineWatchers = new Map<string, ReturnType<typeof setInterval>>();
+  private instanceRateLimits = new Map<string, { five_hour_pct: number; seven_day_pct: number }>();
 
   constructor(public dataDir: string) {
     this.topicCommands = new TopicCommands(this);
@@ -545,6 +546,21 @@ export class FleetManager implements FleetContext {
 
   private async handleScheduleTrigger(schedule: Schedule): Promise<void> {
     const { target, reply_chat_id, reply_thread_id, message, label, id, source } = schedule;
+
+    const RATE_LIMIT_DEFER_THRESHOLD = 85;
+    const rl = this.instanceRateLimits.get(target);
+    if (rl && rl.five_hour_pct > RATE_LIMIT_DEFER_THRESHOLD) {
+      this.scheduler!.recordRun(id, "deferred", `5hr rate limit at ${rl.five_hour_pct}%`);
+      this.eventLog?.insert(target, "schedule_deferred", {
+        schedule_id: id,
+        label,
+        five_hour_pct: rl.five_hour_pct,
+      });
+      this.notifyInstanceTopic(target, `⏳ Schedule "${label ?? id}" deferred — rate limit at ${rl.five_hour_pct}%`);
+      this.logger.info({ target, scheduleId: id, rateLimitPct: rl.five_hour_pct }, "Schedule deferred due to rate limit");
+      return;
+    }
+
     const defaults = this.fleetConfig?.defaults as Record<string, unknown> | undefined;
     const schedulerDefaults = defaults?.scheduler as Record<string, unknown> | undefined;
 
@@ -718,6 +734,13 @@ export class FleetManager implements FleetContext {
       try {
         const data = JSON.parse(readFileSync(statusFile, "utf-8"));
         this.costGuard?.updateCost(name, data.cost?.total_cost_usd ?? 0);
+        const rl = data.rate_limits;
+        if (rl) {
+          this.instanceRateLimits.set(name, {
+            five_hour_pct: rl.five_hour?.used_percentage ?? 0,
+            seven_day_pct: rl.seven_day?.used_percentage ?? 0,
+          });
+        }
       } catch { /* file may not exist yet or be mid-write */ }
     }, 10_000);
     this.statuslineWatchers.set(name, timer);
@@ -736,6 +759,7 @@ export class FleetManager implements FleetContext {
   private clearStatuslineWatchers(): void {
     for (const [, timer] of this.statuslineWatchers) clearInterval(timer);
     this.statuslineWatchers.clear();
+    this.instanceRateLimits.clear();
   }
 
   async stopAll(): Promise<void> {
