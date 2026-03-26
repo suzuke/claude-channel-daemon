@@ -6,9 +6,11 @@ import yaml from "js-yaml";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-import type { FleetConfig, InstanceConfig } from "./types.js";
+import type { FleetConfig, InstanceConfig, CostGuardConfig } from "./types.js";
 import type { RouteTarget } from "./meeting/types.js";
-import { loadFleetConfig } from "./config.js";
+import { loadFleetConfig, DEFAULT_COST_GUARD } from "./config.js";
+import { EventLog } from "./event-log.js";
+import { CostGuard } from "./cost-guard.js";
 import { TmuxManager } from "./tmux-manager.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
@@ -40,6 +42,10 @@ export class FleetManager implements FleetContext {
   private meetingManager: MeetingManager;
   // sessionName → instanceName mapping for external sessions
   private sessionRegistry: Map<string, string> = new Map();
+  eventLog: EventLog | null = null;
+  costGuard: CostGuard | null = null;
+  private statuslineWatchers = new Map<string, ReturnType<typeof setInterval>>();
+  private lastKnownCost = new Map<string, number>();
 
   constructor(public dataDir: string) {
     this.topicCommands = new TopicCommands(this);
@@ -146,6 +152,29 @@ export class FleetManager implements FleetContext {
     const pidPath = join(this.dataDir, "fleet.pid");
     writeFileSync(pidPath, String(process.pid), "utf-8");
 
+    // Initialize event log
+    this.eventLog = new EventLog(join(this.dataDir, "events.db"));
+
+    // Initialize cost guard
+    const costGuardConfig: CostGuardConfig = {
+      ...DEFAULT_COST_GUARD,
+      ...(fleet.defaults as Record<string, unknown>)?.cost_guard as Partial<CostGuardConfig> ?? {},
+    };
+    this.costGuard = new CostGuard(costGuardConfig, this.eventLog);
+    this.costGuard.startMidnightReset();
+
+    this.costGuard.on("warn", (instance: string, totalCents: number, limitCents: number) => {
+      const msg = `⚠️ ${instance} cost: $${(totalCents / 100).toFixed(2)} / $${(limitCents / 100).toFixed(2)} (${Math.round(totalCents / limitCents * 100)}%)`;
+      this.notifyInstanceTopic(instance, msg);
+    });
+
+    this.costGuard.on("limit", (instance: string, totalCents: number, limitCents: number) => {
+      const msg = `🛑 ${instance} daily limit $${(limitCents / 100).toFixed(2)} reached — pausing instance.`;
+      this.notifyInstanceTopic(instance, msg);
+      this.eventLog?.insert(instance, "instance_paused", { reason: "cost_limit", cost_cents: totalCents });
+      this.stopInstance(instance).catch(err => this.logger.error({ err, instance }, "Failed to pause instance on cost limit"));
+    });
+
     for (const [name, config] of Object.entries(fleet.instances)) {
       await this.startInstance(name, config, topicMode && !config.channel);
     }
@@ -174,6 +203,10 @@ export class FleetManager implements FleetContext {
 
       await new Promise(r => setTimeout(r, 3000));
       await this.connectToInstances(fleet);
+
+      for (const name of Object.keys(fleet.instances)) {
+        this.startStatuslineWatcher(name);
+      }
     }
 
     // SIGHUP: reload scheduler (use once + re-register to avoid duplicates)
@@ -285,6 +318,9 @@ export class FleetManager implements FleetContext {
         }
       });
       this.logger.debug({ name }, "Connected to instance IPC");
+      if (!this.statuslineWatchers.has(name)) {
+        this.startStatuslineWatcher(name);
+      }
     } catch (err) {
       this.logger.warn({ name, err }, "Failed to connect to instance IPC");
     }
@@ -681,7 +717,43 @@ export class FleetManager implements FleetContext {
     this.logger.info({ path: this.configPath }, "Saved fleet config");
   }
 
+  private startStatuslineWatcher(name: string): void {
+    const statusFile = join(this.getInstanceDir(name), "statusline.json");
+    const timer = setInterval(() => {
+      try {
+        if (!existsSync(statusFile)) return;
+        const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+        const costUsd: number = data.cost?.total_cost_usd ?? 0;
+
+        // Detect rotation: cost dropped = new session started
+        const prevCost = this.lastKnownCost.get(name) ?? 0;
+        if (costUsd < prevCost && prevCost > 0) {
+          this.costGuard?.snapshotAndReset(name);
+          this.logger.info({ name, prevCost, newCost: costUsd }, "Cost dropped — rotation detected, snapshot taken");
+        }
+        this.lastKnownCost.set(name, costUsd);
+        this.costGuard?.updateCost(name, costUsd);
+      } catch { /* ignore read errors */ }
+    }, 10_000);
+    this.statuslineWatchers.set(name, timer);
+  }
+
+  private notifyInstanceTopic(instanceName: string, text: string): void {
+    if (!this.adapter) return;
+    const groupId = this.fleetConfig?.channel?.group_id;
+    if (!groupId) return;
+    const threadId = this.fleetConfig?.instances[instanceName]?.topic_id;
+    this.adapter.sendText(String(groupId), text, {
+      threadId: threadId != null ? String(threadId) : undefined,
+    }).catch(e => this.logger.debug({ err: e }, "Failed to send notification"));
+  }
+
   async stopAll(): Promise<void> {
+    for (const [, timer] of this.statuslineWatchers) clearInterval(timer);
+    this.statuslineWatchers.clear();
+    this.lastKnownCost.clear();
+    this.costGuard?.stop();
+
     if (this.topicCleanupTimer) {
       clearInterval(this.topicCleanupTimer);
       this.topicCleanupTimer = null;
@@ -702,6 +774,8 @@ export class FleetManager implements FleetContext {
       await this.adapter.stop();
       this.adapter = null;
     }
+
+    this.eventLog?.close();
 
     const pidPath = join(this.dataDir, "fleet.pid");
     try { unlinkSync(pidPath); } catch (e) { this.logger.debug({ err: e }, "Failed to remove fleet PID file"); }
@@ -757,6 +831,10 @@ export class FleetManager implements FleetContext {
 
     this.logger.info("All instances idle — restarting...");
 
+    for (const [, timer] of this.statuslineWatchers) clearInterval(timer);
+    this.statuslineWatchers.clear();
+    this.lastKnownCost.clear();
+
     for (const [, ipc] of this.instanceIpcClients) {
       await ipc.close();
     }
@@ -778,6 +856,10 @@ export class FleetManager implements FleetContext {
       this.routingTable = this.buildRoutingTable();
       await new Promise(r => setTimeout(r, 3000));
       await this.connectToInstances(fleet);
+
+      for (const name of Object.keys(fleet.instances)) {
+        this.startStatuslineWatcher(name);
+      }
     }
 
     this.logger.info("Graceful restart complete");
