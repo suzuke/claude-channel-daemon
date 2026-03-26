@@ -362,6 +362,14 @@ export class FleetManager implements FleetContext {
             this.logger.info({ sessionName, instanceName: name }, "Registered external session");
           }
         } else if (msg.type === "fleet_outbound") {
+          // Auto-register external session on first outbound message — covers the
+          // race where mcp_ready arrived before fleet manager connected and query_sessions
+          // fired before the MCP server reconnected.
+          const sender = msg.senderSessionName as string | undefined;
+          if (sender && sender !== name && !this.sessionRegistry.has(sender)) {
+            this.sessionRegistry.set(sender, name);
+            this.logger.info({ sessionName: sender, instanceName: name }, "Registered external session");
+          }
           this.handleOutboundFromInstance(name, msg);
         } else if (msg.type === "fleet_approval_request") {
           this.handleApprovalFromInstance(name, msg);
