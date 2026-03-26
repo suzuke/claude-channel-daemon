@@ -13,10 +13,10 @@ import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY, DEFAULT_INS
 import { EventLog } from "./event-log.js";
 import { CostGuard, formatCents } from "./cost-guard.js";
 import { TmuxManager } from "./tmux-manager.js";
-import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
 import { IpcClient } from "./channel/ipc-bridge.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
+import { createAdapter } from "./channel/factory.js";
 import { createLogger, type Logger } from "./logger.js";
 import { processAttachments } from "./channel/attachment-handler.js";
 import { routeToolCall } from "./channel/tool-router.js";
@@ -321,8 +321,8 @@ export class FleetManager implements FleetContext {
     const inboxDir = join(this.dataDir, "inbox");
     mkdirSync(inboxDir, { recursive: true });
 
-    this.adapter = new TelegramAdapter({
-      id: "tg-fleet",
+    this.adapter = await createAdapter(channelConfig, {
+      id: "fleet",
       botToken,
       accessManager,
       inboxDir,
@@ -362,7 +362,7 @@ export class FleetManager implements FleetContext {
     await this.topicCommands.registerBotCommands();
     await this.adapter.start();
     if (fleet.channel?.group_id) {
-      (this.adapter as TelegramAdapter).setChatId(String(fleet.channel.group_id));
+      this.adapter.setChatId(String(fleet.channel.group_id));
     }
 
     this.adapter.on("started", (username: string) => {
@@ -793,7 +793,7 @@ export class FleetManager implements FleetContext {
     const editMessageId = msg.editMessageId as string | null;
     const instanceConfig = this.fleetConfig?.instances[instanceName];
     const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
-    const chatId = (this.adapter as TelegramAdapter).getChatId();
+    const chatId = this.adapter.getChatId();
     if (!chatId) return;
 
     if (editMessageId) {
@@ -923,27 +923,12 @@ export class FleetManager implements FleetContext {
 
   // ===================== Topic management =====================
 
-  /** Create a Telegram Forum Topic. Returns the message_thread_id. */
+  /** Create a forum topic via the adapter. Returns the message_thread_id. */
   async createForumTopic(topicName: string): Promise<number> {
-    const groupId = this.fleetConfig?.channel?.group_id;
-    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
-    if (!groupId || !botTokenEnv) throw new Error("No group_id or bot_token configured");
-    const botToken = process.env[botTokenEnv];
-    if (!botToken) throw new Error(`Bot token env var ${botTokenEnv} not set`);
-
-    const res = await fetch(
-      `https://api.telegram.org/bot${botToken}/createForumTopic`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: groupId, name: topicName }),
-      },
-    );
-    const data = await res.json() as { ok: boolean; result?: { message_thread_id: number }; description?: string };
-    if (!data.ok || !data.result) {
-      throw new Error(`createForumTopic failed: ${data.description ?? "unknown error"}`);
+    if (!this.adapter?.createTopic) {
+      throw new Error("Adapter does not support topic creation");
     }
-    return data.result.message_thread_id;
+    return this.adapter.createTopic(topicName);
   }
 
   private async deleteForumTopic(topicId: number): Promise<void> {
@@ -972,27 +957,21 @@ export class FleetManager implements FleetContext {
   /** Periodically check if bound topics still exist */
   private startTopicCleanupPoller(): void {
     this.topicCleanupTimer = setInterval(async () => {
-      if (!this.fleetConfig?.channel?.group_id) return;
-      const tgAdapter = this.adapter as TelegramAdapter;
-      const groupId = this.fleetConfig.channel.group_id;
+      if (!this.fleetConfig?.channel?.group_id || !this.adapter?.topicExists) return;
 
-      const bot = tgAdapter.getBot();
       for (const [threadId, target] of this.routingTable) {
         try {
-          const msg = await bot.api.sendMessage(groupId, "\u200B", {
-            message_thread_id: threadId,
-          });
-          await bot.api.deleteMessage(groupId, msg.message_id).catch(e => this.logger.debug({ err: e }, "Failed to delete topic probe message"));
-        } catch (err: unknown) {
-          const errMsg = String(err);
-          if (errMsg.includes("thread not found") || errMsg.includes("TOPIC_ID_INVALID")) {
+          const exists = await this.adapter.topicExists(threadId);
+          if (!exists) {
             const targetName = target.kind === "instance" ? target.name : "meeting";
             this.logger.info({ threadId, target: targetName }, "Topic deleted — auto-unbinding");
             await this.topicCommands.handleTopicDeleted(threadId);
           }
+        } catch (err) {
+          this.logger.debug({ err, threadId }, "Topic existence check failed");
         }
       }
-    }, 5 * 60_000); // Check every 5 minutes (reduced from 60s to avoid API rate limits)
+    }, 5 * 60_000);
   }
 
   /** Save fleet config back to fleet.yaml */
@@ -1051,18 +1030,17 @@ export class FleetManager implements FleetContext {
     if (!groupId) return;
     const threadId = this.fleetConfig?.instances[instanceName]?.topic_id;
 
-    const tgAdapter = this.adapter as TelegramAdapter;
-    const { InlineKeyboard } = await import("grammy");
-    const keyboard = new InlineKeyboard()
-      .text("🔄 Force restart", `hang:restart:${instanceName}`)
-      .text("⏳ Keep waiting", `hang:wait:${instanceName}`);
-
-    await tgAdapter.sendTextWithKeyboard(
-      String(groupId),
-      `⚠️ ${instanceName} appears hung (no activity for 15+ minutes)`,
-      keyboard,
-      threadId != null ? String(threadId) : undefined,
-    ).catch(e => this.logger.debug({ err: e }, "Failed to send hang notification"));
+    await this.adapter.notifyAlert(String(groupId), {
+      type: "hang",
+      instanceName,
+      message: `⚠️ ${instanceName} appears hung (no activity for 15+ minutes)`,
+      choices: [
+        { id: `hang:restart:${instanceName}`, label: "🔄 Force restart" },
+        { id: `hang:wait:${instanceName}`, label: "⏳ Keep waiting" },
+      ],
+    }, {
+      threadId: threadId != null ? String(threadId) : undefined,
+    }).catch(e => this.logger.debug({ err: e }, "Failed to send hang notification"));
   }
 
   private clearStatuslineWatchers(): void {

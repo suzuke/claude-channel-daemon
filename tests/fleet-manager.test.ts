@@ -60,35 +60,22 @@ instances:
     expect(table.size).toBe(2); // proj-c has no topic_id
   });
 
-  it("createForumTopic calls Telegram API and returns message_thread_id", async () => {
+  it("createForumTopic delegates to adapter.createTopic", async () => {
     const fm = new FleetManager(tmpDir);
-    const configPath = join(tmpDir, "fleet.yaml");
-    writeFileSync(configPath, `
-channel:
-  type: telegram
-  mode: topic
-  bot_token_env: TEST_BOT_TOKEN
-  group_id: -100123
-instances: {}
-`);
-    fm.loadConfig(configPath);
 
-    const originalFetch = global.fetch;
-    global.fetch = async (_url: string | URL | Request, _init?: RequestInit) => {
-      return {
-        json: async () => ({ ok: true, result: { message_thread_id: 999 } }),
-      } as Response;
-    };
+    // No adapter set — should throw
+    await expect(fm.createForumTopic("my-topic")).rejects.toThrow("Adapter does not support topic creation");
 
-    process.env.TEST_BOT_TOKEN = "test-token-abc";
+    // Set a mock adapter with createTopic
+    fm.adapter = {
+      createTopic: async (name: string) => {
+        expect(name).toBe("my-topic");
+        return 999;
+      },
+    } as any;
 
-    try {
-      const threadId = await fm.createForumTopic("my-topic");
-      expect(threadId).toBe(999);
-    } finally {
-      global.fetch = originalFetch;
-      delete process.env.TEST_BOT_TOKEN;
-    }
+    const threadId = await fm.createForumTopic("my-topic");
+    expect(threadId).toBe(999);
   });
 });
 
