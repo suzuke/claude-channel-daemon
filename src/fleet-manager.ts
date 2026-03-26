@@ -762,7 +762,16 @@ export class FleetManager implements FleetContext {
     this.scheduler?.shutdown();
 
     await Promise.allSettled(
-      [...this.daemons.keys()].map(name => this.stopInstance(name))
+      [...this.daemons.entries()].map(async ([name, daemon]) => {
+        try {
+          await daemon.gracefulStop();
+        } catch (err) {
+          this.logger.warn({ name, err }, "Graceful stop failed, force stopping");
+          await daemon.stop();
+        }
+        this.daemons.delete(name);
+        await this.meetingManager.cleanupEphemeral(name);
+      })
     );
 
     for (const [, ipc] of this.instanceIpcClients) {
