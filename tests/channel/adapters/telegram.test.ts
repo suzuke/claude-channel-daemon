@@ -394,7 +394,7 @@ describe("TelegramAdapter", () => {
 
   it("closeForumTopic calls bot.api.closeForumTopic with lastChatId and threadId", async () => {
     const bot = (adapter as unknown as { bot: { api: Record<string, ReturnType<typeof vi.fn>> } }).bot;
-    adapter.setLastChatId("-100123456");
+    adapter.setChatId("-100123456");
     await adapter.closeForumTopic(55);
     expect(bot.api.closeForumTopic).toHaveBeenCalledWith(-100123456, 55);
   });
@@ -409,7 +409,7 @@ describe("TelegramAdapter", () => {
   it("closeForumTopic silently ignores API errors", async () => {
     const bot = (adapter as unknown as { bot: { api: Record<string, ReturnType<typeof vi.fn>> } }).bot;
     bot.api.closeForumTopic.mockRejectedValueOnce(new Error("TOPIC_CLOSED"));
-    adapter.setLastChatId("-100123456");
+    adapter.setChatId("-100123456");
     await expect(adapter.closeForumTopic(55)).resolves.toBeUndefined();
   });
 

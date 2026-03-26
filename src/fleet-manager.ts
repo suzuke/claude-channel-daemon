@@ -362,7 +362,7 @@ export class FleetManager implements FleetContext {
     await this.topicCommands.registerBotCommands();
     await this.adapter.start();
     if (fleet.channel?.group_id) {
-      (this.adapter as TelegramAdapter).setLastChatId(String(fleet.channel.group_id));
+      (this.adapter as TelegramAdapter).setChatId(String(fleet.channel.group_id));
     }
 
     this.adapter.on("started", (username: string) => {
@@ -793,7 +793,7 @@ export class FleetManager implements FleetContext {
     const editMessageId = msg.editMessageId as string | null;
     const instanceConfig = this.fleetConfig?.instances[instanceName];
     const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
-    const chatId = (this.adapter as TelegramAdapter).getLastChatId();
+    const chatId = (this.adapter as TelegramAdapter).getChatId();
     if (!chatId) return;
 
     if (editMessageId) {

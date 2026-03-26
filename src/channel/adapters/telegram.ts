@@ -4,7 +4,7 @@ import { join, extname, basename } from "node:path";
 import { Bot, GrammyError, InputFile } from "grammy";
 import type { Context, InlineKeyboard as InlineKeyboardType } from "grammy";
 import { InlineKeyboard } from "grammy";
-import type { ChannelAdapter, ApprovalHandle, SendOpts, SentMessage, PermissionPrompt } from "../types.js";
+import type { ChannelAdapter, ApprovalHandle, SendOpts, SentMessage, PermissionPrompt, Choice, AlertData } from "../types.js";
 import type { AccessManager } from "../access-manager.js";
 import { MessageQueue } from "../message-queue.js";
 
@@ -19,6 +19,7 @@ export interface TelegramAdapterOptions {
 
 export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
   readonly type = "telegram";
+  readonly topology = "topics" as const;
   readonly id: string;
 
   private bot: Bot;
@@ -422,7 +423,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     }
 
     if (threadId) {
-      const chatId = this.getLastChatId();
+      const chatId = this.getChatId();
       if (chatId) {
         await this.bot.api.sendMessage(Number(chatId), text, {
           message_thread_id: Number(threadId),
@@ -444,8 +445,8 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   /** Get the last known chatId (group ID for topic mode) */
   private lastChatId: string | null = null;
-  getLastChatId(): string | null { return this.lastChatId; }
-  setLastChatId(chatId: string): void { this.lastChatId = chatId; }
+  getChatId(): string | null { return this.lastChatId; }
+  setChatId(chatId: string): void { this.lastChatId = chatId; }
 
   // ── File download ─────────────────────────────────────────────────────────
 
@@ -482,10 +483,66 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     return localPath;
   }
 
+  // ── Intent-oriented methods ──────────────────────────────────────────────
+
+  async promptUser(chatId: string, text: string, choices: Choice[], opts?: SendOpts): Promise<string> {
+    const keyboard = new InlineKeyboard();
+    for (const choice of choices) {
+      keyboard.text(choice.label, choice.id).row();
+    }
+    const threadId = opts?.threadId;
+    const msg = await this.bot.api.sendMessage(Number(chatId), text, {
+      message_thread_id: threadId != null ? Number(threadId) : undefined,
+      reply_markup: keyboard,
+    });
+    return String(msg.message_id);
+  }
+
+  async notifyAlert(chatId: string, alert: AlertData, opts?: SendOpts): Promise<SentMessage> {
+    const threadId = opts?.threadId;
+    if (alert.choices && alert.choices.length > 0) {
+      const keyboard = new InlineKeyboard();
+      for (const choice of alert.choices) {
+        keyboard.text(choice.label, choice.id);
+      }
+      const msg = await this.bot.api.sendMessage(Number(chatId), alert.message, {
+        message_thread_id: threadId != null ? Number(threadId) : undefined,
+        reply_markup: keyboard,
+      });
+      return { messageId: String(msg.message_id), chatId, threadId };
+    }
+    return this.sendText(chatId, alert.message, opts);
+  }
+
+  async createTopic(name: string): Promise<number> {
+    const chatId = this.getChatId();
+    if (!chatId) throw new Error("No chat ID set — cannot create topic");
+    const res = await this.bot.api.createForumTopic(Number(chatId), name);
+    return res.message_thread_id;
+  }
+
+  async topicExists(topicId: number): Promise<boolean> {
+    const chatId = this.getChatId();
+    if (!chatId) return false;
+    try {
+      const msg = await this.bot.api.sendMessage(Number(chatId), "\u200B", {
+        message_thread_id: topicId,
+      });
+      await this.bot.api.deleteMessage(Number(chatId), msg.message_id).catch(() => {});
+      return true;
+    } catch (err: unknown) {
+      const errMsg = String(err);
+      if (errMsg.includes("thread not found") || errMsg.includes("TOPIC_ID_INVALID")) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
   // ── Pairing ───────────────────────────────────────────────────────────────
 
   async closeForumTopic(threadId: number): Promise<void> {
-    const chatId = this.getLastChatId();
+    const chatId = this.getChatId();
     if (!chatId) return;
     try {
       await this.bot.api.closeForumTopic(Number(chatId), threadId);
