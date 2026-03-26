@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import yaml from "js-yaml";
-import type { CostGuardConfig, DaemonConfig, FleetConfig, InstanceConfig } from "./types.js";
+import type { CostGuardConfig, HangDetectorConfig, DaemonConfig, FleetConfig, InstanceConfig } from "./types.js";
 
 export const DEFAULT_CONFIG: DaemonConfig = {
   channel_plugin: "telegram@claude-plugins-official",
@@ -59,6 +59,11 @@ export const DEFAULT_COST_GUARD: CostGuardConfig = {
   daily_limit_usd: 0, // 0 = disabled
   warn_at_percentage: 80,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+};
+
+export const DEFAULT_HANG_DETECTOR: HangDetectorConfig = {
+  enabled: true,
+  timeout_minutes: 15,
 };
 
 export const DEFAULT_INSTANCE_CONFIG: Omit<InstanceConfig, "working_directory"> = {

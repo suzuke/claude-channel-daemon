@@ -25,6 +25,7 @@ import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
 import type { FleetContext } from "./fleet-context.js";
 import { TopicCommands } from "./topic-commands.js";
 import { MeetingManager } from "./meeting-manager.js";
+import type { HangDetector } from "./hang-detector.js";
 
 const TMUX_SESSION = "ccd";
 
@@ -108,6 +109,15 @@ export class FleetManager implements FleetContext {
       this.eventLog?.insert(name, "context_rotation", data);
       this.logger.info({ name, ...data }, "Context rotation completed");
     });
+
+    const hangDetector = daemon.getHangDetector();
+    if (hangDetector) {
+      hangDetector.on("hang", () => {
+        this.eventLog?.insert(name, "hang_detected", {});
+        this.logger.warn({ name }, "Instance appears hung");
+        this.sendHangNotification(name);
+      });
+    }
   }
 
   async stopInstance(name: string): Promise<void> {
@@ -256,7 +266,26 @@ export class FleetManager implements FleetContext {
       this.handleInboundMessage(msg);
     });
 
-    this.adapter.on("callback_query", (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
+    this.adapter.on("callback_query", async (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
+      if (data.callbackData.startsWith("hang:")) {
+        const parts = data.callbackData.split(":");
+        const action = parts[1];
+        const instanceName = parts[2];
+        if (action === "restart") {
+          await this.stopInstance(instanceName);
+          const config = this.fleetConfig?.instances[instanceName];
+          if (config) {
+            const topicMode = this.fleetConfig?.channel?.mode === "topic" && !config.channel;
+            await this.startInstance(instanceName, config, topicMode);
+            await new Promise(r => setTimeout(r, 3000));
+            await this.connectIpcToInstance(instanceName);
+          }
+          this.adapter?.editMessage(data.chatId, data.messageId, `🔄 ${instanceName} restarted.`).catch(() => {});
+        } else {
+          this.adapter?.editMessage(data.chatId, data.messageId, `⏳ Continuing to wait for ${instanceName}.`).catch(() => {});
+        }
+        return;
+      }
       this.topicCommands.handleCallbackQuery(data);
     });
 
@@ -759,6 +788,26 @@ export class FleetManager implements FleetContext {
     this.adapter.sendText(String(groupId), text, {
       threadId: threadId != null ? String(threadId) : undefined,
     }).catch(e => this.logger.debug({ err: e }, "Failed to send notification"));
+  }
+
+  private async sendHangNotification(instanceName: string): Promise<void> {
+    if (!this.adapter) return;
+    const groupId = this.fleetConfig?.channel?.group_id;
+    if (!groupId) return;
+    const threadId = this.fleetConfig?.instances[instanceName]?.topic_id;
+
+    const tgAdapter = this.adapter as TelegramAdapter;
+    const { InlineKeyboard } = await import("grammy");
+    const keyboard = new InlineKeyboard()
+      .text("🔄 Force restart", `hang:restart:${instanceName}`)
+      .text("⏳ Keep waiting", `hang:wait:${instanceName}`);
+
+    await tgAdapter.sendTextWithKeyboard(
+      String(groupId),
+      `⚠️ ${instanceName} appears hung (no activity for 15+ minutes)`,
+      keyboard,
+      threadId != null ? String(threadId) : undefined,
+    ).catch(e => this.logger.debug({ err: e }, "Failed to send hang notification"));
   }
 
   private clearStatuslineWatchers(): void {

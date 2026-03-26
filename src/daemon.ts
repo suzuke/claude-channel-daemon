@@ -19,6 +19,7 @@ import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage, ApprovalResponse, PermissionPrompt } from "./channel/types.js";
 import { processAttachments } from "./channel/attachment-handler.js";
 import { routeToolCall } from "./channel/tool-router.js";
+import { HangDetector } from "./hang-detector.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,6 +53,7 @@ export class Daemon extends EventEmitter {
   // Context rotation quality tracking
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
+  private hangDetector: HangDetector | null = null;
 
   constructor(
     private name: string,
@@ -237,15 +239,21 @@ export class Daemon extends EventEmitter {
       this.transcriptMonitor.on("tool_use", (name: string, _input: unknown) => {
         this.logger.debug({ tool: name }, "Tool use");
         ackIfPending();
+        this.hangDetector?.recordActivity();
       });
       this.transcriptMonitor.on("tool_result", (_name: string, _output: unknown) => {
-        // no-op
+        this.hangDetector?.recordActivity();
       });
       this.transcriptMonitor.on("assistant_text", (text: string) => {
         this.logger.debug({ text: text.slice(0, 200) }, "Claude response");
         ackIfPending();
+        this.hangDetector?.recordActivity();
       });
       this.transcriptMonitor.startPolling();
+
+      // Hang detector
+      this.hangDetector = new HangDetector(15);
+      this.hangDetector.start();
 
       // 8. Context guardian
       const statusFile = join(this.instanceDir, "statusline.json");
@@ -253,7 +261,10 @@ export class Daemon extends EventEmitter {
       this.guardian.startWatching();
       this.guardian.startTimer();
 
-      this.guardian.on("status_update", () => this.saveSessionId());
+      this.guardian.on("status_update", () => {
+        this.saveSessionId();
+        this.hangDetector?.recordStatuslineUpdate();
+      });
       this.guardian.on("pending", async () => {
         this.logger.info("Context rotation pending — waiting for transcript to settle");
         await this.waitForTranscriptIdle(15000);
@@ -390,6 +401,7 @@ export class Daemon extends EventEmitter {
     if (this.healthCheckTimer) { clearInterval(this.healthCheckTimer); this.healthCheckTimer = null; }
     if (this.toolStatusDebounce) { clearTimeout(this.toolStatusDebounce); this.toolStatusDebounce = null; }
     this.pendingIpcRequests.clear();
+    this.hangDetector?.stop();
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.memoryLayer) await this.memoryLayer.stop();
@@ -415,6 +427,10 @@ export class Daemon extends EventEmitter {
     } catch (e) {
       this.logger.debug({ err: e }, "Failed to remove PID file");
     }
+  }
+
+  getHangDetector(): HangDetector | null {
+    return this.hangDetector;
   }
 
   getMessageBus(): MessageBus {
