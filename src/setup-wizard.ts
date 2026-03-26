@@ -154,7 +154,7 @@ export async function runSetupWizard(): Promise<void> {
 
   console.log(`\n${bold("Claude Channel Daemon — Setup")}\n`);
 
-  const TOTAL_STEPS = 7;
+  const TOTAL_STEPS = 8;
 
   // ── Step 1: Prerequisites ──
   step(1, TOTAL_STEPS, "Checking prerequisites");
@@ -384,8 +384,41 @@ export async function runSetupWizard(): Promise<void> {
     }
   }
 
-  // ── Step 7: Summary ──
-  step(7, TOTAL_STEPS, "Summary");
+  // ── Step 7: Fleet Defaults ──
+  step(7, TOTAL_STEPS, "Fleet Defaults");
+
+  let costGuardLimit = 0;
+  let costGuardTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const enableCostGuard = await confirm(rl, "Enable cost guard (daily spending limit)?", false);
+  if (enableCostGuard) {
+    const limitStr = await ask(rl, "Daily limit (USD)", {
+      default: "50",
+      validate: (v) => {
+        const n = parseFloat(v);
+        return isNaN(n) || n <= 0 ? "Must be a positive number" : null;
+      },
+    });
+    costGuardLimit = parseFloat(limitStr);
+    costGuardTimezone = await ask(rl, "Timezone", {
+      default: costGuardTimezone,
+    });
+  }
+
+  let dailySummaryHour = 21;
+  const enableSummary = await confirm(rl, "Enable daily summary report?", true);
+  if (enableSummary) {
+    const hourStr = await ask(rl, "Summary hour (0-23, local time)", {
+      default: "21",
+      validate: (v) => {
+        const n = parseInt(v, 10);
+        return isNaN(n) || n < 0 || n > 23 ? "Must be 0-23" : null;
+      },
+    });
+    dailySummaryHour = parseInt(hourStr, 10);
+  }
+
+  // ── Step 8: Summary ──
+  step(8, TOTAL_STEPS, "Summary");
   console.log();
   console.log(`  ${bold("Bot:")}        @${botUsername}`);
   console.log(`  ${bold("Token env:")}  ${tokenEnvName}`);
@@ -400,6 +433,12 @@ export async function runSetupWizard(): Promise<void> {
   } else {
     console.log(`  ${bold("Instances:")}  ${dim("(none — will auto-create from topics)")}`);
   }
+  if (costGuardLimit > 0) {
+    console.log(`  ${bold("Cost guard:")} $${costGuardLimit}/day (${costGuardTimezone})`);
+  } else {
+    console.log(`  ${bold("Cost guard:")} ${dim("disabled")}`);
+  }
+  console.log(`  ${bold("Daily sum.:")} ${enableSummary ? `${dailySummaryHour}:00` : dim("disabled")}`);
   console.log();
 
   const proceed = await confirm(rl, "Write config?");
@@ -462,6 +501,20 @@ export async function runSetupWizard(): Promise<void> {
       backup_to_sqlite: true,
     },
     log_level: "info",
+    ...(costGuardLimit > 0 ? {
+      cost_guard: {
+        daily_limit_usd: costGuardLimit,
+        warn_at_percentage: 80,
+        timezone: costGuardTimezone,
+      },
+    } : {}),
+    ...(enableSummary ? {
+      daily_summary: {
+        enabled: true,
+        hour: dailySummaryHour,
+        minute: 0,
+      },
+    } : {}),
   };
 
   const instancesObj: Record<string, Record<string, unknown>> = {};

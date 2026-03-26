@@ -22,7 +22,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/anthropics/claude-channel-daemon.git"
+    "url": "https://github.com/suzuke/claude-channel-daemon.git"
   },
   "keywords": [
     "claude",

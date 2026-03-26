@@ -27,6 +27,10 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 | Create topic = auto-bind project | — | **Built-in** |
 | Install as system service (launchd/systemd) | — | **One command** |
 | Crash recovery | — | **Auto-restart** |
+| Cost guard (daily spending limits) | — | **Built-in** |
+| Fleet status from Telegram | — | **/status command** |
+| Daily fleet summary | — | **Scheduled report** |
+| Hang detection | — | **Auto-detect + notify** |
 
 ## Who is this for
 
@@ -48,6 +52,7 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 | Mobile-first (Telegram) | **Yes** | Yes | No | No |
 | Voice input | **Yes** | No | No | No |
 | System service | **Yes** | No | N/A | N/A |
+| Cost controls | **Yes** | No | N/A | N/A |
 | Crash recovery | **Yes** | No | N/A | N/A |
 
 ## Architecture
@@ -163,6 +168,7 @@ In topic mode, the bot responds to commands in the General topic:
 - `/meets "topic"` — start a multi-angle discussion using Agent Teams
 - `/debate "topic"` — start a pro/con debate
 - `/collab --repo ~/app "task"` — start collaborative coding with git worktrees
+- `/status` — show fleet status and costs
 
 ### Permission system
 
@@ -175,6 +181,59 @@ Telegram voice messages are transcribed via Groq Whisper API and sent to Claude 
 ### Auto topic binding
 
 In topic mode, creating a new Telegram Forum Topic triggers an interactive directory browser. Pick a project directory → instance auto-configured, topic bound, Claude starts. Deleting a topic auto-unbinds and stops the instance.
+
+### Cost guard
+
+Prevent bill shock when running unattended. Configure daily spending limits in `fleet.yaml`:
+
+```yaml
+defaults:
+  cost_guard:
+    daily_limit_usd: 50
+    warn_at_percentage: 80
+    timezone: "Asia/Taipei"
+```
+
+When an instance approaches the limit, a warning is posted to its Telegram topic. When the limit is reached, the instance is automatically paused and a notification is sent. Paused instances resume the next day or when manually restarted.
+
+### Fleet status
+
+Use `/status` in the General topic to see a live overview:
+
+```
+🟢 proj-a — ctx 42%, $3.20 today
+🟢 proj-b — ctx 67%, $8.50 today
+⏸ proj-c — paused (cost limit)
+
+Fleet: $11.70 / $50.00 daily
+```
+
+### Daily summary
+
+A daily report is posted to the General topic at a configurable time (default 21:00):
+
+```
+📊 Daily Report — 2026-03-26
+
+proj-a: $8.20, 2 rotations
+proj-b: $2.10
+proj-c: $0.00 ⚠️ 1 hang
+
+Total: $10.30
+```
+
+### Hang detection
+
+If an instance shows no activity for 15 minutes (configurable), the daemon posts a notification with inline buttons:
+
+- **Force restart** — stops and restarts the instance
+- **Keep waiting** — dismisses the alert
+
+Uses multi-signal detection: checks both transcript activity and statusline freshness to avoid false positives during long-running tool calls.
+
+### Rate limit-aware scheduling
+
+When the 5-hour API rate limit exceeds 85%, scheduled triggers are automatically deferred instead of firing. A notification is posted to the instance's topic. Deferred schedules are not lost — they will fire on the next cron tick when rate limits are below threshold.
 
 ## Quick start
 
@@ -202,6 +261,7 @@ ccd fleet stop            Stop all instances
 ccd fleet restart         Graceful restart (wait for idle)
 ccd fleet status          Show instance status
 ccd fleet logs <name>     Show instance logs
+ccd fleet history         Show event history (cost, rotations, hangs)
 ccd fleet start <name>    Start specific instance
 ccd fleet stop <name>     Stop specific instance
 ccd schedule list         List all schedules
@@ -244,6 +304,14 @@ channel:
       - 123456789
 
 defaults:
+  cost_guard:
+    daily_limit_usd: 50
+    warn_at_percentage: 80
+    timezone: "Asia/Taipei"
+  daily_summary:
+    enabled: true
+    hour: 21
+    minute: 0
   context_guardian:
     threshold_percentage: 60
     max_age_hours: 8
@@ -272,6 +340,7 @@ GROQ_API_KEY=gsk_...          # optional, for voice transcription
 | `fleet.log` | Fleet log (JSON) |
 | `fleet.pid` | Fleet manager PID |
 | `scheduler.db` | Schedule database (SQLite) |
+| `events.db` | Event log (cost snapshots, rotations, hangs) |
 | `instances/<name>/` | Per-instance data |
 | `instances/<name>/daemon.log` | Instance log |
 | `instances/<name>/session-id` | Session UUID for `--resume` |
