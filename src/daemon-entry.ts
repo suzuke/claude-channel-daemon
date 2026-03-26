@@ -10,7 +10,13 @@ function getArg(name: string): string {
 
 const name = getArg("--instance");
 const instanceDir = getArg("--instance-dir");
-const config: InstanceConfig = JSON.parse(getArg("--config"));
+let config: InstanceConfig;
+try {
+  config = JSON.parse(getArg("--config"));
+} catch (err) {
+  console.error(`Failed to parse --config JSON: ${(err as Error).message}`);
+  process.exit(1);
+}
 
 const topicMode = args.includes("--topic-mode");
 const daemon = new Daemon(name, config, instanceDir, topicMode);
