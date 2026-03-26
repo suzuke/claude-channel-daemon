@@ -42,6 +42,8 @@ export class Daemon {
   private toolStatusMessageId: string | null = null;
   private toolStatusLines: string[] = [];
   private toolStatusDebounce: ReturnType<typeof setTimeout> | null = null;
+  // Session identity: map IPC socket → sessionName (from mcp_ready)
+  private socketSessionNames = new Map<import("node:net").Socket, string>();
   // Crash recovery
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private crashCount = 0;
@@ -99,9 +101,11 @@ export class Daemon {
       } else if (msg.type === "permission_request") {
         this.handlePermissionRequest(msg, socket);
       } else if (msg.type === "mcp_ready") {
-        this.logger.debug("MCP channel server connected and ready");
+        const sessionName = msg.sessionName as string | undefined;
+        if (sessionName) this.socketSessionNames.set(socket, sessionName);
+        this.logger.debug({ sessionName }, "MCP channel server connected and ready");
         // Notify FleetManager's IPC client that MCP is ready
-        this.ipcServer?.broadcast({ type: "mcp_ready" });
+        this.ipcServer?.broadcast({ type: "mcp_ready", sessionName });
       } else if (msg.type === "fleet_inbound") {
         // Fleet manager routed a message to us (topic mode)
         const meta = msg.meta as Record<string, string>;
@@ -536,11 +540,13 @@ export class Daemon {
         // Use fleetRequestId (not requestId) to avoid MCP server resolving the
         // pending tool call prematurely when it receives the broadcast.
         const fleetReqId = `xmsg_${requestId}`;
+        const senderSessionName = this.socketSessionNames.get(socket);
         this.ipcServer.broadcast({
           type: "fleet_outbound",
           tool,
           args,
           fleetRequestId: fleetReqId,
+          senderSessionName,
         });
         const timeout = setTimeout(() => {
           this.pendingIpcRequests.delete(fleetReqId);
@@ -661,7 +667,7 @@ export class Daemon {
         "ccd-channel": {
           command: "node",
           args: [serverJs],
-          env: { CCD_SOCKET_PATH: sockPath },
+          env: { CCD_SOCKET_PATH: sockPath, CCD_SESSION_NAME: this.name },
         },
       },
       systemPrompt: this.config.systemPrompt,

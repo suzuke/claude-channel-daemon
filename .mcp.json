@@ -6,7 +6,8 @@
         "/Users/suzuke/Documents/Hack/claude-channel-daemon/dist/channel/mcp-server.js"
       ],
       "env": {
-        "CCD_SOCKET_PATH": "/Users/suzuke/.claude-channel-daemon/instances/claude-channel-daemon/channel.sock"
+        "CCD_SOCKET_PATH": "/Users/suzuke/.claude-channel-daemon/instances/claude-channel-daemon/channel.sock",
+        "CCD_SESSION_NAME": "dev"
       }
     }
   }

@@ -101,7 +101,7 @@ async function connectIpc(): Promise<void> {
     ipcConnected = true;
     reconnecting = false;
     setupIpcListeners(client);
-    client.send({ type: "mcp_ready" });
+    client.send({ type: "mcp_ready", sessionName: process.env.CCD_SESSION_NAME });
     process.stderr.write("ccd-channel: connected to daemon IPC\n");
   } catch (err) {
     process.stderr.write(`ccd-channel: failed to connect to daemon IPC: ${err}\n`);

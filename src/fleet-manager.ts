@@ -332,6 +332,7 @@ export class FleetManager implements FleetContext {
     const args = (msg.args ?? {}) as Record<string, unknown>;
     const requestId = msg.requestId as number | undefined;
     const fleetRequestId = msg.fleetRequestId as string | undefined;
+    const senderSessionName = msg.senderSessionName as string | undefined;
 
     const respond = (result: unknown, error?: string) => {
       const ipc = this.instanceIpcClients.get(instanceName);
@@ -367,21 +368,25 @@ export class FleetManager implements FleetContext {
           break;
         }
 
+        // Use sessionName for attribution (falls back to instanceName)
+        const senderLabel = senderSessionName ?? instanceName;
+        const isExternalSender = senderSessionName != null && senderSessionName !== instanceName;
+
         targetIpc.send({
           type: "fleet_inbound",
           content: message,
           meta: {
             chat_id: "cross-instance",
             message_id: `xmsg-${Date.now()}`,
-            user: `instance:${instanceName}`,
-            user_id: `instance:${instanceName}`,
+            user: `instance:${senderLabel}`,
+            user_id: `instance:${senderLabel}`,
             ts: new Date().toISOString(),
             thread_id: "",
-            from_instance: instanceName,
+            from_instance: senderLabel,
           },
         });
 
-        // Post to both Telegram topics for visibility
+        // Post to Telegram topics for visibility
         const groupId = this.fleetConfig?.channel?.group_id;
         if (groupId && this.adapter) {
           const senderTopicId = this.meetingManager.getEphemeralTopicId(instanceName)
@@ -390,19 +395,20 @@ export class FleetManager implements FleetContext {
             ?? this.fleetConfig?.instances[targetName]?.topic_id;
           const preview = message.length > 200 ? message.slice(0, 200) + "…" : message;
 
-          if (senderTopicId) {
+          // Only post to sender topic if sender is the instance itself (not external)
+          if (senderTopicId && !isExternalSender) {
             this.adapter.sendText(String(groupId), `→ ${targetName}: ${preview}`, {
               threadId: String(senderTopicId),
             }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
           }
           if (targetTopicId) {
-            this.adapter.sendText(String(groupId), `← ${instanceName}: ${preview}`, {
+            this.adapter.sendText(String(groupId), `← ${senderLabel}: ${preview}`, {
               threadId: String(targetTopicId),
             }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
           }
         }
 
-        this.logger.info(`✉ ${instanceName} → ${targetName}: ${message.slice(0, 100)}`);
+        this.logger.info(`✉ ${senderLabel} → ${targetName}: ${message.slice(0, 100)}`);
         respond({ sent: true, target: targetName });
         break;
       }
