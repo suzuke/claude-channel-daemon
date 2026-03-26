@@ -484,7 +484,7 @@ export class FleetManager implements FleetContext {
 
         if (!targetIpc) {
           // Check if instance exists in config but is stopped
-          const existsInConfig = targetName in this.fleetConfig.instances;
+          const existsInConfig = targetName in (this.fleetConfig?.instances ?? {});
           if (existsInConfig) {
             respond(null, `Instance '${targetName}' is stopped. Use start_instance('${targetName}') to start it first.`);
           } else {
