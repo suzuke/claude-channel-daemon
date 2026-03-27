@@ -645,6 +645,7 @@ export class FleetManager implements FleetContext {
             status: this.daemons.has(name) ? "running" : "stopped",
             working_directory: config.working_directory,
             topic_id: config.topic_id ?? null,
+            description: config.description ?? null,
           }));
         // Include external sessions (excluding self)
         const externalSessions = [...this.sessionRegistry.entries()]
@@ -685,6 +686,7 @@ export class FleetManager implements FleetContext {
       case "create_instance": {
         const directory = (args.directory as string).replace(/^~/, process.env.HOME || "~");
         const topicName = (args.topic_name as string) || basename(directory);
+        const description = args.description as string | undefined;
 
         // Validate directory exists
         try {
@@ -724,6 +726,7 @@ export class FleetManager implements FleetContext {
             ...this.fleetConfig!.defaults,
             working_directory: directory,
             topic_id: createdTopicId,
+            ...(description ? { description } : {}),
           } as InstanceConfig;
           this.fleetConfig!.instances[newInstanceName] = instanceConfig;
           this.routingTable.set(createdTopicId, { kind: "instance", name: newInstanceName });

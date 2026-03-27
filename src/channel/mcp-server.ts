@@ -420,6 +420,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "Name for the Telegram topic. Defaults to directory basename.",
           },
+          description: {
+            type: "string",
+            description: "Human-readable description of what this instance does (e.g., 'Daily secretary for scheduling and reminders').",
+          },
         },
         required: ["directory"],
       },

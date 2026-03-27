@@ -92,6 +92,8 @@ export interface ChannelConfig {
 
 export interface InstanceConfig {
   working_directory: string;
+  /** Human-readable description of what this instance does */
+  description?: string;
   topic_id?: number;
   general_topic?: boolean;
   channel?: ChannelConfig;
