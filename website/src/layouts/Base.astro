@@ -1,0 +1,57 @@
+---
+import type { Locale } from '../i18n/utils';
+import { t, langSwitchHref } from '../i18n/utils';
+import '../styles/global.css';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const lang = locale === 'zh-tw' ? 'zh-TW' : 'en';
+---
+
+<!doctype html>
+<html lang={lang} class="scroll-smooth">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgEnD — {t(locale, 'hero.headline')}</title>
+    <meta name="description" content={t(locale, 'hero.subheadline')} />
+    <meta property="og:title" content={`AgEnD — ${t(locale, 'hero.headline')}`} />
+    <meta property="og:description" content={t(locale, 'hero.subheadline')} />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body class="bg-bg text-text-primary font-sans antialiased">
+    <!-- Nav -->
+    <nav class="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur">
+      <div class="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+        <a href={locale === 'en' ? '/' : '/zh-tw/'} class="text-accent font-bold text-lg font-mono">AgEnD</a>
+        <div class="flex items-center gap-6 text-sm text-text-secondary">
+          <a href="#features" class="hover:text-text-primary">{t(locale, 'nav.features')}</a>
+          <a href="#quickstart" class="hover:text-text-primary">{t(locale, 'nav.quickstart')}</a>
+          <a href="#faq" class="hover:text-text-primary">{t(locale, 'nav.faq')}</a>
+          <a href={langSwitchHref(locale)} class="border border-border rounded px-2 py-0.5 hover:text-text-primary">
+            {t(locale, 'nav.langSwitch')}
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="mx-auto max-w-5xl px-6">
+      <slot />
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-border mt-24 py-8 text-center text-sm text-text-secondary">
+      <div class="flex items-center justify-center gap-4">
+        <a href="https://github.com/anthropics/claude-channel-daemon" class="hover:text-text-primary">GitHub</a>
+        <span>·</span>
+        <a href="https://www.npmjs.com/package/claude-channel-daemon" class="hover:text-text-primary">npm</a>
+        <span>·</span>
+        <span>{t(locale, 'footer.license')}</span>
+      </div>
+    </footer>
+  </body>
+</html>
