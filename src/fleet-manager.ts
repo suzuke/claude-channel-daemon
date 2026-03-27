@@ -1295,6 +1295,12 @@ export class FleetManager implements FleetContext {
     if (groupId && this.adapter) {
       await this.adapter.sendText(String(groupId), `✅ Graceful restart complete — ${this.daemons.size} instances running`)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
+
+      // Notify each instance's channel so Claude resumes work
+      for (const [threadId] of this.routingTable) {
+        this.adapter.sendText(String(groupId), "Fleet restart complete. Continue from where you left off.", { threadId: String(threadId) })
+          .catch(e => this.logger.debug({ err: e, threadId }, "Failed to post per-instance restart notification"));
+      }
     }
   }
 }
