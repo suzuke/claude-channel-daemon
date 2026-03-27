@@ -53,6 +53,10 @@ export interface ChannelAdapter extends EventEmitter {
 
   createTopic?(name: string): Promise<number>;
   topicExists?(topicId: number): Promise<boolean>;
+  closeForumTopic?(threadId: number): Promise<void>;
+  reopenForumTopic?(threadId: number): Promise<void>;
+  editForumTopic?(threadId: number, opts: { name?: string; iconCustomEmojiId?: string }): Promise<void>;
+  getTopicIconStickers?(): Promise<{ customEmojiId: string; emoji: string }[]>;
 }
 
 export interface ApprovalHandle {

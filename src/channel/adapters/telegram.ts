@@ -561,6 +561,36 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     }
   }
 
+  async reopenForumTopic(threadId: number): Promise<void> {
+    const chatId = this.getChatId();
+    if (!chatId) return;
+    try {
+      await this.bot.api.reopenForumTopic(Number(chatId), threadId);
+    } catch {
+      // Best-effort — topic may already be open
+    }
+  }
+
+  async editForumTopic(threadId: number, opts: { name?: string; iconCustomEmojiId?: string }): Promise<void> {
+    const chatId = this.getChatId();
+    if (!chatId) return;
+    try {
+      await this.bot.api.editForumTopic(Number(chatId), threadId, {
+        name: opts.name,
+        icon_custom_emoji_id: opts.iconCustomEmojiId,
+      });
+    } catch {
+      // Best-effort — icon change is cosmetic
+    }
+  }
+
+  async getTopicIconStickers(): Promise<{ customEmojiId: string; emoji: string }[]> {
+    const stickers = await this.bot.api.getForumTopicIconStickers();
+    return stickers
+      .filter((s) => s.custom_emoji_id != null)
+      .map((s) => ({ customEmojiId: s.custom_emoji_id!, emoji: s.emoji ?? "" }));
+  }
+
   async handlePairing(chatId: string, userId: string): Promise<string> {
     const code = this.accessManager.generateCode(Number(userId));
     return code;
