@@ -1299,9 +1299,30 @@ export class FleetManager implements FleetContext {
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
 
       // Notify each instance's channel so Claude resumes work
-      for (const [threadId] of this.routingTable) {
-        this.adapter.sendText(String(groupId), "Fleet restart complete. Continue from where you left off.", { threadId: String(threadId) })
-          .catch(e => this.logger.debug({ err: e, threadId }, "Failed to post per-instance restart notification"));
+      const instances = Object.entries(this.fleetConfig?.instances ?? {});
+      this.logger.info({ count: instances.length }, "Sending restart notification to instances");
+      for (const [name, config] of instances) {
+        const threadId = config.topic_id != null ? String(config.topic_id) : undefined;
+
+        // Send to Telegram topic so the message appears in the chat
+        if (threadId) {
+          this.adapter.sendText(String(groupId), "Fleet restart complete. Continue from where you left off.", { threadId })
+            .catch(e => this.logger.warn({ err: e, name, threadId }, "Failed to post per-instance restart notification"));
+        }
+
+        // Push to daemon IPC so the Claude session receives the message
+        const ipc = this.instanceIpcClients.get(name);
+        if (ipc?.connected) {
+          ipc.send({
+            type: "fleet_inbound",
+            content: "Fleet restart complete. Continue from where you left off.",
+            meta: {
+              chat_id: String(groupId),
+              thread_id: threadId ?? "",
+              ts: new Date().toISOString(),
+            },
+          });
+        }
       }
     }
   }
