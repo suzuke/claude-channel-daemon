@@ -13,6 +13,6 @@ export function t(locale: Locale, key: string): string {
   return val ?? key;
 }
 
-export function langSwitchHref(locale: Locale): string {
-  return locale === 'en' ? '/zh-tw/' : '/';
+export function langSwitchHref(locale: Locale, base: string = '/'): string {
+  return locale === 'en' ? `${base}zh-tw/` : base;
 }
