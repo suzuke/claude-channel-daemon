@@ -121,29 +121,34 @@ export class ClaudeCodeBackend implements CliBackend {
   }
 
   async postLaunch(tmux: TmuxManager, windowId: string): Promise<void> {
+    let stableCount = 0;
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 1000));
       try {
         const pane = await tmux.capturePane();
-        if (pane.includes("I am using this for local development")) {
+        if (pane.includes("I am using this for local development") ||
+            pane.includes("New MCP server found") ||
+            pane.includes("Use this and all future MCP servers")) {
           await tmux.sendSpecialKey("Enter");
-          continue;
-        }
-        if (pane.includes("New MCP server found") || pane.includes("Use this and all future MCP servers")) {
-          await tmux.sendSpecialKey("Enter");
+          stableCount = 0;
           continue;
         }
         if (pane.includes("Listening for channel messages")) {
           return;
         }
+        // Claude TUI prompt (❯) — require 3 consecutive stable reads
+        // to avoid false positives during startup transitions
         const lastLine = pane.trimEnd().split("\n").pop() ?? "";
         if (/[$%>]\s*$/.test(lastLine)) {
-          return;
+          if (++stableCount >= 3) return;
+        } else {
+          stableCount = 0;
         }
       } catch {
-        // Transient pane capture failure during startup — retry loop continues
+        stableCount = 0;
       }
     }
+    throw new Error("postLaunch timed out — Claude may be stuck at a prompt");
   }
 
   cleanup(config: CliBackendConfig): void {

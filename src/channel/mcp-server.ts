@@ -45,6 +45,14 @@ const SLOW_TOOLS = new Set(["start_instance", "create_instance"]);
 // Safety nets
 // ---------------------------------------------------------------------------
 
+// When the parent Claude process dies, stdin closes. Exit immediately to avoid
+// becoming an orphaned process that spins CPU forever on reconnect loops.
+process.stdin.on("end", () => {
+  process.stderr.write("ccd-channel: stdin closed (parent died) — exiting\n");
+  process.exit(0);
+});
+process.stdin.resume(); // ensure 'end' fires even if nothing reads stdin
+
 process.on("unhandledRejection", (err) => {
   process.stderr.write(`ccd-channel: unhandled rejection: ${err}\n`);
 });
@@ -60,6 +68,8 @@ let ipc: IpcClient | null = null;
 let ipcConnected = false;
 let requestCounter = 0;
 let reconnecting = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 20; // ~60s of retries
 const pendingRequests = new Map<
   number,
   { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -103,6 +113,7 @@ async function connectIpc(): Promise<void> {
     ipc = client;
     ipcConnected = true;
     reconnecting = false;
+    reconnectAttempts = 0;
     setupIpcListeners(client);
     // CCD_INSTANCE_NAME: set by daemon via tmux env (internal sessions)
     // CCD_SESSION_NAME: set in .mcp.json env (external sessions, optional custom name)
@@ -122,9 +133,14 @@ async function connectIpc(): Promise<void> {
 
 function scheduleReconnect(): void {
   if (reconnecting) return;
+  reconnectAttempts++;
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    process.stderr.write(`ccd-channel: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) exceeded — exiting\n`);
+    process.exit(1);
+  }
   reconnecting = true;
   const delay = 3000;
-  process.stderr.write(`ccd-channel: reconnecting in ${delay}ms...\n`);
+  process.stderr.write(`ccd-channel: reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...\n`);
   setTimeout(() => {
     reconnecting = false;
     connectIpc();
