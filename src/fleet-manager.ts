@@ -615,17 +615,16 @@ export class FleetManager implements FleetContext {
             ?? this.fleetConfig?.instances[instanceName]?.topic_id;
           const targetTopicId = this.meetingManager.getEphemeralTopicId(targetInstanceName)
             ?? this.fleetConfig?.instances[targetInstanceName]?.topic_id;
-          const preview = message.length > 200 ? message.slice(0, 200) + "…" : message;
-
+          // Post full message to topics — adapter handles 4096-char chunking
           // Only post to sender topic if sender is the instance itself (not external)
           if (senderTopicId && !isExternalSender) {
-            this.adapter.sendText(String(groupId), `→ ${targetName}: ${preview}`, {
+            this.adapter.sendText(String(groupId), `→ ${targetName}:\n${message}`, {
               threadId: String(senderTopicId),
             }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
           }
           // Only post to target topic if target is an instance (not external session)
           if (targetTopicId && !this.sessionRegistry.has(targetName)) {
-            this.adapter.sendText(String(groupId), `← ${senderLabel}: ${preview}`, {
+            this.adapter.sendText(String(groupId), `← ${senderLabel}:\n${message}`, {
               threadId: String(targetTopicId),
             }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
           }
