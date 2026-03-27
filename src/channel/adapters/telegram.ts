@@ -324,15 +324,6 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     });
   }
 
-  /** Send text with inline keyboard (for directory browser etc.) */
-  async sendTextWithKeyboard(chatId: string, text: string, keyboard: InlineKeyboardType, threadId?: string): Promise<SentMessage> {
-    const msg = await this.bot.api.sendMessage(Number(chatId), text, {
-      message_thread_id: threadId != null ? Number(threadId) : undefined,
-      reply_markup: keyboard,
-    });
-    return { messageId: String(msg.message_id), chatId };
-  }
-
   async sendFile(chatId: string, filePath: string, opts?: SendOpts): Promise<SentMessage> {
     const threadId = opts?.threadId;
     const ext = extname(filePath).toLowerCase();

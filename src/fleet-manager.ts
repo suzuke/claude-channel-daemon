@@ -352,7 +352,6 @@ export class FleetManager implements FleetContext {
         }
         return;
       }
-      this.topicCommands.handleCallbackQuery(data);
     });
 
     this.adapter.on("topic_closed", (data: { chatId: string; threadId: string }) => {
@@ -453,9 +452,8 @@ export class FleetManager implements FleetContext {
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
     const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
     if (threadId == null) {
-      // General topic: try topic commands first, then meeting commands
+      // General topic: check for /status command
       if (await this.topicCommands.handleGeneralCommand(msg)) return;
-      if (await this.meetingManager.handleCommand(msg)) return;
 
       // Forward to General Topic instance if configured
       const generalInstance = this.findGeneralInstance();

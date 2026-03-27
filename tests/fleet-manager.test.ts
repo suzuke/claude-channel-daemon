@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FleetManager } from "../src/fleet-manager.js";
 import { TopicCommands } from "../src/topic-commands.js";
 import { join, basename } from "node:path";
@@ -80,63 +80,10 @@ instances:
 });
 
 describe("TopicCommands", () => {
-  it("filterDirectories: exact match wins over substring", () => {
-    const dirs = ["/p/myapp", "/p/myapp-v2", "/p/other"];
-    const tc = new TopicCommands({} as any);
-
-    // Access private method via cast
-    const exact = (tc as any).filterDirectories(dirs, "myapp");
-    expect(exact).toEqual({ type: "exact", path: "/p/myapp" });
-
-    const sub = (tc as any).filterDirectories(dirs, "app");
-    expect(sub).toEqual({ type: "multiple", paths: ["/p/myapp", "/p/myapp-v2"] });
-
-    const none = (tc as any).filterDirectories(dirs, "zzz");
-    expect(none).toEqual({ type: "none" });
-  });
-
-  it("validateProjectName rejects invalid names", () => {
-    const tc = new TopicCommands({} as any);
-    const validate = (name: string) => (tc as any).validateProjectName(name);
-    expect(validate("my-project")).toBe(true);
-    expect(validate("")).toBe(false);
-    expect(validate("   ")).toBe(false);
-    expect(validate("foo/bar")).toBe(false);
-    expect(validate("..")).toBe(false);
-    expect(validate("-flag")).toBe(false);
-    expect(validate("ok-project")).toBe(true);
-    expect(validate("中文專案")).toBe(true);
-  });
-
-  it("listUnboundDirectories excludes already-bound dirs", () => {
-    const tmpDir = join(tmpdir(), `ccd-topic-${Date.now()}`);
-    mkdirSync(tmpDir, { recursive: true });
-
-    const projectRoot = join(tmpDir, "projects");
-    mkdirSync(join(projectRoot, "proj-a"), { recursive: true });
-    mkdirSync(join(projectRoot, "proj-b"), { recursive: true });
-    mkdirSync(join(projectRoot, "proj-c"), { recursive: true });
-
-    const fm = new FleetManager(tmpDir);
-    const configPath = join(tmpDir, "fleet.yaml");
-    writeFileSync(configPath, `
-project_roots:
-  - ${projectRoot}
-instances:
-  proj-a-t42:
-    working_directory: ${join(projectRoot, "proj-a")}
-    topic_id: 42
-`);
-    fm.loadConfig(configPath);
-
-    const tc = new TopicCommands(fm);
-    // listUnboundDirectories is private, but we can test via getProjectRoots indirectly
-    const unbound = (tc as any).listUnboundDirectories();
-    const names = unbound.map((d: string) => basename(d));
-    expect(names).toContain("proj-b");
-    expect(names).toContain("proj-c");
-    expect(names).not.toContain("proj-a");
-
-    rmSync(tmpDir, { recursive: true, force: true });
+  it("handleGeneralCommand returns false for non-commands", async () => {
+    const adapter = { sendText: vi.fn() };
+    const tc = new TopicCommands({ adapter } as any);
+    const result = await tc.handleGeneralCommand({ text: "hello", chatId: "1", messageId: "1", username: "u", userId: "1", timestamp: new Date() } as any);
+    expect(result).toBe(false);
   });
 });
