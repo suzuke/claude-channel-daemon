@@ -1,0 +1,71 @@
+{
+  "nav": {
+    "features": "功能",
+    "quickstart": "快速開始",
+    "faq": "常見問題",
+    "langSwitch": "EN"
+  },
+  "hero": {
+    "headline": "你的 always-on AI 工程團隊",
+    "subheadline": "從通訊軟體管理多個 AI coding agent。Fleet mode、排程、花費控制，永不中斷。",
+    "cta": "快速開始",
+    "github": "GitHub →"
+  },
+  "terminal": {
+    "cmd": "$ agend fleet start",
+    "line1": "✓ web-app — 已透過 Telegram 連線",
+    "line2": "✓ api-server — 已透過 Telegram 連線",
+    "line3": "✓ ml-pipeline — 已透過 Telegram 連線",
+    "status": "Fleet 運行中 — 3 個實例已啟動"
+  },
+  "problem": {
+    "without": "沒有 AgEnD",
+    "withTitle": "有了 AgEnD",
+    "pain1": "一個 terminal = 一個 session",
+    "pain2": "關掉 terminal = session 消失",
+    "pain3": "沒有排程功能",
+    "pain4": "無法控制花費",
+    "pain5": "Agent 之間無法溝通",
+    "gain1": "N 個專案同時運行",
+    "gain2": "Daemon 常駐、永不中斷",
+    "gain3": "內建 Cron 排程",
+    "gain4": "每日花費上限",
+    "gain5": "P2P agent 協作"
+  },
+  "features": {
+    "title": "功能特色",
+    "fleet": { "name": "Fleet Mode", "desc": "N 個 agent 同時運行" },
+    "schedule": { "name": "排程系統", "desc": "Cron 定時任務" },
+    "cost": { "name": "花費守衛", "desc": "每日花費上限" },
+    "p2p": { "name": "P2P 協作", "desc": "Agent 互相溝通" },
+    "rotation": { "name": "Context 輪替", "desc": "自動刷新過期 session" },
+    "backend": { "name": "多 Backend", "desc": "不綁定單一 CLI 工具" }
+  },
+  "quickstart": {
+    "title": "快速開始",
+    "step1": { "label": "安裝", "cmd": "npm i -g agend" },
+    "step2": { "label": "設定", "cmd": "agend init" },
+    "step3": { "label": "啟動", "cmd": "agend fleet start" }
+  },
+  "architecture": {
+    "title": "架構",
+    "channel": "Telegram",
+    "core": "AgEnD",
+    "backend1": "Claude Code",
+    "backend2": "未來的 CLI..."
+  },
+  "faq": {
+    "title": "常見問題",
+    "q1": "免費嗎？",
+    "a1": "是的，開源專案，MIT 授權。",
+    "q2": "支援哪些 backend？",
+    "a2": "目前支援 Claude Code，未來會加入更多。",
+    "q3": "支援哪些通訊管道？",
+    "a3": "目前支援 Telegram，Discord 規劃中。",
+    "q4": "需要伺服器嗎？",
+    "a4": "不需要，任何有 tmux 的機器都能跑。"
+  },
+  "footer": {
+    "license": "MIT 授權"
+  }
+}

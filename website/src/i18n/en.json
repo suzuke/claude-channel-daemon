@@ -1,0 +1,71 @@
+{
+  "nav": {
+    "features": "Features",
+    "quickstart": "Quick Start",
+    "faq": "FAQ",
+    "langSwitch": "中文"
+  },
+  "hero": {
+    "headline": "Your always-on AI engineering team",
+    "subheadline": "Manage multiple AI coding agents from your messaging app. Fleet mode. Scheduling. Cost guards. Always running.",
+    "cta": "Get Started",
+    "github": "GitHub →"
+  },
+  "terminal": {
+    "cmd": "$ agend fleet start",
+    "line1": "✓ web-app — connected via Telegram",
+    "line2": "✓ api-server — connected via Telegram",
+    "line3": "✓ ml-pipeline — connected via Telegram",
+    "status": "Fleet running — 3 instances active"
+  },
+  "problem": {
+    "without": "Without AgEnD",
+    "withTitle": "With AgEnD",
+    "pain1": "One terminal = one session",
+    "pain2": "Close terminal = lost session",
+    "pain3": "No scheduling",
+    "pain4": "No cost control",
+    "pain5": "Agents can't talk to each other",
+    "gain1": "N projects in parallel",
+    "gain2": "Always-on via daemon",
+    "gain3": "Cron scheduling built-in",
+    "gain4": "Daily cost guards",
+    "gain5": "P2P agent collaboration"
+  },
+  "features": {
+    "title": "Features",
+    "fleet": { "name": "Fleet Mode", "desc": "N agents running simultaneously" },
+    "schedule": { "name": "Scheduling", "desc": "Cron-based task scheduling" },
+    "cost": { "name": "Cost Guard", "desc": "Daily spending limits" },
+    "p2p": { "name": "P2P Collaboration", "desc": "Agents communicate with each other" },
+    "rotation": { "name": "Context Rotation", "desc": "Auto-refresh stale sessions" },
+    "backend": { "name": "Multi-Backend", "desc": "Not locked to one CLI" }
+  },
+  "quickstart": {
+    "title": "Quick Start",
+    "step1": { "label": "Install", "cmd": "npm i -g agend" },
+    "step2": { "label": "Configure", "cmd": "agend init" },
+    "step3": { "label": "Launch", "cmd": "agend fleet start" }
+  },
+  "architecture": {
+    "title": "Architecture",
+    "channel": "Telegram",
+    "core": "AgEnD",
+    "backend1": "Claude Code",
+    "backend2": "Future CLI..."
+  },
+  "faq": {
+    "title": "FAQ",
+    "q1": "Is it free?",
+    "a1": "Yes. Open source, MIT license.",
+    "q2": "Which backends are supported?",
+    "a2": "Claude Code today. More backends planned.",
+    "q3": "Which messaging channels?",
+    "a3": "Telegram today. Discord planned.",
+    "q4": "Does it need a server?",
+    "a4": "No. Runs on any machine with tmux."
+  },
+  "footer": {
+    "license": "MIT License"
+  }
+}
