@@ -121,7 +121,6 @@ export class ClaudeCodeBackend implements CliBackend {
   }
 
   async postLaunch(tmux: TmuxManager, windowId: string): Promise<void> {
-    let stableCount = 0;
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 1000));
       try {
@@ -130,22 +129,19 @@ export class ClaudeCodeBackend implements CliBackend {
             pane.includes("New MCP server found") ||
             pane.includes("Use this and all future MCP servers")) {
           await tmux.sendSpecialKey("Enter");
-          stableCount = 0;
           continue;
         }
         if (pane.includes("Listening for channel messages")) {
           return;
         }
-        // Claude TUI prompt (❯) — require 3 consecutive stable reads
-        // to avoid false positives during startup transitions
-        const lastLine = pane.trimEnd().split("\n").pop() ?? "";
-        if (/[$%>]\s*$/.test(lastLine)) {
-          if (++stableCount >= 3) return;
-        } else {
-          stableCount = 0;
+        // After 10s startup grace period, trust the shell/TUI prompt as success.
+        // Before 10s the dev-channel confirmation might not have rendered yet.
+        if (i >= 10) {
+          const lastLine = pane.trimEnd().split("\n").pop() ?? "";
+          if (/[$%>]\s*$/.test(lastLine)) return;
         }
       } catch {
-        stableCount = 0;
+        // Transient pane capture failure — retry
       }
     }
     throw new Error("postLaunch timed out — Claude may be stuck at a prompt");
