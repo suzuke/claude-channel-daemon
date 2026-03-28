@@ -55,6 +55,8 @@ export class Daemon extends EventEmitter {
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
   private hangDetector: HangDetector | null = null;
+  // Model failover: override model on next spawn when rate-limited
+  private modelOverride: string | undefined;
 
   constructor(
     private name: string,
@@ -782,7 +784,7 @@ export class Daemon extends EventEmitter {
       },
       systemPrompt: this.config.systemPrompt,
       skipPermissions: this.config.skipPermissions,
-      model: this.config.model,
+      model: this.modelOverride ?? this.config.model,
     };
   }
 
@@ -823,6 +825,16 @@ export class Daemon extends EventEmitter {
 
   private readContextPercentage(): number {
     return this.backend?.getContextUsage() ?? 0;
+  }
+
+  /** Set a model override for next spawn (used by failover logic) */
+  setModelOverride(model: string | undefined): void {
+    this.modelOverride = model;
+  }
+
+  /** Get the currently active model override */
+  getModelOverride(): string | undefined {
+    return this.modelOverride;
   }
 
   /** Public wrapper for graceful restart — wait for instance to be idle. */

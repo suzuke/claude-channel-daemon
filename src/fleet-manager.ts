@@ -58,6 +58,9 @@ export class FleetManager implements FleetContext {
   private archiveTimer: ReturnType<typeof setInterval> | null = null;
   private static ARCHIVE_IDLE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+  // Model failover state
+  private failoverActive = new Map<string, string>(); // instance → current failover model
+
   constructor(public dataDir: string) {
     this.topicCommands = new TopicCommands(this);
     this.meetingManager = new MeetingManager(this);
@@ -140,6 +143,7 @@ export class FleetManager implements FleetContext {
 
   async stopInstance(name: string): Promise<void> {
     this.setTopicIcon(name, "remove");
+    this.failoverActive.delete(name);
 
     const daemon = this.daemons.get(name);
     if (daemon) {
@@ -1193,10 +1197,56 @@ export class FleetManager implements FleetContext {
             five_hour_pct: rl.five_hour?.used_percentage ?? 0,
             seven_day_pct: rl.seven_day?.used_percentage ?? 0,
           });
+          this.checkModelFailover(name, rl.five_hour?.used_percentage ?? 0);
         }
       } catch { /* file may not exist yet or be mid-write */ }
     }, 10_000);
     this.statuslineWatchers.set(name, timer);
+  }
+
+  // ── Model failover ──────────────────────────────────────────────────────
+
+  private static FAILOVER_TRIGGER_PCT = 90;
+  private static FAILOVER_RECOVER_PCT = 50;
+
+  private checkModelFailover(name: string, fiveHourPct: number): void {
+    const config = this.fleetConfig?.instances[name];
+    if (!config?.model_failover?.length) return;
+
+    const daemon = this.daemons.get(name);
+    if (!daemon) return;
+
+    const failoverList = config.model_failover;
+    const primaryModel = failoverList[0];
+    const currentFailover = this.failoverActive.get(name);
+
+    if (fiveHourPct >= FleetManager.FAILOVER_TRIGGER_PCT && !currentFailover) {
+      // Trigger failover: pick next model in list
+      const fallbackModel = failoverList.length > 1 ? failoverList[1] : undefined;
+      if (!fallbackModel) return;
+
+      this.failoverActive.set(name, fallbackModel);
+      daemon.setModelOverride(fallbackModel);
+      this.logger.info({ instance: name, from: primaryModel, to: fallbackModel, ratePct: fiveHourPct },
+        "Model failover triggered");
+      this.eventLog?.insert(name, "model_failover", {
+        from: primaryModel, to: fallbackModel, five_hour_pct: fiveHourPct,
+      });
+      this.notifyInstanceTopic(name,
+        `⚡ Rate limit ${fiveHourPct}% — next rotation will use ${fallbackModel} (was ${primaryModel})`);
+
+    } else if (fiveHourPct < FleetManager.FAILOVER_RECOVER_PCT && currentFailover) {
+      // Recover: switch back to primary
+      this.failoverActive.delete(name);
+      daemon.setModelOverride(undefined);
+      this.logger.info({ instance: name, restored: primaryModel, ratePct: fiveHourPct },
+        "Model failover recovered");
+      this.eventLog?.insert(name, "model_recovered", {
+        restored: primaryModel, five_hour_pct: fiveHourPct,
+      });
+      this.notifyInstanceTopic(name,
+        `✅ Rate limit recovered (${fiveHourPct}%) — next rotation will use ${primaryModel}`);
+    }
   }
 
   private notifyInstanceTopic(instanceName: string, text: string): void {
@@ -1325,6 +1375,7 @@ export class FleetManager implements FleetContext {
     for (const [, timer] of this.statuslineWatchers) clearInterval(timer);
     this.statuslineWatchers.clear();
     this.instanceRateLimits.clear();
+    this.failoverActive.clear();
   }
 
   async stopAll(): Promise<void> {

@@ -114,6 +114,8 @@ export interface InstanceConfig {
   skipPermissions?: boolean;
   /** Claude model to use (e.g. "sonnet", "opus", "haiku", or full model ID) */
   model?: string;
+  /** Ordered fallback models when primary hits rate limit (e.g. ["opus", "sonnet"]) */
+  model_failover?: string[];
   /** Per-instance cost guard (overrides fleet defaults) */
   cost_guard?: CostGuardConfig;
   /** Original repo path when this instance uses a git worktree */
