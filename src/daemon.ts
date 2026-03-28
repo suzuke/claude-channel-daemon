@@ -208,6 +208,7 @@ export class Daemon extends EventEmitter {
             user_id: msg.userId,
             ts: msg.timestamp.toISOString(),
             ...(msg.threadId ? { thread_id: msg.threadId } : {}),
+            ...(msg.replyToText ? { reply_to_text: msg.replyToText } : {}),
             ...extraMeta,
           });
         });

@@ -105,6 +105,8 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       // Collect attachments
       const attachments = this._extractAttachments(msg);
 
+      const replyToText = msg.reply_to_message?.text ?? msg.reply_to_message?.caption;
+
       this.emit("message", {
         source: "telegram",
         adapterId: this.id,
@@ -119,6 +121,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
         replyTo: msg.reply_to_message?.message_id != null
           ? String(msg.reply_to_message.message_id)
           : undefined,
+        replyToText: replyToText || undefined,
       });
     });
 

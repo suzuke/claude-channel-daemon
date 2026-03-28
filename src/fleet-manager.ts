@@ -531,6 +531,7 @@ export class FleetManager implements FleetContext {
               user_id: msg.userId,
               ts: msg.timestamp.toISOString(),
               thread_id: "",
+              ...(msg.replyToText ? { reply_to_text: msg.replyToText } : {}),
               ...extraMeta,
             },
           });
@@ -579,6 +580,7 @@ export class FleetManager implements FleetContext {
         user_id: msg.userId,
         ts: msg.timestamp.toISOString(),
         thread_id: msg.threadId ?? "",
+        ...(msg.replyToText ? { reply_to_text: msg.replyToText } : {}),
         ...extraMeta,
       },
     });

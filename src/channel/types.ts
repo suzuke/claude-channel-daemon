@@ -96,6 +96,7 @@ export interface InboundMessage {
   timestamp: Date;
   attachments?: Attachment[];
   replyTo?: string;
+  replyToText?: string;
 }
 
 export interface Attachment {
