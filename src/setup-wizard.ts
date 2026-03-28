@@ -154,7 +154,7 @@ export async function runSetupWizard(): Promise<void> {
 
   console.log(`\n${bold("Claude Channel Daemon — Setup")}\n`);
 
-  const TOTAL_STEPS = 8;
+  const TOTAL_STEPS = 9;
 
   // ── Step 1: Prerequisites ──
   step(1, TOTAL_STEPS, "Checking prerequisites");
@@ -425,8 +425,34 @@ export async function runSetupWizard(): Promise<void> {
     dailySummaryHour = parseInt(hourStr, 10);
   }
 
-  // ── Step 8: Summary ──
-  step(8, TOTAL_STEPS, "Summary");
+  // ── Step 8: Voice Transcription (Groq) ──
+  step(8, TOTAL_STEPS, "Voice Transcription");
+  let groqApiKey = "";
+
+  // Check existing .env for GROQ_API_KEY
+  if (existsSync(ENV_PATH)) {
+    const existingEnv = readFileSync(ENV_PATH, "utf-8");
+    const groqMatch = existingEnv.match(/^GROQ_API_KEY=(gsk_\S+)/m);
+    if (groqMatch) {
+      const masked = groqMatch[1].slice(0, 8) + "..." + groqMatch[1].slice(-4);
+      console.log(`  ${dim(`Found existing key: ${masked}`)}`);
+      const keep = await confirm(rl, "Keep existing Groq API key?");
+      if (keep) groqApiKey = groqMatch[1];
+    }
+  }
+
+  if (!groqApiKey) {
+    const enableVoice = await confirm(rl, "Enable voice transcription (Groq Whisper)?", false);
+    if (enableVoice) {
+      console.log(`  ${dim("Get a key from https://console.groq.com/keys")}`);
+      groqApiKey = await ask(rl, "Groq API Key", {
+        validate: (v) => v.startsWith("gsk_") ? null : "Must start with gsk_",
+      });
+    }
+  }
+
+  // ── Step 9: Summary ──
+  step(9, TOTAL_STEPS, "Summary");
   console.log();
   console.log(`  ${bold("Bot:")}        @${botUsername}`);
   console.log(`  ${bold("Token env:")}  ${tokenEnvName}`);
@@ -447,6 +473,7 @@ export async function runSetupWizard(): Promise<void> {
     console.log(`  ${bold("Cost guard:")} ${dim("disabled")}`);
   }
   console.log(`  ${bold("Daily sum.:")} ${enableSummary ? `${dailySummaryHour}:00` : dim("disabled")}`);
+  console.log(`  ${bold("Voice:")}      ${groqApiKey ? green("enabled (Groq Whisper)") : dim("disabled")}`);
   console.log();
 
   const proceed = await confirm(rl, "Write config?");
@@ -466,11 +493,12 @@ export async function runSetupWizard(): Promise<void> {
     // Remove old token line with same env name
     envContent = envContent
       .split("\n")
-      .filter((line) => !line.startsWith(`${tokenEnvName}=`))
+      .filter((line) => !line.startsWith(`${tokenEnvName}=`) && !(groqApiKey && line.startsWith("GROQ_API_KEY=")))
       .join("\n");
     if (envContent && !envContent.endsWith("\n")) envContent += "\n";
   }
   envContent += `${tokenEnvName}=${token}\n`;
+  if (groqApiKey) envContent += `GROQ_API_KEY=${groqApiKey}\n`;
   writeFileSync(ENV_PATH, envContent);
   console.log(`  ${green("✓")} ${ENV_PATH}`);
 
