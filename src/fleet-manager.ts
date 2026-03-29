@@ -917,6 +917,11 @@ export class FleetManager implements FleetContext {
           break;
         }
 
+        if (instanceConfig.general_topic) {
+          respond(null, "Cannot delete the General instance");
+          break;
+        }
+
         // Delete Telegram topic if requested (before removeInstance clears config)
         if (deleteTopic && instanceConfig.topic_id) {
           await this.deleteForumTopic(instanceConfig.topic_id);
@@ -1175,6 +1180,12 @@ export class FleetManager implements FleetContext {
   async removeInstance(name: string): Promise<void> {
     const config = this.fleetConfig?.instances[name];
     if (!config) return;
+
+    // Never remove the General instance
+    if (config.general_topic) {
+      this.logger.warn({ name }, "Refusing to remove General instance");
+      return;
+    }
 
     // Clean up schedules
     if (this.scheduler && config.topic_id) {
