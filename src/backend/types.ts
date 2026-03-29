@@ -1,5 +1,3 @@
-import type { TmuxManager } from "../tmux-manager.js";
-
 export interface McpServerEntry {
   command: string;
   args: string[];
@@ -28,9 +26,6 @@ export interface CliBackend {
 
   /** Read session ID for resume capability. Returns null if unavailable. */
   getSessionId(): string | null;
-
-  /** Post-launch setup (e.g., auto-confirm prompts). Called after CLI spawns in tmux. */
-  postLaunch?(tmux: TmuxManager, windowId: string): Promise<void>;
 
   /** Clean up config files on shutdown. */
   cleanup?(config: CliBackendConfig): void;

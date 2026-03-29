@@ -782,14 +782,8 @@ export class Daemon extends EventEmitter {
     const windowIdFile = join(this.instanceDir, "window-id");
     writeFileSync(windowIdFile, windowId);
 
-    // Post-launch setup (auto-confirm prompts for Claude Code)
-    if (this.backend.postLaunch) {
-      this.backend.postLaunch(this.tmux!, windowId).then(() => {
-        this.logger.debug("Post-launch setup completed");
-      }).catch(err => {
-        this.logger.warn({ err }, "Post-launch setup failed or timed out — manually run: tmux send-keys -t ccd:${this.tmux?.getWindowId()} Enter");
-      });
-    }
+    // Brief grace period for Claude Code to initialize MCP server
+    await new Promise(r => setTimeout(r, 10_000));
   }
 
   private saveSessionId(): void {

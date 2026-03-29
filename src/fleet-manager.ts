@@ -291,7 +291,7 @@ export class FleetManager implements FleetContext {
       const [name, config] = instanceEntries[i];
       // @deprecated DM mode: when config.channel is set, instance runs its own adapter
       await this.startInstance(name, config, topicMode && !config.channel);
-      // Stagger launches to avoid resource contention during postLaunch
+      // Stagger launches to avoid resource contention during startup
       if (i < instanceEntries.length - 1) {
         await new Promise(r => setTimeout(r, 3000));
       }

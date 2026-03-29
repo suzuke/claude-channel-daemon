@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import type { CliBackend, CliBackendConfig } from "./types.js";
-import type { TmuxManager } from "../tmux-manager.js";
+
 
 export class ClaudeCodeBackend implements CliBackend {
   constructor(private instanceDir: string) {}
@@ -105,33 +105,6 @@ export class ClaudeCodeBackend implements CliBackend {
     } catch {
       return null;
     }
-  }
-
-  async postLaunch(tmux: TmuxManager, windowId: string): Promise<void> {
-    for (let i = 0; i < 60; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      try {
-        const pane = await tmux.capturePane();
-        if (pane.includes("I am using this for local development") ||
-            pane.includes("New MCP server found") ||
-            pane.includes("Use this and all future MCP servers")) {
-          await tmux.sendSpecialKey("Enter");
-          continue;
-        }
-        if (pane.includes("Listening for channel messages")) {
-          return;
-        }
-        // After 10s startup grace period, trust the shell/TUI prompt as success.
-        // Before 10s the dev-channel confirmation might not have rendered yet.
-        if (i >= 10) {
-          const lastLine = pane.trimEnd().split("\n").pop() ?? "";
-          if (/[$%>❯]\s*$/.test(lastLine)) return;
-        }
-      } catch {
-        // Transient pane capture failure — retry
-      }
-    }
-    throw new Error("postLaunch timed out — Claude may be stuck at a prompt");
   }
 
   cleanup(config: CliBackendConfig): void {
