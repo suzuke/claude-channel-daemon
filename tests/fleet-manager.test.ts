@@ -60,6 +60,29 @@ instances:
     expect(table.size).toBe(2); // proj-c has no topic_id
   });
 
+  it("marks the General topic as non-probeable in the routing table", () => {
+    const fm = new FleetManager(tmpDir);
+    const configPath = join(tmpDir, "fleet.yaml");
+    writeFileSync(configPath, `
+channel:
+  type: telegram
+  mode: topic
+  bot_token_env: BOT
+  group_id: -100
+  access:
+    mode: locked
+    allowed_users: [1]
+instances:
+  general:
+    working_directory: /tmp/general
+    topic_id: 1
+    general_topic: true
+`);
+    fm.loadConfig(configPath);
+    const table = fm.buildRoutingTable();
+    expect(table.get(1)).toEqual({ kind: "general", name: "general" });
+  });
+
   it("createForumTopic delegates to adapter.createTopic", async () => {
     const fm = new FleetManager(tmpDir);
 
@@ -85,5 +108,41 @@ describe("TopicCommands", () => {
     const tc = new TopicCommands({ adapter } as any);
     const result = await tc.handleGeneralCommand({ text: "hello", chatId: "1", messageId: "1", username: "u", userId: "1", timestamp: new Date() } as any);
     expect(result).toBe(false);
+  });
+
+  it("ignores topic deletion for the General instance", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn() };
+    const removeInstance = vi.fn();
+    const tc = new TopicCommands({
+      logger,
+      removeInstance,
+      routingTable: new Map([[1, { kind: "general", name: "general" }]]),
+      fleetConfig: {
+        defaults: {},
+        instances: {
+          general: {
+            working_directory: "/tmp/general",
+            topic_id: 1,
+            general_topic: true,
+            restart_policy: { max_retries: 1, backoff: "linear", reset_after: 1 },
+            context_guardian: {
+              threshold_percentage: 60,
+              max_idle_wait_ms: 300_000,
+              completion_timeout_ms: 60_000,
+              grace_period_ms: 600_000,
+              max_age_hours: 8,
+            },
+            memory: { auto_summarize: true, watch_memory_dir: true, backup_to_sqlite: true },
+            log_level: "info",
+          },
+        },
+      },
+    } as any);
+
+    await tc.handleTopicDeleted(1);
+
+    expect(removeInstance).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalled();
   });
 });

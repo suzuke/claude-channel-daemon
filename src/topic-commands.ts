@@ -82,10 +82,13 @@ export class TopicCommands {
   async handleTopicDeleted(threadId: number): Promise<void> {
     const target = this.ctx.routingTable.get(threadId);
     if (!target) return;
-    const instanceName = target.name;
+    if (target.kind === "general") {
+      this.ctx.logger.debug({ instanceName: target.name, threadId }, "Ignoring delete event for General topic");
+      return;
+    }
 
-    this.ctx.logger.info({ instanceName, threadId }, "Topic deleted — auto-unbinding");
-    await this.ctx.removeInstance(instanceName);
+    this.ctx.logger.info({ instanceName: target.name, threadId }, "Topic deleted — auto-unbinding");
+    await this.ctx.removeInstance(target.name);
   }
 
   /** Create instance config, save fleet.yaml, start daemon, connect IPC. */

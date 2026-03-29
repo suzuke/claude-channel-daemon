@@ -9,7 +9,7 @@ import yaml from "js-yaml";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig, CostGuardConfig, DailySummaryConfig, WebhookConfig } from "./types.js";
-import type { RouteTarget } from "./fleet-context.js";
+import { isProbeableRouteTarget, type RouteTarget } from "./fleet-context.js";
 import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { EventLog } from "./event-log.js";
 import { CostGuard, formatCents } from "./cost-guard.js";
@@ -82,7 +82,10 @@ export class FleetManager implements FleetContext {
     if (!this.fleetConfig) return table;
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
       if (inst.topic_id != null) {
-        table.set(inst.topic_id, { kind: "instance", name });
+        table.set(inst.topic_id, {
+          kind: inst.general_topic ? "general" : "instance",
+          name,
+        });
       }
     }
     return table;
@@ -1142,10 +1145,11 @@ export class FleetManager implements FleetContext {
 
       for (const [threadId, target] of this.routingTable) {
         try {
+          if (!isProbeableRouteTarget(target)) {
+            continue;
+          }
           const exists = await this.adapter.topicExists(threadId);
           if (!exists) {
-            const targetName = target.kind === "instance" ? target.name : "meeting";
-            this.logger.info({ threadId, target: targetName }, "Topic deleted — auto-unbinding");
             await this.topicCommands.handleTopicDeleted(threadId);
           }
         } catch (err) {

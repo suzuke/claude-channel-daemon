@@ -5,7 +5,13 @@ import type { Scheduler } from "./scheduler/index.js";
 import type { Logger } from "./logger.js";
 import type { CostGuard } from "./cost-guard.js";
 
-export type RouteTarget = { kind: "instance"; name: string };
+export type RouteTarget =
+  | { kind: "instance"; name: string }
+  | { kind: "general"; name: string };
+
+export function isProbeableRouteTarget(target: RouteTarget): boolean {
+  return target.kind === "instance";
+}
 
 /**
  * Shared context interface for fleet sub-modules (topic commands).
