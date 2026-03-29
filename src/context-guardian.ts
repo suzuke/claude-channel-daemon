@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
 import { readFileSync, watchFile, unwatchFile, existsSync } from "node:fs";
-import type { ContextStatus, StatusLineData, DaemonConfig } from "./types.js";
+import type { ContextStatus, StatusLineData, InstanceConfig } from "./types.js";
 import type { Logger } from "./logger.js";
 
-type GuardianConfig = DaemonConfig["context_guardian"];
+type GuardianConfig = InstanceConfig["context_guardian"];
 type State = "NORMAL" | "PENDING" | "HANDING_OVER" | "ROTATING" | "GRACE";
 export type RotationReason = "context_full" | "max_age";
 

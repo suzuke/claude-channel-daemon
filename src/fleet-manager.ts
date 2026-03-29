@@ -287,6 +287,7 @@ export class FleetManager implements FleetContext {
     }
 
     for (const [name, config] of Object.entries(fleet.instances)) {
+      // @deprecated DM mode: when config.channel is set, instance runs its own adapter
       await this.startInstance(name, config, topicMode && !config.channel);
     }
 

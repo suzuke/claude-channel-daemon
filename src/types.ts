@@ -1,27 +1,3 @@
-export interface DaemonConfig {
-  channel_plugin: string;
-  working_directory: string;
-  restart_policy: {
-    max_retries: number;
-    backoff: "exponential" | "linear";
-    reset_after: number;
-  };
-  context_guardian: {
-    threshold_percentage: number;
-    max_idle_wait_ms: number;
-    completion_timeout_ms: number;
-    grace_period_ms: number;
-    max_age_hours: number;
-  };
-  memory: {
-    auto_summarize: boolean;
-    watch_memory_dir: boolean;
-    backup_to_sqlite: boolean;
-  };
-  memory_directory?: string;
-  log_level: "debug" | "info" | "warn" | "error";
-}
-
 export interface ContextStatus {
   used_percentage: number;
   remaining_percentage: number;
@@ -89,16 +65,28 @@ export interface InstanceConfig {
   topic_id?: number;
   general_topic?: boolean;
   channel?: ChannelConfig;
-  restart_policy: DaemonConfig["restart_policy"];
-  context_guardian: DaemonConfig["context_guardian"];
-  memory: DaemonConfig["memory"];
+  restart_policy: {
+    max_retries: number;
+    backoff: "exponential" | "linear";
+    reset_after: number;
+  };
+  context_guardian: {
+    threshold_percentage: number;
+    max_idle_wait_ms: number;
+    completion_timeout_ms: number;
+    grace_period_ms: number;
+    max_age_hours: number;
+  };
+  memory: {
+    auto_summarize: boolean;
+    watch_memory_dir: boolean;
+    backup_to_sqlite: boolean;
+  };
   memory_directory?: string;
-  log_level: DaemonConfig["log_level"];
+  log_level: "debug" | "info" | "warn" | "error";
   /** CLI backend to use. Default: "claude-code" */
   backend?: string;
-  /** @deprecated backward compat */
-  channel_plugin?: string;
-  /** Skip non-essential subsystems (transcript monitor, context guardian, memory layer, approval server, prompt detector) */
+  /** Skip non-essential subsystems (transcript monitor, context guardian, approval server, prompt detector) */
   lightweight?: boolean;
   /** System prompt for the Claude instance */
   systemPrompt?: string;

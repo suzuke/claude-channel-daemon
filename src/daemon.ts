@@ -156,6 +156,7 @@ export class Daemon extends EventEmitter {
       }
     });
 
+    // @deprecated DM mode — will be removed in a future version
     // 1b. Create Telegram adapter (DM mode only — in topic mode, fleet manager owns the adapter)
     if (!this.topicMode && this.config.channel) {
       const channelConfig = this.config.channel;
@@ -486,7 +487,7 @@ export class Daemon extends EventEmitter {
         editMessageId: this.toolStatusMessageId,
       });
     } else {
-      // DM mode: send directly via adapter
+      // @deprecated DM mode: send directly via adapter
       const adapters = this.messageBus.getAllAdapters();
       if (adapters.length === 0) return;
       const adapter = adapters[0];

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { loadConfig } from "./config.js";
 import { join, dirname } from "node:path";
 import { SchedulerDb } from "./scheduler/db.js";
 import { Cron } from "croner";
@@ -13,18 +12,13 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const DATA_DIR = join(homedir(), ".claude-channel-daemon");
-const DEFAULT_CONFIG_PATH = join(DATA_DIR, "config.yaml");
 const FLEET_CONFIG_PATH = join(DATA_DIR, "fleet.yaml");
-const PID_PATH = join(DATA_DIR, "daemon.pid");
-const LOG_PATH = join(DATA_DIR, "daemon.log");
 
 const program = new Command();
 
@@ -42,104 +36,6 @@ program
   .name("ccd")
   .description("Claude Channel Daemon")
   .version(pkgVersion);
-
-// === Single-instance (backward compat) ===
-program
-  .command("start")
-  .description("Start single daemon instance (legacy)")
-  .option("-c, --config <path>", "Config file path", DEFAULT_CONFIG_PATH)
-  .action(async (opts) => {
-    const { Daemon } = await import("./daemon.js");
-    const config = loadConfig(opts.config);
-
-    // Map DaemonConfig → InstanceConfig
-    const instanceConfig: import("./types.js").InstanceConfig = {
-      working_directory: config.working_directory,
-      restart_policy: config.restart_policy,
-      context_guardian: config.context_guardian,
-      memory: config.memory,
-      memory_directory: config.memory_directory,
-      log_level: config.log_level,
-      channel_plugin: config.channel_plugin,
-    };
-
-    mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(PID_PATH, String(process.pid));
-
-    const instanceDir = join(DATA_DIR, "instances", "default");
-    const daemon = new Daemon("default", instanceConfig, instanceDir);
-    await daemon.start();
-
-    const shutdown = async () => {
-      await daemon.stop();
-      if (existsSync(PID_PATH)) unlinkSync(PID_PATH);
-      process.exit(0);
-    };
-    process.on("SIGTERM", shutdown);
-    process.on("SIGINT", shutdown);
-  });
-
-program
-  .command("stop")
-  .description("Stop the daemon")
-  .action(() => {
-    if (!existsSync(PID_PATH)) {
-      console.error("Daemon is not running (no PID file found)");
-      process.exit(1);
-    }
-    const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
-    try {
-      process.kill(pid, "SIGTERM");
-      console.log("Daemon stopped");
-    } catch {
-      console.error("Failed to stop daemon (process may have already exited)");
-    }
-    try {
-      unlinkSync(PID_PATH);
-    } catch {
-      // ignore
-    }
-  });
-
-program
-  .command("status")
-  .description("Show daemon status")
-  .action(() => {
-    if (!existsSync(PID_PATH)) {
-      console.log("Status: stopped");
-      return;
-    }
-    const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
-    try {
-      process.kill(pid, 0);
-      console.log(`Status: running (PID ${pid})`);
-    } catch {
-      console.log("Status: stopped (stale PID file)");
-    }
-  });
-
-program
-  .command("logs")
-  .description("Show daemon logs")
-  .option("-n, --lines <count>", "Number of lines to show", "50")
-  .option("-f, --follow", "Follow log output")
-  .action((opts) => {
-    if (!existsSync(LOG_PATH)) {
-      console.error("No log file found");
-      process.exit(1);
-    }
-    if (opts.follow) {
-      const tail = spawn("tail", ["-f", LOG_PATH], { stdio: "inherit" });
-      tail.on("close", () => process.exit(0));
-      process.on("SIGINT", () => { tail.kill(); process.exit(0); });
-      return;
-    } else {
-      const content = readFileSync(LOG_PATH, "utf-8");
-      const lines = content.trim().split("\n");
-      const n = parseInt(opts.lines, 10);
-      console.log(lines.slice(-n).join("\n"));
-    }
-  });
 
 function signalFleetReload(): void {
   const pidPath = join(DATA_DIR, "fleet.pid");
