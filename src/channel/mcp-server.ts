@@ -241,6 +241,9 @@ const mcp = new Server(
       "If the inbound meta has reply_to_text, the user is quoting/replying to a previous message — reply_to_text contains the original message text.",
       "Use send_to_instance to communicate with other Claude instances. Messages are passive — the recipient sees them but is not forced to respond. Use list_instances to discover available instances.",
       "Cross-instance messages (from_instance in meta) must be replied to via send_to_instance, NOT the reply tool. The reply tool is for Telegram only.",
+      "Cross-instance meta fields: from_instance (sender name), request_kind (query|task|report|update), requires_reply (boolean), correlation_id (for request-response pairing), task_summary (brief description).",
+      "High-level collaboration tools: request_information (ask a question), delegate_task (assign work), report_result (return results with correlation_id). These wrap send_to_instance with appropriate metadata.",
+      "Use describe_instance to get detailed info about a specific instance before interacting with it.",
     ].join("\n"),
   },
 );
@@ -391,8 +394,113 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "The message to send to the target instance.",
           },
+          request_kind: {
+            type: "string",
+            enum: ["query", "task", "report", "update"],
+            description: "Categorizes the message intent. 'query' = asking a question, 'task' = delegating work, 'report' = returning results, 'update' = status notification.",
+          },
+          requires_reply: {
+            type: "boolean",
+            description: "Whether you expect the recipient to respond. Default: false.",
+          },
+          correlation_id: {
+            type: "string",
+            description: "Echo this from a previous message to link request-response pairs.",
+          },
+          task_summary: {
+            type: "string",
+            description: "Brief summary of the task or request (shown in logs and Telegram visibility posts).",
+          },
         },
         required: ["instance_name", "message"],
+      },
+    },
+    {
+      name: "request_information",
+      description: "Ask another instance a question and expect a reply. Wrapper around send_to_instance with request_kind=query and requires_reply=true.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          target_instance: {
+            type: "string",
+            description: "Name of the instance to ask.",
+          },
+          question: {
+            type: "string",
+            description: "The question to ask.",
+          },
+          context: {
+            type: "string",
+            description: "Optional context to help the recipient answer.",
+          },
+        },
+        required: ["target_instance", "question"],
+      },
+    },
+    {
+      name: "delegate_task",
+      description: "Delegate a task to another instance and expect a result report back. Wrapper around send_to_instance with request_kind=task and requires_reply=true.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          target_instance: {
+            type: "string",
+            description: "Name of the instance to delegate to.",
+          },
+          task: {
+            type: "string",
+            description: "Description of the task to perform.",
+          },
+          success_criteria: {
+            type: "string",
+            description: "How the recipient should judge if the task is complete.",
+          },
+          context: {
+            type: "string",
+            description: "Optional background context for the task.",
+          },
+        },
+        required: ["target_instance", "task"],
+      },
+    },
+    {
+      name: "report_result",
+      description: "Report results back to an instance that delegated a task or asked a question. Wrapper around send_to_instance with request_kind=report.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          target_instance: {
+            type: "string",
+            description: "Name of the instance to report to.",
+          },
+          correlation_id: {
+            type: "string",
+            description: "The correlation_id from the original request.",
+          },
+          summary: {
+            type: "string",
+            description: "Summary of the result.",
+          },
+          artifacts: {
+            type: "string",
+            description: "Optional details: file paths, commit hashes, URLs, etc.",
+          },
+        },
+        required: ["target_instance", "summary"],
+      },
+    },
+    {
+      name: "describe_instance",
+      description: "Get detailed information about a specific instance: description, working directory, status, tags, and recent activity.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: {
+            type: "string",
+            description: "Instance name to describe.",
+          },
+        },
+        required: ["name"],
       },
     },
     {

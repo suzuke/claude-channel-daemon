@@ -69,6 +69,8 @@ export class ClaudeCodeBackend implements CliBackend {
       "mcp__ccd-channel__send_to_instance", "mcp__ccd-channel__list_instances",
       "mcp__ccd-channel__start_instance", "mcp__ccd-channel__create_instance",
       "mcp__ccd-channel__delete_instance",
+      "mcp__ccd-channel__request_information", "mcp__ccd-channel__delegate_task",
+      "mcp__ccd-channel__report_result", "mcp__ccd-channel__describe_instance",
     ];
 
     const settings: Record<string, unknown> = {

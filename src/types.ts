@@ -62,6 +62,8 @@ export interface InstanceConfig {
   working_directory: string;
   /** Human-readable description of what this instance does */
   description?: string;
+  /** Tags for capability discovery (e.g. ["code-reviewer", "researcher", "executor"]) */
+  tags?: string[];
   topic_id?: number;
   general_topic?: boolean;
   channel?: ChannelConfig;

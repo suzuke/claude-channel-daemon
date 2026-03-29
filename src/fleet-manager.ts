@@ -687,19 +687,29 @@ export class FleetManager implements FleetContext {
           break;
         }
 
+        // Build structured metadata (Phase 2)
+        const correlationId = (args.correlation_id as string) || `cid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const meta: Record<string, string> = {
+          chat_id: "",
+          message_id: `xmsg-${Date.now()}`,
+          user: `instance:${senderLabel}`,
+          user_id: `instance:${senderLabel}`,
+          ts: new Date().toISOString(),
+          thread_id: "",
+          from_instance: senderLabel,
+          correlation_id: correlationId,
+        };
+        if (args.request_kind) meta.request_kind = args.request_kind as string;
+        if (args.requires_reply != null) meta.requires_reply = String(args.requires_reply);
+        if (args.task_summary) meta.task_summary = args.task_summary as string;
+        if (args.working_directory) meta.working_directory = args.working_directory as string;
+        if (args.branch) meta.branch = args.branch as string;
+
         targetIpc.send({
           type: "fleet_inbound",
           targetSession,
           content: message,
-          meta: {
-            chat_id: "",
-            message_id: `xmsg-${Date.now()}`,
-            user: `instance:${senderLabel}`,
-            user_id: `instance:${senderLabel}`,
-            ts: new Date().toISOString(),
-            thread_id: "",
-            from_instance: senderLabel,
-          },
+          meta,
         });
 
         // Post to Telegram topics for visibility
@@ -723,7 +733,7 @@ export class FleetManager implements FleetContext {
         }
 
         this.logger.info(`✉ ${senderLabel} → ${targetName}: ${message.slice(0, 100)}`);
-        respond({ sent: true, target: targetName });
+        respond({ sent: true, target: targetName, correlation_id: correlationId });
         break;
       }
 
@@ -738,6 +748,8 @@ export class FleetManager implements FleetContext {
             working_directory: config.working_directory,
             topic_id: config.topic_id ?? null,
             description: config.description ?? null,
+            tags: config.tags ?? [],
+            last_activity: this.lastActivity.get(name) ? new Date(this.lastActivity.get(name)!).toISOString() : null,
           }));
         // Include external sessions (excluding self)
         const externalSessions = [...this.sessionRegistry.entries()]
@@ -746,6 +758,75 @@ export class FleetManager implements FleetContext {
             name: sessName, type: "session" as const, host: hostInstance,
           }));
         respond({ instances: allInstances, external_sessions: externalSessions });
+        break;
+      }
+
+      // Phase 3: High-level collaboration tools (wrappers around send_to_instance)
+      case "request_information": {
+        const targetName = args.target_instance as string;
+        const question = args.question as string;
+        const context = args.context as string | undefined;
+        const body = context ? `${question}\n\nContext: ${context}` : question;
+        // Re-dispatch as send_to_instance with structured metadata
+        args.instance_name = targetName;
+        args.message = body;
+        args.request_kind = "query";
+        args.requires_reply = true;
+        args.task_summary = question.slice(0, 120);
+        // Recursively handle via the same switch (will hit send_to_instance case above)
+        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args, requestId, fleetRequestId, senderSessionName });
+      }
+
+      case "delegate_task": {
+        const targetName = args.target_instance as string;
+        const task = args.task as string;
+        const criteria = args.success_criteria as string | undefined;
+        const context = args.context as string | undefined;
+        let body = task;
+        if (criteria) body += `\n\nSuccess criteria: ${criteria}`;
+        if (context) body += `\n\nContext: ${context}`;
+        args.instance_name = targetName;
+        args.message = body;
+        args.request_kind = "task";
+        args.requires_reply = true;
+        args.task_summary = task.slice(0, 120);
+        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args, requestId, fleetRequestId, senderSessionName });
+      }
+
+      case "report_result": {
+        const targetName = args.target_instance as string;
+        const summary = args.summary as string;
+        const artifacts = args.artifacts as string | undefined;
+        let body = summary;
+        if (artifacts) body += `\n\nArtifacts: ${artifacts}`;
+        args.instance_name = targetName;
+        args.message = body;
+        args.request_kind = "report";
+        args.requires_reply = false;
+        args.correlation_id = args.correlation_id ?? undefined;
+        args.task_summary = summary.slice(0, 120);
+        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args, requestId, fleetRequestId, senderSessionName });
+      }
+
+      // Phase 4: Capability discovery
+      case "describe_instance": {
+        const targetName = args.name as string;
+        const config = this.fleetConfig?.instances[targetName];
+        if (!config) {
+          respond(null, `Instance '${targetName}' not found in fleet config`);
+          break;
+        }
+        respond({
+          name: targetName,
+          description: config.description ?? null,
+          tags: config.tags ?? [],
+          working_directory: config.working_directory,
+          status: this.daemons.has(targetName) ? "running" : "stopped",
+          topic_id: config.topic_id ?? null,
+          model: config.model ?? null,
+          last_activity: this.lastActivity.get(targetName) ? new Date(this.lastActivity.get(targetName)!).toISOString() : null,
+          worktree_source: config.worktree_source ?? null,
+        });
         break;
       }
 
