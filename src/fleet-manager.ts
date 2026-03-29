@@ -1169,16 +1169,21 @@ export class FleetManager implements FleetContext {
 
     // Clean up git worktree if applicable
     if (config.worktree_source && config.working_directory) {
-      try {
-        const { execFile: execFileCb } = await import("node:child_process");
-        const { promisify } = await import("node:util");
-        const execFileAsync = promisify(execFileCb);
-        await execFileAsync("git", ["worktree", "remove", "--force", config.working_directory], {
-          cwd: config.worktree_source,
-        });
-        this.logger.info({ worktree: config.working_directory }, "Removed git worktree");
-      } catch (err) {
-        this.logger.warn({ err, worktree: config.working_directory }, "Failed to remove git worktree");
+      const { existsSync } = await import("node:fs");
+      if (!existsSync(config.working_directory)) {
+        this.logger.info({ worktree: config.working_directory }, "Worktree directory already gone, skipping removal");
+      } else {
+        try {
+          const { execFile: execFileCb } = await import("node:child_process");
+          const { promisify } = await import("node:util");
+          const execFileAsync = promisify(execFileCb);
+          await execFileAsync("git", ["worktree", "remove", "--force", config.working_directory], {
+            cwd: config.worktree_source,
+          });
+          this.logger.info({ worktree: config.working_directory }, "Removed git worktree");
+        } catch (err) {
+          this.logger.warn({ err, worktree: config.working_directory }, "Failed to remove git worktree");
+        }
       }
     }
 
