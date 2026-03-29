@@ -386,18 +386,26 @@ const access = program
   .command("access")
   .description("Access control for instances");
 
+async function resolveAccessPath(instance: string): Promise<string> {
+  const { loadFleetConfig } = await import("./config.js");
+  const { resolveAccessPathFromConfig } = await import("./access-path.js");
+  const config = loadFleetConfig(FLEET_CONFIG_PATH);
+  const inst = config.instances[instance];
+  return resolveAccessPathFromConfig(DATA_DIR, instance, config.channel, inst?.channel);
+}
+
 access
   .command("lock")
   .description("Lock instance access")
   .argument("<instance>", "Instance name")
   .action(async (instance: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
       process.exit(1);
     }
+    const statePath = await resolveAccessPath(instance);
     const am = new AccessManager({ mode: "locked", allowed_users: [], max_pending_codes: 5, code_expiry_minutes: 10 }, statePath);
     am.setMode("locked");
     console.log(`${instance}: locked`);
@@ -409,12 +417,12 @@ access
   .argument("<instance>", "Instance name")
   .action(async (instance: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
       process.exit(1);
     }
+    const statePath = await resolveAccessPath(instance);
     const am = new AccessManager({ mode: "pairing", allowed_users: [], max_pending_codes: 5, code_expiry_minutes: 10 }, statePath);
     am.setMode("pairing");
     console.log(`${instance}: unlocked`);
@@ -426,12 +434,12 @@ access
   .argument("<instance>", "Instance name")
   .action(async (instance: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
       process.exit(1);
     }
+    const statePath = await resolveAccessPath(instance);
     const am = new AccessManager({ mode: "pairing", allowed_users: [], max_pending_codes: 5, code_expiry_minutes: 10 }, statePath);
     const users = am.getAllowedUsers();
     if (users.length === 0) {
@@ -451,12 +459,12 @@ access
   .argument("<user-id>", "User ID to remove")
   .action(async (instance: string, userId: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
       process.exit(1);
     }
+    const statePath = await resolveAccessPath(instance);
     const am = new AccessManager({ mode: "pairing", allowed_users: [], max_pending_codes: 5, code_expiry_minutes: 10 }, statePath);
     am.removeUser(parseInt(userId, 10));
     console.log(`${instance}: removed user ${userId}`);
@@ -469,12 +477,12 @@ access
   .argument("<user-id>", "Telegram user ID requesting pairing")
   .action(async (instance: string, userId: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
       process.exit(1);
     }
+    const statePath = await resolveAccessPath(instance);
     const am = new AccessManager({ mode: "pairing", allowed_users: [], max_pending_codes: 5, code_expiry_minutes: 10 }, statePath);
     const code = am.generateCode(parseInt(userId, 10));
     console.log(`${instance}: pairing code = ${code}`);

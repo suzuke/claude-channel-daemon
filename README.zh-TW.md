@@ -295,11 +295,7 @@ GET /status  → { instances: [{ name, status, context_pct, cost_today }] }
 在 `fleet.yaml` 設定：
 
 ```yaml
-defaults:
-  health_endpoint:
-    enabled: true
-    port: 19280
-    bind: "127.0.0.1"
+health_port: 19280  # top-level，預設 19280，綁定 127.0.0.1
 ```
 
 ### Webhook 通知
@@ -416,10 +412,6 @@ defaults:
     threshold_percentage: 60
     max_age_hours: 8
   model_failover: ["opus", "sonnet"]
-  health_endpoint:
-    enabled: true
-    port: 19280
-    bind: "127.0.0.1"
   webhooks:
     - url: https://hooks.slack.com/...
       events: ["rotation", "hang", "cost_warn"]

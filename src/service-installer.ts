@@ -12,7 +12,7 @@ const templatesDir = join(__dirname, "..", "templates");
 interface ServiceVars {
   label: string;
   execPath: string;
-  path: string;
+  path?: string;
   workingDirectory: string;
   logPath: string;
 }
@@ -21,14 +21,18 @@ export function detectPlatform(): "macos" | "linux" {
   return platform() === "darwin" ? "macos" : "linux";
 }
 
+function withDefaults(vars: ServiceVars): ServiceVars & { path: string } {
+  return { ...vars, path: vars.path ?? process.env.PATH ?? "" };
+}
+
 export function renderLaunchdPlist(vars: ServiceVars): string {
   const template = readFileSync(join(templatesDir, "launchd.plist.ejs"), "utf-8");
-  return render(template, vars);
+  return render(template, withDefaults(vars));
 }
 
 export function renderSystemdUnit(vars: ServiceVars): string {
   const template = readFileSync(join(templatesDir, "systemd.service.ejs"), "utf-8");
-  return render(template, vars);
+  return render(template, withDefaults(vars));
 }
 
 export function uninstallService(label: string): boolean {
