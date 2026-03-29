@@ -778,7 +778,7 @@ export class Daemon extends EventEmitter {
     // are distinguishable from external sessions sharing the same .mcp.json
     let claudeCmd = `CCD_INSTANCE_NAME=${this.name} ` + this.backend.buildCommand(backendConfig);
 
-    const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory);
+    const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory, this.name);
     const windowIdFile = join(this.instanceDir, "window-id");
     writeFileSync(windowIdFile, windowId);
 
