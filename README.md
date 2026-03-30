@@ -126,17 +126,34 @@ Also rotates after `max_age_hours` (default 8h) regardless of context usage.
 
 Every instance is an equal peer that can discover, wake, create, and message other instances. No dispatcher needed — collaboration emerges from the tools available to each agent.
 
-MCP tools for collaboration:
+**Core MCP tools:**
 
-- `list_instances` — discover all configured instances (running or stopped) with status and working directory
-- `send_to_instance` — send a message to another instance or external session
+- `list_instances` — discover all configured instances (running or stopped) with status, working directory, tags, and last activity
+- `send_to_instance` — send a message to another instance or external session; supports structured metadata (`request_kind`, `requires_reply`, `correlation_id`, `task_summary`)
 - `start_instance` — wake a stopped instance so you can message it
 - `create_instance` — create a new instance with a topic from a project directory (supports `--branch` for git worktree isolation)
 - `delete_instance` — remove an instance and its topic
+- `describe_instance` — get detailed info about a specific instance (description, tags, model, last activity)
+
+**High-level collaboration tools** (prefer these over raw `send_to_instance`):
+
+- `request_information` — ask another instance a question and expect a reply (`request_kind=query`, `requires_reply=true`)
+- `delegate_task` — assign work to another instance with success criteria (`request_kind=task`, `requires_reply=true`)
+- `report_result` — return results to the requester, echoing `correlation_id` to link the response to its request
 
 Messages are posted to the recipient's Telegram topic for visibility. Sender topic notifications are only posted for instance-to-instance messages (not from external sessions).
 
 If you `send_to_instance` a stopped instance, the error tells you to use `start_instance()` first — agents self-correct without human intervention.
+
+#### Fleet context system prompt
+
+On startup, each instance automatically receives a fleet context system prompt that tells it:
+
+- Its own identity (`instanceName`) and working directory
+- The full list of fleet tools and how to use them
+- Collaboration rules: how to handle `from_instance` messages, when to echo `correlation_id`, scope awareness (never assume direct file access to another instance's repo)
+
+This means instances understand their role in the fleet from the first message, without any manual configuration.
 
 ### General Topic instance
 
@@ -422,6 +439,7 @@ instances:
     working_directory: /path/to/project
     topic_id: 277
     description: "Main backend service"
+    tags: ["backend", "api"]   # searchable labels; visible in list_instances
     cost_guard:
       daily_limit_usd: 30
     model: opus
