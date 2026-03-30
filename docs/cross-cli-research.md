@@ -54,6 +54,45 @@ CCD 的 MCP server (`ccd-channel`) 依賴 Claude Code 專有的 channel protocol
 - **問題**：每次 spawn 新 process，2-5 秒延遲（Node.js 啟動 + MCP 載入 + session 讀取）
 - **結論**：可行但延遲太高，尤其 cross-instance messaging
 
+### POC 結果（2026-03-30）
+
+```
+測試環境：macOS, Node.js 25.8.0, Claude Code 2.1.81
+狀態：rate limited（7-day 100%），無法測試完整 API 流程
+
+啟動延遲 breakdown（3 次平均）：
+  Total wall time:  ~2.8s
+  API duration:     ~0.4s (rate limited stub)
+  Startup overhead: ~2.4s (Node.js + Claude Code init)
+
+JSON output 結構確認：
+  ✅ session_id — 可用於 --resume
+  ✅ result — 文字回覆
+  ✅ is_error — 錯誤偵測
+  ✅ duration_ms, total_cost_usd — 監控數據
+  ✅ num_turns — 多輪追蹤
+
+MCP 整合確認：
+  ✅ --mcp-config 可載入自訂 MCP server
+  ✅ --allowedTools 可預先授權 MCP tools
+  ✅ MCP server stderr 可捕獲 tool calls
+  ❌ 無法測試實際 tool call（rate limited）
+
+Resume 確認：
+  ✅ --resume $session_id 接續對話
+  ✅ session_id 在 JSON output 中返回
+
+架構驗證：
+  ✅ 不需要 tmux
+  ✅ 不需要 channel protocol
+  ✅ 不需要 IPC socket
+  ✅ 結構化 I/O（JSON in/out）
+  ❌ 2.4s 固定啟動開銷（不可接受用於 cross-instance messaging）
+  ❓ 待測：實際 API call 時的 MCP tool call 捕獲
+```
+
+POC 程式碼：`poc-headless.mjs`
+
 ### 6. Headless 常駐 process（最有前景）⭐
 - 把 CLI 跑成常駐 process，用程式化 API 持續對話
 - Claude Code：Agent SDK（TypeScript/Python package）
