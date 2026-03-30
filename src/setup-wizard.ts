@@ -237,19 +237,10 @@ export async function runSetupWizard(): Promise<void> {
 
   // ── Step 3: Mode ──
   step(3, TOTAL_STEPS, "Channel Mode");
-  const modeIndex = await choose(
-    rl,
-    "How will this bot serve your projects?",
-    [
-      { label: "Topic mode", hint: "1 group, N forum topics = N projects (recommended)" },
-      { label: "DM mode", hint: "1 bot = 1 project, direct messages" },
-    ],
-    0,
-  );
-  const mode = modeIndex === 0 ? "topic" : "dm";
+  const mode = "topic";
 
   let groupId: number | undefined;
-  if (mode === "topic") {
+  {
     console.log();
     console.log(`  ${dim("To get the group ID:")}`);
     console.log(`  ${dim("1. Add the bot to a Telegram group with Forum Topics enabled")}`);
@@ -526,15 +517,6 @@ export async function runSetupWizard(): Promise<void> {
       max_retries: 10,
       backoff: "exponential",
       reset_after: 300,
-    },
-    context_guardian: {
-      threshold_percentage: 40,
-      max_age_hours: 8,
-      strategy: "hybrid",
-    },
-    memory: {
-      watch_memory_dir: true,
-      backup_to_sqlite: true,
     },
     log_level: "info",
     ...(costGuardLimit > 0 ? {

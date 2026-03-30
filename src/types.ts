@@ -51,7 +51,7 @@ export interface DailySummaryConfig {
 
 export interface ChannelConfig {
   type: string;
-  mode: "topic" | "dm";
+  mode: "topic";
   bot_token_env: string;
   group_id?: number;
   access: AccessConfig;
@@ -66,30 +66,15 @@ export interface InstanceConfig {
   tags?: string[];
   topic_id?: number;
   general_topic?: boolean;
-  channel?: ChannelConfig;
   restart_policy: {
     max_retries: number;
     backoff: "exponential" | "linear";
     reset_after: number;
   };
   context_guardian: {
-    /** @deprecated Use restart_threshold_pct instead */
-    threshold_percentage?: number;
-    /** v3: restart when context usage exceeds this percentage */
-    restart_threshold_pct?: number;
-    /** @deprecated No longer used in v3 */
-    max_idle_wait_ms?: number;
-    /** @deprecated No longer used in v3 */
-    completion_timeout_ms?: number;
     grace_period_ms: number;
     max_age_hours: number;
   };
-  memory: {
-    auto_summarize: boolean;
-    watch_memory_dir: boolean;
-    backup_to_sqlite: boolean;
-  };
-  memory_directory?: string;
   log_level: "debug" | "info" | "warn" | "error";
   /** CLI backend to use. Default: "claude-code" */
   backend?: string;

@@ -55,11 +55,6 @@ export const DEFAULT_INSTANCE_CONFIG: Omit<InstanceConfig, "working_directory"> 
     grace_period_ms: 600_000,
     max_age_hours: 0, // 0 = disabled; Claude Code auto-compact handles context limits
   },
-  memory: {
-    auto_summarize: true,
-    watch_memory_dir: true,
-    backup_to_sqlite: true,
-  },
   log_level: "info",
 };
 

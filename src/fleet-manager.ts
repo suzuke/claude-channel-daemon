@@ -326,8 +326,7 @@ export class FleetManager implements FleetContext {
     const instanceEntries = Object.entries(fleet.instances);
     for (let i = 0; i < instanceEntries.length; i++) {
       const [name, config] = instanceEntries[i];
-      // @deprecated DM mode: when config.channel is set, instance runs its own adapter
-      await this.startInstance(name, config, topicMode && !config.channel);
+      await this.startInstance(name, config, topicMode);
       // Stagger launches to avoid resource contention during startup
       if (i < instanceEntries.length - 1) {
         await new Promise(r => setTimeout(r, 3000));
@@ -442,7 +441,7 @@ export class FleetManager implements FleetContext {
           await this.stopInstance(instanceName);
           const config = this.fleetConfig?.instances[instanceName];
           if (config) {
-            const topicMode = this.fleetConfig?.channel?.mode === "topic" && !config.channel;
+            const topicMode = this.fleetConfig?.channel?.mode === "topic";
             await this.startInstance(instanceName, config, topicMode);
             await new Promise(r => setTimeout(r, 3000));
             await this.connectIpcToInstance(instanceName);
@@ -1331,9 +1330,7 @@ export class FleetManager implements FleetContext {
       if (inst.systemPrompt) serialized.systemPrompt = inst.systemPrompt;
       if (inst.skipPermissions) serialized.skipPermissions = inst.skipPermissions;
       if (inst.lightweight) serialized.lightweight = inst.lightweight;
-      if (inst.memory_directory) serialized.memory_directory = inst.memory_directory;
       if (inst.cost_guard) serialized.cost_guard = inst.cost_guard;
-      if (inst.channel) serialized.channel = inst.channel;
       (toSave.instances as Record<string, unknown>)[name] = serialized;
     }
     writeFileSync(this.configPath, yaml.dump(toSave, { lineWidth: 120 }));
@@ -1813,7 +1810,7 @@ export class FleetManager implements FleetContext {
     const topicMode = fleet.channel?.mode === "topic";
 
     for (const [name, config] of Object.entries(fleet.instances)) {
-      await this.startInstance(name, config, topicMode && !config.channel);
+      await this.startInstance(name, config, topicMode);
     }
 
     if (topicMode) {

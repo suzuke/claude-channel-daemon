@@ -13,10 +13,7 @@ import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import type { CliBackend, CliBackendConfig } from "./backend/types.js";
-import { createAdapter } from "./channel/factory.js";
-import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage, ApprovalResponse, PermissionPrompt } from "./channel/types.js";
-import { processAttachments } from "./channel/attachment-handler.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { generateFleetSystemPrompt } from "./fleet-system-prompt.js";
 import { HangDetector } from "./hang-detector.js";
@@ -165,68 +162,6 @@ export class Daemon extends EventEmitter {
       }
     });
 
-    // @deprecated DM mode — will be removed in a future version
-    // 1b. Create Telegram adapter (DM mode only — in topic mode, fleet manager owns the adapter)
-    if (!this.topicMode && this.config.channel) {
-      const channelConfig = this.config.channel;
-      const botToken = process.env[channelConfig.bot_token_env];
-      if (botToken) {
-        const accessDir = join(this.instanceDir, "access");
-        mkdirSync(accessDir, { recursive: true });
-        const accessManager = new AccessManager(
-          channelConfig.access,
-          join(accessDir, "access.json"),
-        );
-        const inboxDir = join(this.instanceDir, "inbox");
-        mkdirSync(inboxDir, { recursive: true });
-        this.adapter = await createAdapter(this.config.channel!, {
-          id: `dm-${this.name}`,
-          botToken,
-          accessManager,
-          inboxDir,
-        });
-        this.messageBus.register(this.adapter);
-
-        // Wire inbound messages → transcribe voice if present, then push to Claude via IPC
-        this.messageBus.on("message", async (msg: InboundMessage) => {
-          if (msg.chatId) this.lastChatId = msg.chatId;
-          if (msg.threadId) this.lastThreadId = msg.threadId;
-
-          // Auto-react 👀 so sender knows the message was received
-          if (this.adapter && msg.chatId && msg.messageId) {
-            this.adapter.react(msg.chatId, msg.messageId, "👀")
-              .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
-            this.pendingAckMessage = { chatId: msg.chatId, messageId: msg.messageId };
-          }
-
-          let text = msg.text;
-          let extraMeta: Record<string, string> = {};
-
-          if (this.adapter) {
-            const result = await processAttachments(msg, this.adapter, this.logger);
-            text = result.text;
-            extraMeta = result.extraMeta;
-          }
-
-          this.pushChannelMessage(text, {
-            chat_id: msg.chatId,
-            message_id: msg.messageId,
-            user: msg.username,
-            user_id: msg.userId,
-            ts: msg.timestamp.toISOString(),
-            ...(msg.threadId ? { thread_id: msg.threadId } : {}),
-            ...(msg.replyToText ? { reply_to_text: msg.replyToText } : {}),
-            ...extraMeta,
-          });
-        });
-
-        await this.adapter.start();
-        this.logger.info({ adapterId: this.adapter.id }, "Telegram adapter started");
-      } else {
-        this.logger.warn({ env: channelConfig.bot_token_env }, "Bot token env not set, skipping adapter");
-      }
-    }
-
     // 2. Tmux — ensure session, create window if not alive
     const sessionName = "ccd";
     await TmuxManager.ensureSession(sessionName);
@@ -305,7 +240,7 @@ export class Daemon extends EventEmitter {
         this.logger.info({ reason, context_pct: this.preRotationContextPct }, "Restart requested");
 
         // Minimal idle barrier: let current step settle (best-effort, not a handover wait)
-        await this.waitForTranscriptIdle(5000);
+        await this.waitForIdle(5000);
 
         // Collect and write daemon-side snapshot
         const snapshot = this.writeRotationSnapshot(reason);
@@ -514,30 +449,12 @@ export class Daemon extends EventEmitter {
     const text = this.toolStatusLines.join("\n");
     if (!text) return;
 
-    if (this.topicMode) {
-      // Topic mode: send via IPC to fleet manager
-      this.ipcServer?.broadcast({
-        type: "fleet_tool_status",
-        instanceName: this.name,
-        text,
-        editMessageId: this.toolStatusMessageId,
-      });
-    } else {
-      // @deprecated DM mode: send directly via adapter
-      const adapters = this.messageBus.getAllAdapters();
-      if (adapters.length === 0) return;
-      const adapter = adapters[0];
-      const chatId = this.lastChatId ?? "";
-      if (!chatId) return; // No inbound message yet — nowhere to send
-      if (!this.toolStatusMessageId) {
-        adapter.sendText(chatId, text, { threadId: this.lastThreadId })
-          .then(sent => { this.toolStatusMessageId = sent.messageId; })
-          .catch(e => this.logger.debug({ err: e }, "Failed to send tool status message"));
-      } else {
-        adapter.editMessage(chatId, this.toolStatusMessageId, text)
-          .catch(e => this.logger.debug({ err: e }, "Failed to edit tool status message"));
-      }
-    }
+    this.ipcServer?.broadcast({
+      type: "fleet_tool_status",
+      instanceName: this.name,
+      text,
+      editMessageId: this.toolStatusMessageId,
+    });
   }
 
   /** Called by fleet manager when tool status message is sent (returns messageId) */
@@ -875,16 +792,6 @@ export class Daemon extends EventEmitter {
 
   /** Public wrapper for graceful restart — wait for instance to be idle. */
   waitForIdle(quietMs = 5000): Promise<void> {
-    return this.waitForTranscriptIdle(quietMs);
-  }
-
-  /** @deprecated Use stop() directly — daemon-side snapshot handles continuity */
-  async gracefulStop(): Promise<void> {
-    await this.stop();
-  }
-
-  /** Debounce-based idle: resolves when no transcript events for `quietMs`. */
-  private waitForTranscriptIdle(quietMs = 5000): Promise<void> {
     return new Promise((resolve) => {
       const events = ["tool_use", "tool_result", "assistant_text", "channel_message"];
       let timer: ReturnType<typeof setTimeout>;

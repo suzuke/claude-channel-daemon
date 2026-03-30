@@ -102,7 +102,6 @@ export class TopicCommands {
       topic_id: topicId,
       restart_policy: this.ctx.fleetConfig.defaults.restart_policy ?? DEFAULT_INSTANCE_CONFIG.restart_policy,
       context_guardian: this.ctx.fleetConfig.defaults.context_guardian ?? DEFAULT_INSTANCE_CONFIG.context_guardian,
-      memory: this.ctx.fleetConfig.defaults.memory ?? DEFAULT_INSTANCE_CONFIG.memory,
       log_level: this.ctx.fleetConfig.defaults.log_level ?? DEFAULT_INSTANCE_CONFIG.log_level,
     };
 

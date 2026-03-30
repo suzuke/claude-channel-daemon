@@ -1,17 +1,16 @@
 import { join } from "node:path";
 
 /**
- * Resolve the access.json path for an instance based on fleet config.
- * Shared topic adapter → fleet-level; DM or instance-local channel → per-instance.
+ * Resolve the access.json path for an instance.
+ * Topic mode uses fleet-level access; otherwise per-instance.
  */
 export function resolveAccessPathFromConfig(
   dataDir: string,
-  instance: string,
+  _instance: string,
   fleetChannel: { mode?: string } | undefined,
-  instanceChannel: { mode?: string } | undefined,
 ): string {
-  if (fleetChannel?.mode === "topic" && !instanceChannel) {
+  if (fleetChannel?.mode === "topic") {
     return join(dataDir, "access", "access.json");
   }
-  return join(dataDir, "instances", instance, "access", "access.json");
+  return join(dataDir, "access", "access.json");
 }

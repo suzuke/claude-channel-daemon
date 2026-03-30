@@ -67,7 +67,7 @@ fleet
         console.error(`Instance "${instance}" not found in fleet config`);
         process.exit(1);
       }
-      const topicMode = config.channel?.mode === "topic" && !inst.channel;
+      const topicMode = config.channel?.mode === "topic";
       await fm.startInstance(instance, inst, topicMode);
     } else {
       await fm.startAll(FLEET_CONFIG_PATH);
@@ -375,6 +375,21 @@ fleet
       console.log(`  Removed: ${d}`);
     }
     console.log(`Cleaned up ${dirs.length} directories.`);
+
+    // Clean stale files from active instances
+    const staleFiles = ["memory.db", "sandbox-bash"];
+    let staleCount = 0;
+    for (const name of configuredNames) {
+      const instDir = join(instancesDir, name);
+      for (const f of staleFiles) {
+        const p = join(instDir, f);
+        if (existsSync(p)) {
+          if (!opts.dryRun) rmSync(p, { force: true });
+          staleCount++;
+        }
+      }
+    }
+    if (staleCount > 0) console.log(`Removed ${staleCount} stale files (memory.db, sandbox-bash).`);
   });
 
 // === Topic commands ===
@@ -447,7 +462,7 @@ async function resolveAccessPath(instance: string): Promise<string> {
   const { resolveAccessPathFromConfig } = await import("./access-path.js");
   const config = loadFleetConfig(FLEET_CONFIG_PATH);
   const inst = config.instances[instance];
-  return resolveAccessPathFromConfig(DATA_DIR, instance, config.channel, inst?.channel);
+  return resolveAccessPathFromConfig(DATA_DIR, instance, config.channel);
 }
 
 access
