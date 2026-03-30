@@ -90,6 +90,17 @@ export class TmuxManager {
     } catch { return false; }
   }
 
+  /** Paste text via bracketed paste (safe for CLIs with single-char hotkeys like Gemini's '!') */
+  async pasteText(text: string): Promise<boolean> {
+    try {
+      const target = `${this.sessionName}:${this.windowId}`;
+      await exec("tmux", ["set-buffer", "--", text]);
+      await exec("tmux", ["paste-buffer", "-t", target, "-p"]);
+      await exec("tmux", ["send-keys", "-t", target, "Enter"]);
+      return true;
+    } catch { return false; }
+  }
+
   async pipeOutput(logPath: string): Promise<void> {
     const escaped = logPath.replace(/'/g, "'\\''");
     await exec("tmux", [

@@ -2,7 +2,6 @@ import { join, dirname } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { InstanceConfig, RotationSnapshot, RotationSnapshotEvent } from "./types.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -13,7 +12,7 @@ import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import type { CliBackend, CliBackendConfig } from "./backend/types.js";
-import type { ChannelAdapter, InboundMessage, ApprovalResponse, PermissionPrompt } from "./channel/types.js";
+import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { generateFleetSystemPrompt } from "./fleet-system-prompt.js";
 import { HangDetector } from "./hang-detector.js";
@@ -111,8 +110,6 @@ export class Daemon extends EventEmitter {
       if (msg.type === "tool_call") {
         // MCP server forwarding a Claude tool call (reply, react, edit, download)
         this.handleToolCall(msg, socket);
-      } else if (msg.type === "permission_request") {
-        this.handlePermissionRequest(msg, socket);
       } else if (msg.type === "mcp_ready") {
         const sessionName = msg.sessionName as string | undefined;
         if (sessionName) {
@@ -467,28 +464,31 @@ export class Daemon extends EventEmitter {
    * If targetSession is provided, only send to the matching socket.
    * Otherwise send to the instance's own session (this.name).
    */
-  pushChannelMessage(content: string, meta: Record<string, string>, targetSession?: string): void {
-    if (!this.ipcServer) {
-      this.logger.warn("Cannot push channel message: IPC server not running");
+  pushChannelMessage(content: string, meta: Record<string, string>, _targetSession?: string): void {
+    if (!this.tmux) {
+      this.logger.warn("Cannot push channel message: tmux not running");
       return;
     }
     this.hangDetector?.recordInbound();
     // v3: record user messages for rotation snapshot
     this.recordRecentUserMessage(content, meta);
-    const msg = { type: "channel_message", content, meta };
-    const target = targetSession ?? this.name;
-    const socket = this.findSocketBySession(target);
-    if (socket) {
-      this.ipcServer.send(socket, msg);
-    } else if (targetSession && targetSession !== this.name) {
-      // Target session specified but not connected — don't broadcast to avoid
-      // delivering cross-instance messages to the wrong Claude session.
-      this.logger.warn({ targetSession }, "Target session not connected, message dropped");
+
+    // Format message with metadata prefix for the agent
+    const user = meta.user || "unknown";
+    const fromInstance = meta.from_instance;
+    let formatted: string;
+    if (fromInstance) {
+      // Cross-instance message
+      formatted = `[from:${fromInstance}] ${content}`;
     } else {
-      // Own session not yet registered — broadcast as fallback
-      this.ipcServer.broadcast(msg);
+      // User message from Telegram/Discord
+      formatted = `[user:${user}] ${content}`;
     }
-    this.logger.debug({ user: meta.user, targetSession: target, text: content.slice(0, 100) }, "Pushed channel message");
+
+    this.tmux.pasteText(formatted).catch(err => {
+      this.logger.error({ err }, "Failed to paste message to tmux");
+    });
+    this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Pushed channel message via tmux");
   }
 
   /** Find the IPC socket for a given sessionName */
@@ -603,96 +603,6 @@ export class Daemon extends EventEmitter {
 
     if (!routeToolCall(adapter, tool, args, this.lastThreadId, respond)) {
       respond(null, `Unknown tool: ${tool}`);
-    }
-  }
-
-  /** Handle a permission_request IPC message from the MCP server */
-  private async handlePermissionRequest(msg: Record<string, unknown>, socket: import("node:net").Socket): Promise<void> {
-    const requestId = msg.requestId as number;
-    const request_id = msg.request_id as string;
-    const prompt: PermissionPrompt = {
-      tool_name: msg.tool_name as string,
-      description: msg.description as string,
-      input_preview: msg.input_preview as string | undefined,
-    };
-
-    try {
-      let result: ApprovalResponse;
-      if (this.topicMode && this.ipcServer) {
-        result = await this.requestApprovalViaIpc(prompt);
-      } else {
-        result = await this.messageBus.requestApproval(prompt);
-      }
-
-      const isApprove = result.decision === "approve" || result.decision === "approve_always";
-      const behavior = isApprove ? "allow" : "deny";
-      this.ipcServer?.send(socket, {
-        requestId,
-        result: { request_id, behavior },
-      });
-
-      if (result.decision === "approve_always") {
-        this.addToolPermission(prompt.tool_name);
-      }
-
-      // If denied due to timeout, inform Claude so it can distinguish from explicit rejection
-      if (behavior === "deny" && result.respondedBy?.channelType === "timeout") {
-        this.pushChannelMessage(
-          `[System] Permission request for \`${prompt.tool_name}\` timed out — user may be away.`,
-          { chat_id: this.lastChatId ?? "", ts: new Date().toISOString() },
-        );
-      }
-    } catch (err) {
-      this.ipcServer?.send(socket, {
-        requestId,
-        result: { request_id, behavior: "deny" },
-      });
-    }
-  }
-
-  /** Topic mode: forward approval request to fleet manager via IPC */
-  private requestApprovalViaIpc(prompt: PermissionPrompt): Promise<ApprovalResponse> {
-    return new Promise((resolve) => {
-      const approvalId = `approval-${randomUUID()}`;
-
-      const timeout = setTimeout(() => {
-        this.pendingIpcRequests.delete(approvalId);
-        resolve({ decision: "deny", respondedBy: { channelType: "timeout", userId: "" } });
-      }, 120_000);
-
-      this.pendingIpcRequests.set(approvalId, (msg) => {
-        clearTimeout(timeout);
-        const d = msg.decision as string;
-        const decision = d === "approve" ? "approve" as const
-          : d === "approve_always" ? "approve_always" as const
-          : "deny" as const;
-        resolve({ decision, respondedBy: { channelType: "fleet", userId: "" } });
-      });
-
-      this.ipcServer?.broadcast({
-        type: "fleet_approval_request",
-        approvalId,
-        instanceName: this.name,
-        prompt,
-      });
-    });
-  }
-
-
-  /** Add a tool to the persistent permission allow list in claude-settings.json */
-  private addToolPermission(toolName: string): void {
-    const settingsPath = join(this.instanceDir, "claude-settings.json");
-    try {
-      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-      const allow: string[] = settings.permissions?.allow ?? [];
-      if (!allow.includes(toolName)) {
-        allow.push(toolName);
-        settings.permissions.allow = allow;
-        writeFileSync(settingsPath, JSON.stringify(settings));
-        this.logger.info({ toolName }, "Added tool to permission allow list");
-      }
-    } catch (err) {
-      this.logger.warn({ err, toolName }, "Failed to update claude-settings.json");
     }
   }
 

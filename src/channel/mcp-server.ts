@@ -20,7 +20,6 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
 import { basename } from "node:path";
 import { IpcClient } from "./ipc-bridge.js";
 import { TOOLS } from "./mcp-tools.js";
@@ -32,7 +31,6 @@ import { TOOLS } from "./mcp-tools.js";
 const SOCKET_PATH = process.env.CCD_SOCKET_PATH ?? "";
 const IPC_TIMEOUT_MS = 30_000;
 const SLOW_IPC_TIMEOUT_MS = 60_000;
-const PERMISSION_TIMEOUT_MS = 120_000;
 
 const SLOW_TOOLS = new Set(["start_instance", "create_instance", "delete_instance"]);
 
@@ -81,10 +79,6 @@ function setupIpcListeners(client: IpcClient): void {
       } else {
         pending.resolve(msg.result);
       }
-      return;
-    }
-    if (msg.type === "channel_message") {
-      pushChannelMessage(msg as unknown as ChannelIpcMessage);
     }
   });
 
@@ -142,12 +136,6 @@ function scheduleReconnect(): void {
   }, delay);
 }
 
-interface ChannelIpcMessage {
-  type: string;
-  content: string;
-  meta: Record<string, string>;
-}
-
 function ipcRequest(
   tool: string,
   args: Record<string, unknown>,
@@ -178,66 +166,24 @@ function ipcRequest(
   });
 }
 
-function ipcPermissionRequest(
-  request_id: string,
-  tool_name: string,
-  description: string,
-  input_preview?: string,
-): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    if (!ipcConnected || !ipc) {
-      reject(new Error("Not connected to daemon IPC"));
-      return;
-    }
-    const requestId = ++requestCounter;
-    const timer = setTimeout(() => {
-      pendingRequests.delete(requestId);
-      reject(new Error(`Permission request timed out after ${PERMISSION_TIMEOUT_MS}ms`));
-    }, PERMISSION_TIMEOUT_MS);
-    pendingRequests.set(requestId, { resolve, reject, timer });
-    try {
-      ipc.send({
-        type: "permission_request",
-        requestId,
-        request_id,
-        tool_name,
-        description,
-        input_preview,
-      });
-    } catch (err) {
-      pendingRequests.delete(requestId);
-      clearTimeout(timer);
-      ipcConnected = false;
-      reject(new Error(`IPC send failed: ${err}`));
-    }
-  });
-}
-
 // ---------------------------------------------------------------------------
 // MCP Server
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: "ccd-channel", version: "0.2.0" },
+  { name: "ccd-channel", version: "0.3.0" },
   {
     capabilities: {
       tools: {},
-      experimental: {
-        "claude/channel": {},
-        "claude/channel/permission": {},
-      },
     },
     instructions: [
-      "Messages from channels arrive as <channel source=\"ccd\" chat_id=\"...\" message_id=\"...\" user=\"...\" ts=\"...\">.",
-      "Reply using the reply tool -- pass chat_id back. Use reply_to (set to a message_id) to thread. IMPORTANT: chat_id and thread_id in reply must come from the inbound <channel> message only — never use a topic_id from list_instances as thread_id.",
-      "Use react to add emoji reactions, edit_message for progress updates, and download_attachment for file attachments.",
-      "If the inbound meta has image_path, Read that file — it is a photo the sender attached.",
-      "If the inbound meta has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path.",
-      "If the inbound meta has reply_to_text, the user is quoting/replying to a previous message — reply_to_text contains the original message text.",
-      "Use send_to_instance to communicate with other Claude instances. Messages are passive — the recipient sees them but is not forced to respond. Use list_instances to discover available instances.",
-      "Cross-instance messages (from_instance in meta) must be replied to via send_to_instance, NOT the reply tool. The reply tool is for Telegram only.",
-      "Cross-instance meta fields: from_instance (sender name), request_kind (query|task|report|update), requires_reply (boolean), correlation_id (for request-response pairing), task_summary (brief description).",
-      "High-level collaboration tools: request_information (ask a question), delegate_task (assign work), report_result (return results with correlation_id). These wrap send_to_instance with appropriate metadata.",
+      "Reply using the reply tool. Use react for emoji reactions, edit_message for updates, download_attachment for files.",
+      "If the inbound message has image_path, Read that file — it is a photo the sender attached.",
+      "If the inbound message has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path.",
+      "If the inbound message has reply_to_text, the user is quoting/replying to a previous message.",
+      "Use send_to_instance to communicate with other instances. Use list_instances to discover available instances.",
+      "Cross-instance messages (from_instance in meta) must be replied to via send_to_instance, NOT the reply tool.",
+      "High-level collaboration tools: request_information (ask a question), delegate_task (assign work), report_result (return results with correlation_id).",
       "Use describe_instance to get detailed info about a specific instance before interacting with it.",
     ].join("\n"),
   },
@@ -267,67 +213,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
   }
 });
-
-const PermissionRequestNotificationSchema = z.object({
-  method: z.literal("notifications/claude/channel/permission_request"),
-  params: z.object({
-    request_id: z.string(),
-    tool_name: z.string(),
-    description: z.string(),
-    input_preview: z.string().optional(),
-  }),
-});
-
-mcp.setNotificationHandler(
-  PermissionRequestNotificationSchema,
-  async (notification) => {
-    const params = notification.params;
-    try {
-      const result = await ipcPermissionRequest(
-        params.request_id,
-        params.tool_name,
-        params.description,
-        params.input_preview,
-      ) as { request_id: string; behavior: "allow" | "deny" };
-      await mcp.notification({
-        method: "notifications/claude/channel/permission",
-        params: {
-          request_id: result.request_id,
-          behavior: result.behavior,
-        },
-      });
-    } catch (err) {
-      process.stderr.write(`ccd-channel: permission relay error: ${err}\n`);
-      await mcp.notification({
-        method: "notifications/claude/channel/permission",
-        params: {
-          request_id: params.request_id,
-          behavior: "deny",
-        },
-      });
-    }
-  },
-);
-
-// ---------------------------------------------------------------------------
-// Inbound: push channel messages to Claude
-// ---------------------------------------------------------------------------
-
-function pushChannelMessage(msg: ChannelIpcMessage): void {
-  mcp
-    .notification({
-      method: "notifications/claude/channel",
-      params: {
-        content: msg.content,
-        meta: msg.meta ?? {},
-      },
-    })
-    .catch((err) => {
-      process.stderr.write(
-        `ccd-channel: failed to push channel message: ${err}\n`,
-      );
-    });
-}
 
 // ---------------------------------------------------------------------------
 // Main

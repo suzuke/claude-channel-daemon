@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { CliBackend, CliBackendConfig } from "./types.js";
 
 
@@ -8,16 +8,13 @@ export class ClaudeCodeBackend implements CliBackend {
 
   buildCommand(config: CliBackendConfig): string {
     const settingsPath = join(this.instanceDir, "claude-settings.json");
-    let cmd = `CMUX_CLAUDE_HOOKS_DISABLED=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --settings ${settingsPath} --dangerously-load-development-channels server:ccd-channel`;
+    const mcpConfigPath = join(this.instanceDir, "mcp-config.json");
+    let cmd = `CMUX_CLAUDE_HOOKS_DISABLED=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
 
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {
       const sid = readFileSync(sessionIdFile, "utf-8").trim();
       if (sid && /^[a-zA-Z0-9_-]+$/.test(sid)) cmd += ` --resume ${sid}`;
-    }
-
-    if (config.skipPermissions) {
-      cmd += ` --dangerously-skip-permissions`;
     }
 
     if (config.model) {
@@ -34,49 +31,16 @@ export class ClaudeCodeBackend implements CliBackend {
   }
 
   writeConfig(config: CliBackendConfig): void {
-    // 1. Write .mcp.json (always needed — ccd-channel MCP server)
-    const mcpConfigPath = join(config.workingDirectory, ".mcp.json");
-    let mcpConfig: { mcpServers?: Record<string, unknown> } = {};
-    try {
-      const raw = readFileSync(mcpConfigPath, "utf-8");
-      try {
-        mcpConfig = JSON.parse(raw);
-      } catch (parseErr) {
-        throw new Error(`Existing .mcp.json is corrupted and cannot be parsed. Please fix or remove it manually: ${mcpConfigPath}`);
-      }
-    } catch (err: any) {
-      if (err.code === 'ENOENT') {
-        mcpConfig = {};
-      } else {
-        throw err;
-      }
-    }
-    if (!mcpConfig.mcpServers) mcpConfig.mcpServers = {};
-    for (const [name, entry] of Object.entries(config.mcpServers)) {
-      mcpConfig.mcpServers[name] = entry;
-    }
+    // 1. Write mcp-config.json to instance dir (loaded via --mcp-config)
+    const mcpConfigPath = join(this.instanceDir, "mcp-config.json");
+    const mcpConfig = { mcpServers: config.mcpServers };
     writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 
     // 2. Write statusline script
     const statusLineCommand = this.writeStatusLineScript();
 
-    // 3. Write claude-settings.json
-    const mcpTools = [
-      "mcp__ccd-channel__reply", "mcp__ccd-channel__react",
-      "mcp__ccd-channel__edit_message", "mcp__ccd-channel__download_attachment",
-      "mcp__ccd-channel__create_schedule", "mcp__ccd-channel__list_schedules",
-      "mcp__ccd-channel__update_schedule", "mcp__ccd-channel__delete_schedule",
-      "mcp__ccd-channel__send_to_instance", "mcp__ccd-channel__list_instances",
-      "mcp__ccd-channel__start_instance", "mcp__ccd-channel__create_instance",
-      "mcp__ccd-channel__delete_instance",
-      "mcp__ccd-channel__request_information", "mcp__ccd-channel__delegate_task",
-      "mcp__ccd-channel__report_result", "mcp__ccd-channel__describe_instance",
-    ];
-
+    // 3. Write claude-settings.json (permissions handled by --dangerously-skip-permissions)
     const settings: Record<string, unknown> = {
-      permissions: {
-        allow: config.skipPermissions ? ["*"] : mcpTools,
-      },
       statusLine: {
         type: "command",
         command: statusLineCommand,
@@ -109,25 +73,8 @@ export class ClaudeCodeBackend implements CliBackend {
     }
   }
 
-  cleanup(config: CliBackendConfig): void {
-    // Remove ccd-channel from .mcp.json
-    try {
-      const mcpConfigPath = join(config.workingDirectory, ".mcp.json");
-      if (existsSync(mcpConfigPath)) {
-        const mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
-        if (mcpConfig.mcpServers?.["ccd-channel"]) {
-          delete mcpConfig.mcpServers["ccd-channel"];
-          if (Object.keys(mcpConfig.mcpServers).length === 0) {
-            unlinkSync(mcpConfigPath);
-          } else {
-            writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
-          }
-        }
-      }
-    } catch (err) {
-      // Best-effort cleanup — don't fail shutdown, but warn so user can clean up manually
-      process.stderr.write(`ccd: warning: failed to clean up .mcp.json: ${err}\n`);
-    }
+  cleanup(_config: CliBackendConfig): void {
+    // mcp-config.json is in instance dir, cleaned up when instance is deleted
   }
 
   private writeStatusLineScript(): string {
