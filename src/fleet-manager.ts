@@ -691,7 +691,7 @@ export class FleetManager implements FleetContext {
         const correlationId = (args.correlation_id as string) || `cid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const meta: Record<string, string> = {
           chat_id: "",
-          message_id: `xmsg-${Date.now()}`,
+          message_id: `xmsg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           user: `instance:${senderLabel}`,
           user_id: `instance:${senderLabel}`,
           ts: new Date().toISOString(),
@@ -797,13 +797,15 @@ export class FleetManager implements FleetContext {
         const targetName = args.target_instance as string;
         const summary = args.summary as string;
         const artifacts = args.artifacts as string | undefined;
+        if (!args.correlation_id) {
+          this.logger.warn({ instanceName, targetName }, "report_result called without correlation_id — recipient cannot match this to an original request");
+        }
         let body = summary;
         if (artifacts) body += `\n\nArtifacts: ${artifacts}`;
         args.instance_name = targetName;
         args.message = body;
         args.request_kind = "report";
         args.requires_reply = false;
-        args.correlation_id = args.correlation_id ?? undefined;
         args.task_summary = summary.slice(0, 120);
         return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args, requestId, fleetRequestId, senderSessionName });
       }
@@ -812,21 +814,33 @@ export class FleetManager implements FleetContext {
       case "describe_instance": {
         const targetName = args.name as string;
         const config = this.fleetConfig?.instances[targetName];
-        if (!config) {
-          respond(null, `Instance '${targetName}' not found in fleet config`);
+        if (config) {
+          respond({
+            name: targetName,
+            type: "instance",
+            description: config.description ?? null,
+            tags: config.tags ?? [],
+            working_directory: config.working_directory,
+            status: this.daemons.has(targetName) ? "running" : "stopped",
+            topic_id: config.topic_id ?? null,
+            model: config.model ?? null,
+            last_activity: this.lastActivity.get(targetName) ? new Date(this.lastActivity.get(targetName)!).toISOString() : null,
+            worktree_source: config.worktree_source ?? null,
+          });
           break;
         }
-        respond({
-          name: targetName,
-          description: config.description ?? null,
-          tags: config.tags ?? [],
-          working_directory: config.working_directory,
-          status: this.daemons.has(targetName) ? "running" : "stopped",
-          topic_id: config.topic_id ?? null,
-          model: config.model ?? null,
-          last_activity: this.lastActivity.get(targetName) ? new Date(this.lastActivity.get(targetName)!).toISOString() : null,
-          worktree_source: config.worktree_source ?? null,
-        });
+        // Check if it's a known external session
+        const hostInstance = this.sessionRegistry.get(targetName);
+        if (hostInstance) {
+          respond({
+            name: targetName,
+            type: "session",
+            host: hostInstance,
+            status: "running",
+          });
+          break;
+        }
+        respond(null, `Instance or session '${targetName}' not found`);
         break;
       }
 

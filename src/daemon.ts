@@ -766,7 +766,7 @@ export class Daemon extends EventEmitter {
   }
 
   /** Combine fleet context with user-configured system prompt */
-  private buildSystemPrompt(): string | undefined {
+  private buildSystemPrompt(): string {
     const fleetContext = generateFleetSystemPrompt({
       instanceName: this.name,
       workingDirectory: this.config.working_directory,
