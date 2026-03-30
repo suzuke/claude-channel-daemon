@@ -368,35 +368,70 @@ ccd fleet start
 
 ## Commands
 
+### Telegram commands (General topic)
+
+| Command | Description |
+|---------|-------------|
+| `/status` | Show fleet status, context %, and costs |
+| `/reload` | Restart fleet with new code (requires launchd service) |
+
+All other operations (create/delete/start instances, delegate tasks) are handled by the General instance through natural language.
+
+### Fleet management
+
+```bash
+ccd fleet start               # Start all instances (not needed with launchd)
+ccd fleet stop                # Stop all instances
+ccd fleet restart             # Graceful restart (wait for idle, same code)
+ccd fleet restart --reload    # Restart with new code (launchd auto-restarts)
+ccd fleet status              # Show instance status
+ccd fleet logs <name>         # Show instance logs
+ccd fleet history             # Show event history (cost, rotations, hangs)
+ccd fleet start <name>        # Start specific instance
+ccd fleet stop <name>         # Stop specific instance
+ccd fleet cleanup             # Remove orphaned instance directories
+ccd fleet cleanup --dry-run   # Preview cleanup without deleting
 ```
-ccd init                  Interactive setup wizard
-ccd fleet start           Start all instances
-ccd fleet stop            Stop all instances
-ccd fleet restart         Graceful restart (wait for idle)
-ccd fleet status          Show instance status
-ccd fleet logs <name>     Show instance logs
-ccd fleet history         Show event history (cost, rotations, hangs)
-ccd fleet start <name>    Start specific instance
-ccd fleet stop <name>     Stop specific instance
-ccd schedule list         List all schedules
-ccd schedule add          Add a schedule from CLI
-ccd schedule delete <id>  Delete a schedule
-ccd schedule enable <id>  Enable a schedule
-ccd schedule disable <id> Disable a schedule
-ccd schedule history <id> Show schedule run history
-ccd topic list            List topic bindings
-ccd topic bind <n> <tid>  Bind instance to topic
-ccd topic unbind <n>      Unbind instance from topic
-ccd access lock <n>       Lock instance access
-ccd access unlock <n>     Unlock instance access
-ccd access list <n>       List allowed users
-ccd access remove <n> <uid> Remove user
-ccd access pair <n> <uid> Generate pairing code
-ccd export [path]         Export config for device migration
-ccd export --full [path]  Export config + all instance data
-ccd import <file>         Import config from export file
-ccd install               Install as system service
-ccd uninstall             Remove system service
+
+### Schedules
+
+```bash
+ccd schedule list             # List all schedules
+ccd schedule add              # Add a schedule from CLI
+ccd schedule delete <id>      # Delete a schedule
+ccd schedule enable <id>      # Enable a schedule
+ccd schedule disable <id>     # Disable a schedule
+ccd schedule history <id>     # Show schedule run history
+```
+
+### Topic bindings
+
+```bash
+ccd topic list                # List topic bindings
+ccd topic bind <name> <tid>   # Bind instance to topic
+ccd topic unbind <name>       # Unbind instance from topic
+```
+
+### Access control
+
+```bash
+ccd access lock <name>        # Lock instance access
+ccd access unlock <name>      # Unlock instance access
+ccd access list <name>        # List allowed users
+ccd access remove <name> <uid>  # Remove user
+ccd access pair <name> <uid>  # Generate pairing code
+```
+
+### Setup & service
+
+```bash
+ccd init                      # Interactive setup wizard
+ccd install                   # Install as system service (launchd/systemd)
+ccd install --activate        # Install and start immediately
+ccd uninstall                 # Remove system service
+ccd export [path]             # Export config for device migration
+ccd export --full [path]      # Export config + all instance data
+ccd import <file>             # Import config from export file
 ```
 
 ## Configuration
