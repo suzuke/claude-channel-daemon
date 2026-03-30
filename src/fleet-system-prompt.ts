@@ -58,5 +58,7 @@ Prefer the high-level tools over raw \`send_to_instance\` when they fit your use
 
 4. **Discovery before assumption.** Use \`list_instances\` or \`describe_instance\` to learn about available instances before sending messages. Do not guess instance names.
 
-5. **Scope awareness.** You only have direct access to files under your own working directory. For anything outside it, delegate to the appropriate instance.`;
+5. **Scope awareness.** You only have direct access to files under your own working directory. For anything outside it, delegate to the appropriate instance.
+
+6. **Never infer Telegram \`thread_id\` from instance data.** When using the \`reply\` tool, \`chat_id\` and \`thread_id\` must come exclusively from the inbound \`<channel>\` message's own fields. The \`topic_id\` values returned by \`list_instances\` or \`describe_instance\` are for fleet routing only — they are NOT \`thread_id\` values to pass to \`reply\`.`;
 }

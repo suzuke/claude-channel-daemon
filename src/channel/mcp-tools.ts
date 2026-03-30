@@ -4,16 +4,24 @@ export const TOOLS = [
     {
       name: "reply",
       description:
-        "Reply on the channel. Pass chat_id from the inbound message. Optionally pass reply_to (message_id) for threading, and files (absolute paths) to attach.",
+        "Reply on the channel. Pass chat_id from the inbound message. Optionally pass reply_to (message_id) for threading, and files (absolute paths) to attach. IMPORTANT: chat_id and thread_id must come from the inbound <channel> message — never infer them from instance names or topic_ids.",
       inputSchema: {
         type: "object" as const,
         properties: {
-          chat_id: { type: "string" },
+          chat_id: {
+            type: "string",
+            description: "chat_id from the inbound <channel> block. Do NOT use an instance's topic_id here.",
+          },
           text: { type: "string" },
           reply_to: {
             type: "string",
             description:
               "Message ID to thread under. Use message_id from the inbound <channel> block.",
+          },
+          thread_id: {
+            type: "string",
+            description:
+              "Telegram topic thread ID. Use thread_id from the inbound <channel> block only. Never set this to an instance's topic_id from list_instances.",
           },
           files: {
             type: "array",

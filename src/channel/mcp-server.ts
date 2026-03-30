@@ -229,7 +229,7 @@ const mcp = new Server(
     },
     instructions: [
       "Messages from channels arrive as <channel source=\"ccd\" chat_id=\"...\" message_id=\"...\" user=\"...\" ts=\"...\">.",
-      "Reply using the reply tool -- pass chat_id back. Use reply_to (set to a message_id) to thread.",
+      "Reply using the reply tool -- pass chat_id back. Use reply_to (set to a message_id) to thread. IMPORTANT: chat_id and thread_id in reply must come from the inbound <channel> message only — never use a topic_id from list_instances as thread_id.",
       "Use react to add emoji reactions, edit_message for progress updates, and download_attachment for file attachments.",
       "If the inbound meta has image_path, Read that file — it is a photo the sender attached.",
       "If the inbound meta has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path.",
