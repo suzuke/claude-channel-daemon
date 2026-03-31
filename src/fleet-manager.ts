@@ -153,10 +153,10 @@ export class FleetManager implements FleetContext {
 
     const hangDetector = daemon.getHangDetector();
     if (hangDetector) {
-      hangDetector.on("hang", safeHandler(() => {
+      hangDetector.on("hang", safeHandler(async () => {
         this.eventLog?.insert(name, "hang_detected", {});
         this.logger.warn({ name }, "Instance appears hung");
-        this.sendHangNotification(name);
+        await this.sendHangNotification(name);
         this.webhookEmitter?.emit("hang", name);
       }, this.logger, `hangDetector[${name}]`));
     }
@@ -433,8 +433,8 @@ export class FleetManager implements FleetContext {
       inboxDir,
     });
 
-    this.adapter.on("message", safeHandler((msg: InboundMessage) => {
-      this.handleInboundMessage(msg);
+    this.adapter.on("message", safeHandler(async (msg: InboundMessage) => {
+      await this.handleInboundMessage(msg);
     }, this.logger, "adapter.message"));
 
     this.adapter.on("callback_query", safeHandler(async (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
@@ -459,10 +459,10 @@ export class FleetManager implements FleetContext {
       }
     }, this.logger, "adapter.callback_query"));
 
-    this.adapter.on("topic_closed", safeHandler((data: { chatId: string; threadId: string }) => {
+    this.adapter.on("topic_closed", safeHandler(async (data: { chatId: string; threadId: string }) => {
       // Skip unbind if we archived this topic ourselves
       if (this.archivedTopics.has(data.threadId)) return;
-      this.topicCommands.handleTopicDeleted(data.threadId);
+      await this.topicCommands.handleTopicDeleted(data.threadId);
     }, this.logger, "adapter.topic_closed"));
 
     await this.topicCommands.registerBotCommands();
