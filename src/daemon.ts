@@ -274,7 +274,10 @@ export class Daemon extends EventEmitter {
 
     // 10. Health check — detect crashed tmux window and respawn
     if (!this.config.lightweight) {
-      this.startHealthCheck();
+    // Health check disabled — Claude Code handles its own crash recovery.
+    // The daemon-level respawn was causing orphan tmux windows and stale
+    // window-id mismatches. If the CLI exits, it stays down until the
+    // next fleet restart or manual intervention.
     }
 
     this.logger.info(`${this.name} ready`);
