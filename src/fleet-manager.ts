@@ -31,6 +31,7 @@ import { DailySummary } from "./daily-summary.js";
 import { WebhookEmitter } from "./webhook-emitter.js";
 import { TmuxControlClient } from "./tmux-control.js";
 import { safeHandler } from "./safe-async.js";
+import { RoutingEngine } from "./routing-engine.js";
 
 const TMUX_SESSION = "agend";
 
@@ -52,7 +53,8 @@ export class FleetManager implements FleetContext {
   private daemons: Map<string, InstanceType<typeof import("./daemon.js").Daemon>> = new Map();
   fleetConfig: FleetConfig | null = null;
   adapter: ChannelAdapter | null = null;
-  routingTable: Map<string, RouteTarget> = new Map();
+  readonly routing = new RoutingEngine();
+  get routingTable(): Map<string, RouteTarget> { return this.routing.map; }
   instanceIpcClients: Map<string, IpcClient> = new Map();
   scheduler: Scheduler | null = null;
   private configPath: string = "";
@@ -94,17 +96,10 @@ export class FleetManager implements FleetContext {
 
   /** Build topic routing table: { topicId -> RouteTarget } */
   buildRoutingTable(): Map<string, RouteTarget> {
-    const table = new Map<string, RouteTarget>();
-    if (!this.fleetConfig) return table;
-    for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
-      if (inst.topic_id != null) {
-        table.set(String(inst.topic_id), {
-          kind: inst.general_topic ? "general" : "instance",
-          name,
-        });
-      }
+    if (this.fleetConfig) {
+      this.routing.rebuild(this.fleetConfig);
     }
-    return table;
+    return this.routing.map;
   }
 
   getInstanceDir(name: string): string {
@@ -357,8 +352,7 @@ export class FleetManager implements FleetContext {
 
       // Auto-create topics AFTER adapter is ready (needs adapter.createTopic)
       await this.topicCommands.autoCreateTopics();
-      this.routingTable = this.buildRoutingTable();
-      const routeSummary = [...this.routingTable.entries()].map(([tid, target]) => `#${tid}→${target.name}`).join(", ");
+      const routeSummary = this.routing.rebuild(this.fleetConfig!);
       this.logger.info(`Routes: ${routeSummary}`);
 
       // Resolve topic icon emoji IDs and start idle archive poller
@@ -598,7 +592,7 @@ export class FleetManager implements FleetContext {
       return;
     }
 
-    const target = this.routingTable.get(threadId);
+    const target = this.routing.resolve(threadId);
     if (!target) {
       this.topicCommands.handleUnboundTopic(msg);
       return;
@@ -1007,7 +1001,7 @@ export class FleetManager implements FleetContext {
             ...(worktreePath ? { worktree_source: directory } : {}),
           } as InstanceConfig;
           this.fleetConfig!.instances[newInstanceName] = instanceConfig;
-          this.routingTable.set(String(createdTopicId), { kind: "instance", name: newInstanceName });
+          this.routing.register(createdTopicId, { kind: "instance", name: newInstanceName });
           this.saveFleetConfig();
 
           // Step c: Start instance
@@ -1027,7 +1021,7 @@ export class FleetManager implements FleetContext {
           }
           if (newInstanceName && this.fleetConfig?.instances[newInstanceName]) {
             delete this.fleetConfig.instances[newInstanceName];
-            if (createdTopicId) this.routingTable.delete(String(createdTopicId));
+            if (createdTopicId) this.routing.unregister(createdTopicId);
             this.saveFleetConfig();
           }
           if (createdTopicId) {
@@ -1241,7 +1235,7 @@ export class FleetManager implements FleetContext {
     this.topicCleanupTimer = setInterval(async () => {
       if (!this.fleetConfig?.channel?.group_id || !this.adapter?.topicExists) return;
 
-      for (const [threadId, target] of this.routingTable) {
+      for (const [threadId, target] of this.routing.entries()) {
         try {
           if (!isProbeableRouteTarget(target)) {
             continue;
@@ -1341,7 +1335,7 @@ export class FleetManager implements FleetContext {
 
     // Remove from routing table
     if (config.topic_id != null) {
-      this.routingTable.delete(String(config.topic_id));
+      this.routing.unregister(config.topic_id);
     }
 
     // Remove from fleet config and save
@@ -1772,7 +1766,7 @@ export class FleetManager implements FleetContext {
     }
 
     if (topicMode) {
-      this.routingTable = this.buildRoutingTable();
+      this.routing.rebuild(this.fleetConfig!);
       await new Promise(r => setTimeout(r, 3000));
       await this.connectToInstances(fleet);
 
