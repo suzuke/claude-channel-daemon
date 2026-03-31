@@ -34,6 +34,7 @@ import { safeHandler } from "./safe-async.js";
 import { RoutingEngine } from "./routing-engine.js";
 import { InstanceLifecycle, type LifecycleContext } from "./instance-lifecycle.js";
 import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
+import { StatuslineWatcher, type StatuslineWatcherContext } from "./statusline-watcher.js";
 
 const TMUX_SESSION = "agend";
 
@@ -50,7 +51,7 @@ export function resolveReplyThreadId(
   return instanceConfig?.topic_id != null ? String(instanceConfig.topic_id) : undefined;
 }
 
-export class FleetManager implements FleetContext, LifecycleContext, ArchiverContext {
+export class FleetManager implements FleetContext, LifecycleContext, ArchiverContext, StatuslineWatcherContext {
   private children: Map<string, import("node:child_process").ChildProcess> = new Map();
   readonly lifecycle: InstanceLifecycle;
   /** @deprecated Use lifecycle.daemons — kept for backward compat */
@@ -68,8 +69,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   private sessionRegistry: Map<string, string> = new Map();
   eventLog: EventLog | null = null;
   costGuard: CostGuard | null = null;
-  private statuslineWatchers = new Map<string, ReturnType<typeof setInterval>>();
-  private instanceRateLimits = new Map<string, { five_hour_pct: number; seven_day_pct: number }>();
+  private statuslineWatcher: StatuslineWatcher;
   private dailySummary: DailySummary | null = null;
   private webhookEmitter: WebhookEmitter | null = null;
 
@@ -91,6 +91,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.lifecycle = new InstanceLifecycle(this);
     this.topicCommands = new TopicCommands(this);
     this.topicArchiver = new TopicArchiver(this);
+    this.statuslineWatcher = new StatuslineWatcher(this);
   }
 
   // ── ArchiverContext bridge ────────────────────────────────────────────
@@ -493,8 +494,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       // (fixes race condition where mcp_ready was broadcast before fleet manager connected)
       ipc.send({ type: "query_sessions" });
       this.logger.debug({ name }, "Connected to instance IPC");
-      if (!this.statuslineWatchers.has(name)) {
-        this.startStatuslineWatcher(name);
+      if (!this.statuslineWatcher.has(name)) {
+        this.statuslineWatcher.watch(name);
       }
     } catch (err) {
       this.logger.warn({ name, err }, "Failed to connect to instance IPC");
@@ -600,7 +601,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   /** Handle outbound tool calls from a daemon instance */
   private replyIfRateLimited(instanceName: string, msg: InboundMessage): boolean {
-    const rl = this.instanceRateLimits.get(instanceName);
+    const rl = this.statuslineWatcher.getRateLimits(instanceName);
     if (!rl || rl.seven_day_pct < 100) return false;
     if (this.adapter && msg.chatId) {
       const threadId = msg.threadId ?? undefined;
@@ -891,7 +892,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     const { target, reply_chat_id, reply_thread_id, message, label, id, source } = schedule;
 
     const RATE_LIMIT_DEFER_THRESHOLD = 85;
-    const rl = this.instanceRateLimits.get(target);
+    const rl = this.statuslineWatcher.getRateLimits(target);
     if (rl && rl.five_hour_pct > RATE_LIMIT_DEFER_THRESHOLD) {
       this.scheduler!.recordRun(id, "deferred", `5hr rate limit at ${rl.five_hour_pct}%`);
       this.eventLog?.insert(target, "schedule_deferred", {
@@ -1089,30 +1090,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   }
 
   startStatuslineWatcher(name: string): void {
-    const statusFile = join(this.getInstanceDir(name), "statusline.json");
-    const timer = setInterval(() => {
-      try {
-        const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-        if (data.cost?.total_cost_usd != null) {
-          this.costGuard?.updateCost(name, data.cost.total_cost_usd);
-        }
-        const rl = data.rate_limits;
-        if (rl) {
-          const prev = this.instanceRateLimits.get(name);
-          const newSevenDay = rl.seven_day?.used_percentage ?? 0;
-          if (prev?.seven_day_pct === 100 && newSevenDay < 100) {
-            this.notifyInstanceTopic(name, `✅ ${name} weekly usage limit has reset — instance is available again.`);
-            this.logger.info({ name }, "Weekly rate limit recovered");
-          }
-          this.instanceRateLimits.set(name, {
-            five_hour_pct: rl.five_hour?.used_percentage ?? 0,
-            seven_day_pct: newSevenDay,
-          });
-          this.checkModelFailover(name, rl.five_hour?.used_percentage ?? 0);
-        }
-      } catch { /* file may not exist yet or be mid-write */ }
-    }, 10_000);
-    this.statuslineWatchers.set(name, timer);
+    this.statuslineWatcher.watch(name);
   }
 
   // ── Model failover ──────────────────────────────────────────────────────
@@ -1120,7 +1098,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   private static FAILOVER_TRIGGER_PCT = 90;
   private static FAILOVER_RECOVER_PCT = 50;
 
-  private checkModelFailover(name: string, fiveHourPct: number): void {
+  checkModelFailover(name: string, fiveHourPct: number): void {
     const config = this.fleetConfig?.instances[name];
     if (!config?.model_failover?.length) return;
 
@@ -1243,9 +1221,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   // archiveIdleTopics / reopenArchivedTopic → delegated to TopicArchiver
 
   private clearStatuslineWatchers(): void {
-    for (const [, timer] of this.statuslineWatchers) clearInterval(timer);
-    this.statuslineWatchers.clear();
-    this.instanceRateLimits.clear();
+    this.statuslineWatcher.stopAll();
     this.failoverActive.clear();
   }
 
