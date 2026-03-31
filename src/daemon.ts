@@ -685,29 +685,10 @@ export class Daemon extends EventEmitter {
     const windowIdFile = join(this.instanceDir, "window-id");
     writeFileSync(windowIdFile, windowId);
 
-    // Smart wait: poll tmux pane for prompt indicators, press Enter when found.
-    // Minimum 3s wait to let CLI initialize, then poll up to 10s.
-    await new Promise(r => setTimeout(r, 3000));
-    const deadline = Date.now() + 7_000;
-    let prompted = false;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 500));
-      try {
-        const pane = await this.tmux!.capturePane();
-        // Confirmation prompts that need Enter
-        if (/Do you want|Yes.*No|Trust|trust|Enter to confirm|New MCP server/i.test(pane)) {
-          prompted = true;
-          break;
-        }
-        // CLI is ready (status bar visible = fully loaded)
-        if (/bypass permissions|tokens|ok\s*$/m.test(pane)) {
-          break; // ready, no Enter needed
-        }
-      } catch { break; }
-    }
-    if (prompted) {
-      try { await this.tmux!.sendSpecialKey("Enter"); } catch { /* window may have exited */ }
-    }
+    // Fixed grace period — smart detection was unreliable across different CLIs.
+    // Wait for CLI to fully initialize, then press Enter to dismiss any prompts.
+    await new Promise(r => setTimeout(r, 10_000));
+    try { await this.tmux!.sendSpecialKey("Enter"); } catch { /* window may have exited */ }
     this.lastSpawnAt = Date.now();
     } finally {
       this.spawning = false;

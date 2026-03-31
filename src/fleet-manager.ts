@@ -324,13 +324,10 @@ export class FleetManager implements FleetContext {
     }
 
     const instanceEntries = Object.entries(fleet.instances);
-    // Parallel launch in batches of 4
-    const BATCH_SIZE = 4;
-    for (let i = 0; i < instanceEntries.length; i += BATCH_SIZE) {
-      const batch = instanceEntries.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(batch.map(([name, config]) =>
-        this.startInstance(name, config, topicMode)
-      ));
+    for (const [name, config] of instanceEntries) {
+      await this.startInstance(name, config, topicMode).catch(err =>
+        this.logger.error({ err, name }, "Failed to start instance")
+      );
     }
 
     if (topicMode && fleet.channel) {
