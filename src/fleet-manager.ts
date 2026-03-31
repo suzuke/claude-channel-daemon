@@ -1011,6 +1011,7 @@ export class FleetManager implements FleetContext {
             topic_id: createdTopicId,
             ...(description ? { description } : {}),
             ...(args.model ? { model: args.model as string } : {}),
+            ...(args.backend ? { backend: args.backend as string } : {}),
             ...(worktreePath ? { worktree_source: directory } : {}),
           } as InstanceConfig;
           this.fleetConfig!.instances[newInstanceName] = instanceConfig;
