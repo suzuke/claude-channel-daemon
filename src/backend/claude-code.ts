@@ -16,8 +16,9 @@ export class ClaudeCodeBackend implements CliBackend {
     const settingsPath = join(this.instanceDir, "claude-settings.json");
     const mcpConfigPath = join(this.instanceDir, "mcp-config.json");
     const envPrefix = ["CMUX_CLAUDE_HOOKS_DISABLED=1", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"];
-    for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]) {
-      if (process.env[key]) envPrefix.push(`${key}=${process.env[key]}`);
+    if (process.env.ANTHROPIC_BASE_URL) envPrefix.push(`ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL}`);
+    if (process.env.ANTHROPIC_API_KEY && !this.hasOAuthSession()) {
+      envPrefix.push(`ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`);
     }
     let cmd = `${envPrefix.join(" ")} ${this.binaryPath} --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
 
@@ -111,6 +112,16 @@ export class ClaudeCodeBackend implements CliBackend {
         rejected: existing?.rejected ?? [],
       };
       writeFileSync(claudeJsonPath, JSON.stringify(claudeCfg, null, 2));
+    }
+  }
+
+  /** Check if user has an active OAuth session in ~/.claude.json */
+  private hasOAuthSession(): boolean {
+    try {
+      const cfg = JSON.parse(readFileSync(join(homedir(), ".claude.json"), "utf-8"));
+      return !!cfg.oauthAccount?.accountUuid;
+    } catch {
+      return false;
     }
   }
 
