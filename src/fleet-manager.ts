@@ -1218,11 +1218,11 @@ export class FleetManager implements FleetContext, LifecycleContext {
   }
 
   /** Set topic icon based on instance state */
-  setTopicIcon(instanceName: string, state: string): void {
+  setTopicIcon(instanceName: string, state: "green" | "blue" | "red" | "remove"): void {
     const topicId = this.fleetConfig?.instances[instanceName]?.topic_id;
     if (topicId == null || !this.adapter?.editForumTopic) return;
 
-    const emojiId = state === "remove" ? "" : this.topicIcons[state as keyof typeof this.topicIcons];
+    const emojiId = state === "remove" ? "" : this.topicIcons[state];
     if (emojiId == null && state !== "remove") return; // no icon resolved
 
     this.adapter.editForumTopic(topicId, { iconCustomEmojiId: emojiId })

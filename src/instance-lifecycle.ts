@@ -29,7 +29,9 @@ export interface LifecycleContext {
   connectIpcToInstance(name: string): Promise<void>;
   createForumTopic(topicName: string): Promise<number | string>;
   deleteForumTopic(topicId: number | string): Promise<void>;
-  setTopicIcon(name: string, state: string): void;
+  setTopicIcon(name: string, state: "green" | "blue" | "red" | "remove"): void;
+  /** Remove instance with full cleanup (scheduler, IPC, routing, config). */
+  removeInstance(name: string): Promise<void>;
   touchActivity(name: string): void;
   sendHangNotification(name: string): Promise<void>;
   notifyInstanceTopic(name: string, text: string): void;
@@ -335,7 +337,7 @@ export class InstanceLifecycle {
       await this.ctx.deleteForumTopic(instanceConfig.topic_id);
     }
 
-    await this.remove(instanceName);
+    await this.ctx.removeInstance(instanceName);
     respond({ success: true, name: instanceName, topic_deleted: deleteTopic });
   }
 
