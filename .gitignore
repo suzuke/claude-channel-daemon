@@ -14,3 +14,5 @@ website/dist/
 website/.astro/
 .mcp.json
 .gemini/
+.superpowers/
+.claude/settings.local.json

@@ -1,4 +1,0 @@
-{"type":"server-started","port":63148,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:63148","screen_dir":"/Users/suzuke/Documents/Hack/claude-channel-daemon/.superpowers/brainstorm/62495-1774613401/content","state_dir":"/Users/suzuke/Documents/Hack/claude-channel-daemon/.superpowers/brainstorm/62495-1774613401/state"}
-{"type":"screen-added","file":"/Users/suzuke/Documents/Hack/claude-channel-daemon/.superpowers/brainstorm/62495-1774613401/content/page-flow.html"}
-{"type":"screen-added","file":"/Users/suzuke/Documents/Hack/claude-channel-daemon/.superpowers/brainstorm/62495-1774613401/content/waiting-2.html"}
-{"type":"server-stopped","reason":"idle timeout"}
