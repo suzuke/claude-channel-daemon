@@ -30,6 +30,7 @@ import type { HangDetector } from "./hang-detector.js";
 import { DailySummary } from "./daily-summary.js";
 import { WebhookEmitter } from "./webhook-emitter.js";
 import { TmuxControlClient } from "./tmux-control.js";
+import { safeHandler } from "./safe-async.js";
 
 const TMUX_SESSION = "agend";
 
@@ -145,27 +146,27 @@ export class FleetManager implements FleetContext {
     await daemon.start();
     this.daemons.set(name, daemon);
 
-    daemon.on("restart_complete", (data: Record<string, unknown>) => {
+    daemon.on("restart_complete", safeHandler((data: Record<string, unknown>) => {
       this.eventLog?.insert(name, "context_rotation", data);
       this.logger.info({ name, ...data }, "Context restart completed");
-    });
+    }, this.logger, `daemon.restart_complete[${name}]`));
 
     const hangDetector = daemon.getHangDetector();
     if (hangDetector) {
-      hangDetector.on("hang", () => {
+      hangDetector.on("hang", safeHandler(() => {
         this.eventLog?.insert(name, "hang_detected", {});
         this.logger.warn({ name }, "Instance appears hung");
         this.sendHangNotification(name);
         this.webhookEmitter?.emit("hang", name);
-      });
+      }, this.logger, `hangDetector[${name}]`));
     }
 
-    daemon.on("crash_loop", () => {
+    daemon.on("crash_loop", safeHandler(() => {
       this.eventLog?.insert(name, "crash_loop", {});
       this.logger.error({ name }, "Instance in crash loop — respawn paused");
       this.notifyInstanceTopic(name, `🔴 ${name} keeps crashing shortly after launch — respawn paused. Check rate limits or run \`agend fleet restart\`.`);
       this.setTopicIcon(name, "red");
-    });
+    }, this.logger, `daemon.crash_loop[${name}]`));
 
     this.setTopicIcon(name, "green");
     this.touchActivity(name);
@@ -254,17 +255,17 @@ export class FleetManager implements FleetContext {
       this.logger.info({ count: webhookConfigs.length }, "Webhook emitter initialized");
     }
 
-    this.costGuard.on("warn", (instance: string, totalCents: number, limitCents: number) => {
+    this.costGuard.on("warn", safeHandler((instance: string, totalCents: number, limitCents: number) => {
       this.notifyInstanceTopic(instance, `⚠️ ${instance} cost: ${formatCents(totalCents)} / ${formatCents(limitCents)} (${Math.round(totalCents / limitCents * 100)}%)`);
       this.webhookEmitter?.emit("cost_warning", instance, { cost_cents: totalCents, limit_cents: limitCents });
-    });
+    }, this.logger, "costGuard.warn"));
 
-    this.costGuard.on("limit", (instance: string, totalCents: number, limitCents: number) => {
+    this.costGuard.on("limit", safeHandler(async (instance: string, totalCents: number, limitCents: number) => {
       this.notifyInstanceTopic(instance, `🛑 ${instance} daily limit ${formatCents(limitCents)} reached — pausing instance.`);
       this.eventLog?.insert(instance, "instance_paused", { reason: "cost_limit", cost_cents: totalCents });
       this.webhookEmitter?.emit("cost_limit", instance, { cost_cents: totalCents, limit_cents: limitCents });
-      this.stopInstance(instance).catch(err => this.logger.error({ err, instance }, "Failed to pause instance on cost limit"));
-    });
+      await this.stopInstance(instance);
+    }, this.logger, "costGuard.limit"));
 
     const summaryConfig: DailySummaryConfig = {
       ...DEFAULT_DAILY_SUMMARY,
@@ -432,11 +433,11 @@ export class FleetManager implements FleetContext {
       inboxDir,
     });
 
-    this.adapter.on("message", (msg: InboundMessage) => {
+    this.adapter.on("message", safeHandler((msg: InboundMessage) => {
       this.handleInboundMessage(msg);
-    });
+    }, this.logger, "adapter.message"));
 
-    this.adapter.on("callback_query", async (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
+    this.adapter.on("callback_query", safeHandler(async (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
       if (data.callbackData.startsWith("hang:")) {
         const parts = data.callbackData.split(":");
         const action = parts[1];
@@ -456,13 +457,13 @@ export class FleetManager implements FleetContext {
         }
         return;
       }
-    });
+    }, this.logger, "adapter.callback_query"));
 
-    this.adapter.on("topic_closed", (data: { chatId: string; threadId: string }) => {
+    this.adapter.on("topic_closed", safeHandler((data: { chatId: string; threadId: string }) => {
       // Skip unbind if we archived this topic ourselves
       if (this.archivedTopics.has(data.threadId)) return;
       this.topicCommands.handleTopicDeleted(data.threadId);
-    });
+    }, this.logger, "adapter.topic_closed"));
 
     await this.topicCommands.registerBotCommands();
     await this.adapter.start();
@@ -470,15 +471,15 @@ export class FleetManager implements FleetContext {
       this.adapter.setChatId(String(fleet.channel.group_id));
     }
 
-    this.adapter.on("started", (username: string) => {
-      this.logger.info(`Telegram bot @${username} polling`);
-    });
-    this.adapter.on("polling_conflict", ({ attempt, delay }: { attempt: number; delay: number }) => {
+    this.adapter.on("started", safeHandler((username: string) => {
+      this.logger.info(`Bot @${username} polling`);
+    }, this.logger, "adapter.started"));
+    this.adapter.on("polling_conflict", safeHandler(({ attempt, delay }: { attempt: number; delay: number }) => {
       this.logger.warn(`409 Conflict (attempt ${attempt}), retry in ${delay / 1000}s`);
-    });
-    this.adapter.on("handler_error", (err: unknown) => {
-      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Telegram handler error");
-    });
+    }, this.logger, "adapter.polling_conflict"));
+    this.adapter.on("handler_error", safeHandler((err: unknown) => {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Adapter handler error");
+    }, this.logger, "adapter.handler_error"));
 
     this.startTopicCleanupPoller();
 
@@ -505,7 +506,7 @@ export class FleetManager implements FleetContext {
     try {
       await ipc.connect();
       this.instanceIpcClients.set(name, ipc);
-      ipc.on("message", (msg: Record<string, unknown>) => {
+      ipc.on("message", safeHandler(async (msg: Record<string, unknown>) => {
         if (msg.type === "mcp_ready") {
           // Register external sessions (sessionName differs from instance name)
           const sessionName = msg.sessionName as string | undefined;
@@ -528,14 +529,14 @@ export class FleetManager implements FleetContext {
             this.sessionRegistry.set(sender, name);
             this.logger.info({ sessionName: sender, instanceName: name }, "Registered external session");
           }
-          this.handleOutboundFromInstance(name, msg).catch(err => this.logger.error({ err }, "handleOutboundFromInstance error"));
+          await this.handleOutboundFromInstance(name, msg);
         } else if (msg.type === "fleet_tool_status") {
           this.handleToolStatusFromInstance(name, msg);
         } else if (msg.type === "fleet_schedule_create" || msg.type === "fleet_schedule_list" ||
                    msg.type === "fleet_schedule_update" || msg.type === "fleet_schedule_delete") {
           this.handleScheduleCrud(name, msg);
         }
-      });
+      }, this.logger, `ipc.message[${name}]`));
       // Ask daemon for any sessions that registered before we connected
       // (fixes race condition where mcp_ready was broadcast before fleet manager connected)
       ipc.send({ type: "query_sessions" });
@@ -652,7 +653,7 @@ export class FleetManager implements FleetContext {
     if (this.adapter && msg.chatId) {
       const threadId = msg.threadId ?? undefined;
       this.adapter.sendText(msg.chatId, `⏸ ${instanceName} has hit the weekly usage limit. Your message was not delivered. Limit resets automatically — check /status for details.`, { threadId })
-        .catch(e => this.logger.debug({ err: e }, "Failed to send rate limit notice"));
+        .catch(e => this.logger.warn({ err: e }, "Failed to send rate limit notice"));
     }
     this.logger.info({ instanceName }, "Blocked inbound message — weekly rate limit at 100%");
     return true;
@@ -761,13 +762,13 @@ export class FleetManager implements FleetContext {
           if (senderTopicId && !isExternalSender) {
             this.adapter.sendText(String(groupId), `→ ${targetName}:\n${message}`, {
               threadId: String(senderTopicId),
-            }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
+            }).catch(e => this.logger.warn({ err: e }, "Failed to post cross-instance notification"));
           }
           // Only post to target topic if target is an instance (not external session)
           if (targetTopicId && !this.sessionRegistry.has(targetName)) {
             this.adapter.sendText(String(groupId), `← ${senderLabel}:\n${message}`, {
               threadId: String(targetTopicId),
-            }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
+            }).catch(e => this.logger.warn({ err: e }, "Failed to post cross-instance notification"));
           }
         }
 
@@ -1022,7 +1023,7 @@ export class FleetManager implements FleetContext {
         } catch (err) {
           // Rollback in reverse order
           if (newInstanceName && this.daemons.has(newInstanceName)) {
-            await this.stopInstance(newInstanceName).catch(() => {});
+            await this.stopInstance(newInstanceName).catch(e => this.logger.error({ err: e, name: newInstanceName }, "Failed to stop instance during rollback"));
           }
           if (newInstanceName && this.fleetConfig?.instances[newInstanceName]) {
             delete this.fleetConfig.instances[newInstanceName];
@@ -1093,7 +1094,7 @@ export class FleetManager implements FleetContext {
       this.adapter.sendText(chatId, text, { threadId }).then((sent) => {
         const ipc = this.instanceIpcClients.get(instanceName);
         ipc?.send({ type: "fleet_tool_status_ack", messageId: sent.messageId });
-      }).catch(e => this.logger.debug({ err: e }, "Failed to send tool status message"));
+      }).catch(e => this.logger.warn({ err: e }, "Failed to send tool status message"));
     }
   }
 
