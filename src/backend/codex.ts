@@ -1,12 +1,17 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import type { CliBackend, CliBackendConfig } from "./types.js";
+import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
 
 export class CodexBackend implements CliBackend {
-  constructor(private instanceDir: string) {}
+  readonly binaryName = "codex";
+  private binaryPath: string;
+
+  constructor(private instanceDir: string) {
+    this.binaryPath = resolveBinary("codex");
+  }
 
   buildCommand(config: CliBackendConfig): string {
-    let cmd = "codex --full-auto";
+    let cmd = `${this.binaryPath} --full-auto`;
 
     if (config.model) {
       cmd += ` -c model="${config.model}"`;

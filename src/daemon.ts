@@ -707,7 +707,7 @@ export class Daemon extends EventEmitter {
     if (!alive) {
       // First attempt failed (stale --resume, crash, rate limit, etc.)
       // Clean slate: clear session-id and retry once.
-      this.logger.warn("CLI produced no output — clearing session-id and retrying");
+      this.logger.warn("CLI startup failed — clearing session-id and retrying");
       const sidFile = join(this.instanceDir, "session-id");
       try { unlinkSync(sidFile); } catch { /* may not exist */ }
       await this.tmux!.killWindow();
@@ -719,7 +719,6 @@ export class Daemon extends EventEmitter {
       }
     }
 
-    try { await this.tmux!.sendSpecialKey("Enter"); } catch { /* window may have exited */ }
     this.lastSpawnAt = Date.now();
     } finally {
       this.spawning = false;
@@ -729,6 +728,7 @@ export class Daemon extends EventEmitter {
   /**
    * Spawn a CLI window and verify it reaches a ready state.
    * Uses control mode to wait for output, then checks pane content.
+   * Handles confirmation dialogs (trust folder, bypass permissions).
    * Returns true if CLI is ready, false if it failed or got stuck.
    */
   private async trySpawn(): Promise<boolean> {
@@ -744,22 +744,56 @@ export class Daemon extends EventEmitter {
     if (this.controlClient) {
       const hasOutput = await this.controlClient.waitForOutput(windowId, 15_000);
       if (!hasOutput) return false;
-      // Wait for CLI to settle (output stops = UI fully rendered)
       await this.controlClient.waitForIdle(windowId, 10_000);
     } else {
       await new Promise(r => setTimeout(r, 10_000));
     }
 
-    // Verify CLI reached prompt (not stuck in picker/error screen)
+    // Dismiss confirmation dialogs and verify CLI reached prompt
     if (!await this.tmux!.isWindowAlive()) return false;
-    try {
-      const pane = await this.tmux!.capturePane();
-      // CLI is ready if we see a prompt indicator
-      if (/❯|bypass permissions|ok\s*$/m.test(pane)) return true;
-      // CLI is stuck or failed if we see known failure patterns
-      if (/Resume Session|command not found|not found|error|Error/i.test(pane)) return false;
-    } catch { /* capture failed = window dead */ return false; }
-    // Unknown state — assume ok (other CLIs may have different prompts)
+    return this.dismissDialogsUntilReady(3);
+  }
+
+  /**
+   * Repeatedly check pane content, dismiss any confirmation dialogs,
+   * and return true once CLI reaches a ready prompt.
+   */
+  private async dismissDialogsUntilReady(maxAttempts: number): Promise<boolean> {
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        const pane = await this.tmux!.capturePane();
+
+        // CLI is ready
+        if (/❯|bypass permissions|ok\s*$/m.test(pane)) return true;
+
+        // Confirmation dialog: "Yes, I accept" / "Yes, I trust this folder"
+        // Navigate to the "Yes" option and confirm
+        if (/No, exit|I accept|I trust/i.test(pane)) {
+          this.logger.debug("Dismissing confirmation dialog");
+          // If "No" is selected (❯ on No), press Down to select Yes
+          if (/❯\s*\d+\.\s*No/m.test(pane)) {
+            await this.tmux!.sendSpecialKey("Down");
+            await new Promise(r => setTimeout(r, 200));
+          }
+          await this.tmux!.sendSpecialKey("Enter");
+          // Wait for next screen to render
+          if (this.controlClient) {
+            const wid = readFileSync(join(this.instanceDir, "window-id"), "utf-8").trim();
+            await this.controlClient.waitForIdle(wid, 10_000);
+          } else {
+            await new Promise(r => setTimeout(r, 3_000));
+          }
+          if (!await this.tmux!.isWindowAlive()) return false;
+          continue;
+        }
+
+        // Resume Session picker or command not found
+        if (/Resume Session|command not found|not found/i.test(pane)) return false;
+      } catch {
+        return false;
+      }
+    }
+    // Exhausted attempts — assume ok for unknown CLI prompts
     return true;
   }
 

@@ -1,32 +1,25 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { execFileSync } from "node:child_process";
-import type { CliBackend, CliBackendConfig } from "./types.js";
-
-/** Resolve the full path to the claude binary (tmux new-window may have a minimal PATH) */
-function resolveClaudePath(): string {
-  try {
-    // Use the daemon's own shell to resolve, which has the full PATH
-    return execFileSync("which", ["claude"], { encoding: "utf-8" }).trim();
-  } catch {
-    return "claude"; // fallback to bare name
-  }
-}
+import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
 
 
 export class ClaudeCodeBackend implements CliBackend {
-  constructor(private instanceDir: string) {}
+  readonly binaryName = "claude";
+  private binaryPath: string;
+
+  constructor(private instanceDir: string) {
+    this.binaryPath = resolveBinary("claude");
+  }
 
   buildCommand(config: CliBackendConfig): string {
     const settingsPath = join(this.instanceDir, "claude-settings.json");
     const mcpConfigPath = join(this.instanceDir, "mcp-config.json");
-    // Forward Anthropic env vars to the CLI process (tmux shell doesn't inherit daemon's env)
     const envPrefix = ["CMUX_CLAUDE_HOOKS_DISABLED=1", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"];
     for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]) {
       if (process.env[key]) envPrefix.push(`${key}=${process.env[key]}`);
     }
-    let cmd = `${envPrefix.join(" ")} ${resolveClaudePath()} --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
+    let cmd = `${envPrefix.join(" ")} ${this.binaryPath} --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
 
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {

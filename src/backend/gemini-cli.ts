@@ -1,12 +1,17 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import type { CliBackend, CliBackendConfig } from "./types.js";
+import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
 
 export class GeminiCliBackend implements CliBackend {
-  constructor(private instanceDir: string) {}
+  readonly binaryName = "gemini";
+  private binaryPath: string;
+
+  constructor(private instanceDir: string) {
+    this.binaryPath = resolveBinary("gemini");
+  }
 
   buildCommand(config: CliBackendConfig): string {
-    let cmd = "gemini --yolo";
+    let cmd = `${this.binaryPath} --yolo`;
 
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {

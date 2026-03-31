@@ -1,12 +1,17 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import type { CliBackend, CliBackendConfig } from "./types.js";
+import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
 
 export class OpenCodeBackend implements CliBackend {
-  constructor(private instanceDir: string) {}
+  readonly binaryName = "opencode";
+  private binaryPath: string;
+
+  constructor(private instanceDir: string) {
+    this.binaryPath = resolveBinary("opencode");
+  }
 
   buildCommand(_config: CliBackendConfig): string {
-    return "opencode";
+    return this.binaryPath;
   }
 
   writeConfig(config: CliBackendConfig): void {
