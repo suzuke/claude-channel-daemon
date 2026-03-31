@@ -76,13 +76,21 @@ export class IpcServer extends EventEmitter {
         this.acceptClient(socket);
       });
 
-      this.server.on("error", reject);
-
       // Set restrictive umask before listen to prevent TOCTOU race
       // (socket is created with 0o600 permissions atomically)
       const prevUmask = process.umask(0o077);
+      let umaskRestored = false;
+      const restoreUmask = () => {
+        if (!umaskRestored) { umaskRestored = true; process.umask(prevUmask); }
+      };
+
+      this.server.on("error", (err) => {
+        restoreUmask();
+        reject(err);
+      });
+
       this.server.listen(this.sockPath, () => {
-        process.umask(prevUmask);
+        restoreUmask();
         // Belt-and-suspenders: also chmod in case umask was ineffective
         try {
           chmodSync(this.sockPath, 0o600);
