@@ -1226,20 +1226,8 @@ export class FleetManager implements FleetContext {
 
   private async deleteForumTopic(topicId: number | string): Promise<void> {
     try {
-      const groupId = this.fleetConfig?.channel?.group_id;
-      const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
-      if (!groupId || !botTokenEnv) return;
-      const botToken = process.env[botTokenEnv];
-      if (!botToken) return;
-
-      await fetch(
-        `https://api.telegram.org/bot${botToken}/deleteForumTopic`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: groupId, message_thread_id: topicId }),
-        },
-      );
+      if (!this.adapter?.deleteTopic) return;
+      await this.adapter.deleteTopic(topicId);
     } catch (err) {
       this.logger.warn({ err, topicId }, "Failed to delete forum topic during rollback");
     }

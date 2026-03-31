@@ -52,6 +52,7 @@ export interface ChannelAdapter extends EventEmitter {
   notifyAlert(chatId: string, alert: AlertData, opts?: SendOpts): Promise<SentMessage>;
 
   createTopic?(name: string): Promise<number | string>;
+  deleteTopic?(topicId: number | string): Promise<void>;
   topicExists?(topicId: number | string): Promise<boolean>;
   closeForumTopic?(threadId: number | string): Promise<void>;
   reopenForumTopic?(threadId: number | string): Promise<void>;

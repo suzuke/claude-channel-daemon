@@ -584,6 +584,12 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     return res.message_thread_id;
   }
 
+  async deleteTopic(topicId: number | string): Promise<void> {
+    const chatId = this.getChatId();
+    if (!chatId) return;
+    await this.bot.api.raw.deleteForumTopic({ chat_id: Number(chatId), message_thread_id: Number(topicId) });
+  }
+
   async topicExists(topicId: number): Promise<boolean> {
     const chatId = this.getChatId();
     if (!chatId) return false;
