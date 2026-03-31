@@ -12,22 +12,19 @@ One Telegram bot, multiple CLI backends (Claude Code, Gemini CLI, Codex, OpenCod
 
 > **⚠️** All CLI backends run with `--dangerously-skip-permissions` (or equivalent). See [Security](SECURITY.md).
 
-## How it compares
+## Problems agend solves
 
-| | agend | Claude Code Telegram Plugin | Cursor | Cline (VS Code) |
-|---|:-:|:-:|:-:|:-:|
-| Runs headless (no IDE/terminal) | ✅ | Needs terminal | ❌ | ❌ |
-| Multi-project fleet | ✅ | 1 session | 1 window | 1 window |
-| Multi-channel (Telegram, Discord) | ✅ | Telegram only | N/A | N/A |
-| Scheduled tasks (persistent) | ✅ | Session-scoped | ❌ | ❌ |
-| Context auto-rotation | ✅ | ❌ | N/A | ❌ |
-| Permission approval (inline buttons) | ✅ | Text-based | N/A | Limited |
-| Voice input | ✅ | ❌ | ❌ | ❌ |
-| System service (launchd/systemd) | ✅ | ❌ | N/A | N/A |
-| Per-instance cost controls | ✅ | Platform-level | N/A | N/A |
-| Model failover | ✅ | ❌ | ❌ | ❌ |
-| Crash recovery | ✅ | ❌ | N/A | N/A |
-| Peer-to-peer agent collaboration | ✅ | ❌ | ❌ | ❌ |
+| Without agend | With agend |
+|---|---|
+| Close the terminal, agent goes offline | Runs as a system service — survives reboots |
+| One terminal = one project | One bot, unlimited projects running in parallel |
+| Context window fills up, session degrades | Auto-rotates context before it gets stale |
+| No idea what your agents are doing overnight | Daily cost reports + hang detection alerts |
+| Cron tasks disappear when the session ends | Persistent schedules backed by SQLite |
+| Rate limited on one model, everything stops | Auto-failover to backup models |
+| Can't approve tool use from your phone | Inline Telegram buttons with countdown + Always Allow |
+| Agents work in silos, can't coordinate | Peer-to-peer collaboration via MCP tools |
+| Runaway costs from unattended sessions | Per-instance daily spending limits with auto-pause |
 
 ## Quick start
 
