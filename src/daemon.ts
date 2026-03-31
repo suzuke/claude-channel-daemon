@@ -304,7 +304,7 @@ export class Daemon extends EventEmitter {
           this.rapidCrashCount = 0;
         }
 
-        if (this.rapidCrashCount >= 1) {
+        if (this.rapidCrashCount >= 3) {
           this.healthCheckPaused = true;
           this.logger.error(
             { rapidCrashCount: this.rapidCrashCount },
