@@ -486,8 +486,21 @@ export class Daemon extends EventEmitter {
       formatted = `[user:${user}] ${content}`;
     }
 
-    this.tmux.pasteText(formatted).catch(err => {
-      this.logger.error({ err }, "Failed to paste message to tmux");
+    this.tmux.pasteText(formatted).catch(async (err) => {
+      // Window ID may be stale after crash/respawn — try to find by name
+      this.logger.warn({ err }, "pasteText failed, looking up window by name");
+      try {
+        const windows = await TmuxManager.listWindows("agend");
+        const match = windows.find(w => w.name === this.name);
+        if (match) {
+          this.tmux = new TmuxManager("agend", match.id);
+          writeFileSync(join(this.instanceDir, "window-id"), match.id);
+          await this.tmux.pasteText(formatted);
+          this.logger.info({ windowId: match.id }, "Recovered window ID and delivered message");
+        }
+      } catch (retryErr) {
+        this.logger.error({ err: retryErr }, "Failed to recover window for message delivery");
+      }
     });
     this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Pushed channel message via tmux");
   }
