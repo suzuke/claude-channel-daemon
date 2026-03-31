@@ -94,8 +94,9 @@ export class TmuxManager {
   async pasteText(text: string): Promise<boolean> {
     try {
       const target = `${this.sessionName}:${this.windowId}`;
-      await exec("tmux", ["set-buffer", "--", text]);
-      await exec("tmux", ["paste-buffer", "-t", target, "-p"]);
+      const bufName = `paste-${this.windowId}-${Date.now()}`;
+      await exec("tmux", ["set-buffer", "-b", bufName, "--", text]);
+      await exec("tmux", ["paste-buffer", "-d", "-b", bufName, "-t", target, "-p"]);
       // Small delay to let TUI process the bracketed paste before sending Enter
       await new Promise(r => setTimeout(r, 200));
       await exec("tmux", ["send-keys", "-t", target, "Enter"]);
