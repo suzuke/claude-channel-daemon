@@ -328,7 +328,7 @@ export class FleetManager implements FleetContext {
     const BATCH_SIZE = 4;
     for (let i = 0; i < instanceEntries.length; i += BATCH_SIZE) {
       const batch = instanceEntries.slice(i, i + BATCH_SIZE);
-      await Promise.all(batch.map(([name, config]) =>
+      await Promise.allSettled(batch.map(([name, config]) =>
         this.startInstance(name, config, topicMode)
       ));
     }

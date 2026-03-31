@@ -182,7 +182,7 @@ export class Daemon extends EventEmitter {
     if (!this.config.lightweight) {
       // 3. Pipe-pane for prompt detection
       const outputLog = join(this.instanceDir, "output.log");
-      await this.tmux.pipeOutput(outputLog);
+      await this.tmux.pipeOutput(outputLog).catch(() => {});
 
       // 4. Transcript monitor
       this.transcriptMonitor = new TranscriptMonitor(this.instanceDir, this.logger);
@@ -667,21 +667,22 @@ export class Daemon extends EventEmitter {
     writeFileSync(windowIdFile, windowId);
 
     // Smart wait: poll tmux pane for prompt indicators, press Enter when found.
-    // Falls back to max 10s timeout if no prompt detected.
-    const deadline = Date.now() + 10_000;
+    // Minimum 3s wait to let CLI initialize, then poll up to 10s.
+    await new Promise(r => setTimeout(r, 3000));
+    const deadline = Date.now() + 7_000;
     let prompted = false;
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 500));
       try {
         const pane = await this.tmux!.capturePane();
-        if (/Do you want|Yes.*No|Trust|trust|Enter to confirm|MCP server/i.test(pane)) {
+        // Confirmation prompts that need Enter
+        if (/Do you want|Yes.*No|Trust|trust|Enter to confirm|New MCP server/i.test(pane)) {
           prompted = true;
           break;
         }
-        // Already at prompt (❯) with no confirmation needed
-        if (/^❯\s*$/m.test(pane)) {
-          prompted = true;
-          break;
+        // CLI is ready (status bar visible = fully loaded)
+        if (/bypass permissions|tokens|ok\s*$/m.test(pane)) {
+          break; // ready, no Enter needed
         }
       } catch { break; }
     }
