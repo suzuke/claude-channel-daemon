@@ -22,19 +22,22 @@ export class OpenCodeBackend implements CliBackend {
       oc = JSON.parse(readFileSync(configPath, "utf-8"));
     } catch { /* new file */ }
 
-    // MCP servers
-    oc.mcp = {};
+    // MCP servers — OpenCode uses "mcpServers" with stdio format
+    oc.mcpServers = {};
     for (const [name, entry] of Object.entries(config.mcpServers)) {
-      (oc.mcp as Record<string, unknown>)[name] = {
-        type: "local",
-        command: [entry.command, ...entry.args],
-        env: entry.env,
+      (oc.mcpServers as Record<string, unknown>)[name] = {
+        type: "stdio",
+        command: entry.command,
+        args: entry.args,
+        env: Object.entries(entry.env || {}).map(([k, v]) => `${k}=${v}`),
       };
     }
 
-    // System prompt via instructions
+    // System prompt — write to file and reference via instructions array
     if (config.systemPrompt) {
-      oc.instructions = config.systemPrompt;
+      const promptPath = join(config.workingDirectory, ".opencode-instructions.md");
+      writeFileSync(promptPath, config.systemPrompt);
+      oc.instructions = [".opencode-instructions.md"];
     }
 
     writeFileSync(configPath, JSON.stringify(oc, null, 2));
@@ -61,9 +64,9 @@ export class OpenCodeBackend implements CliBackend {
       const configPath = join(config.workingDirectory, "opencode.json");
       if (existsSync(configPath)) {
         const oc = JSON.parse(readFileSync(configPath, "utf-8"));
-        if (oc.mcp) {
+        if (oc.mcpServers) {
           for (const name of Object.keys(config.mcpServers)) {
-            delete oc.mcp[name];
+            delete oc.mcpServers[name];
           }
           writeFileSync(configPath, JSON.stringify(oc, null, 2));
         }
