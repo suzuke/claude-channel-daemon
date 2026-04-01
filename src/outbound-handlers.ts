@@ -250,9 +250,10 @@ const broadcast: Handler = (ctx, args, respond, meta) => {
   }
 
   const sentTo: string[] = [];
+  const failed: string[] = [];
   for (const targetName of targetNames) {
     const targetIpc = ctx.instanceIpcClients.get(targetName) ?? ctx.instanceIpcClients.get(ctx.sessionRegistry.get(targetName) ?? "");
-    if (!targetIpc) continue;
+    if (!targetIpc) { failed.push(targetName); continue; }
 
     const correlationId = `bcast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const ipcMeta: Record<string, string> = {
@@ -269,8 +270,11 @@ const broadcast: Handler = (ctx, args, respond, meta) => {
   }
 
   ctx.logger.info(`📢 ${senderLabel} broadcast to ${sentTo.length} instances: ${(message).slice(0, 80)}`);
-  ctx.eventLog?.logActivity("message", senderLabel, args.task_summary as string || message.slice(0, 200), `[${sentTo.join(", ")}]`);
-  respond({ sent_to: sentTo, count: sentTo.length });
+  const summary = (args.task_summary as string) || message.slice(0, 200);
+  for (const target of sentTo) {
+    ctx.eventLog?.logActivity("message", senderLabel, summary, target);
+  }
+  respond({ sent_to: sentTo, failed, count: sentTo.length });
 };
 
 // ── Registry ────────────────────────────────────────────────────────────
