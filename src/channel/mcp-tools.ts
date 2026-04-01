@@ -398,5 +398,5 @@ export const TOOL_SETS: Record<string, string[]> = {
     "send_to_instance", "list_instances", "describe_instance",
     "list_decisions", "post_decision",
   ],
-  minimal: ["reply", "send_to_instance", "list_decisions"],
+  minimal: ["reply", "send_to_instance", "list_decisions", "download_attachment"],
 };
