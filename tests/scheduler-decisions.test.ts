@@ -115,4 +115,35 @@ describe("SchedulerDb — Decisions", () => {
   it("throws on update non-existent decision", () => {
     expect(() => db.updateDecision("fake-id", { content: "x" })).toThrow(/not found/i);
   });
+
+  // ── Fleet scope ───────────────────────────────────────────────
+
+  it("fleet decision is visible from any project_root", () => {
+    db.createDecision({ project_root: "/a", scope: "fleet", title: "Always use worktrees", content: "c", created_by: "x" });
+    db.createDecision({ project_root: "/a", scope: "project", title: "Use ESM", content: "c", created_by: "x" });
+
+    // From project /a: sees both
+    const fromA = db.listDecisions("/a");
+    expect(fromA).toHaveLength(2);
+
+    // From project /b: sees only fleet decision
+    const fromB = db.listDecisions("/b");
+    expect(fromB).toHaveLength(1);
+    expect(fromB[0].title).toBe("Always use worktrees");
+    expect(fromB[0].scope).toBe("fleet");
+  });
+
+  it("fleet decisions appear before project decisions", () => {
+    db.createDecision({ project_root: "/p", scope: "project", title: "Project first", content: "c", created_by: "x" });
+    db.createDecision({ project_root: "/p", scope: "fleet", title: "Fleet rule", content: "c", created_by: "x" });
+
+    const list = db.listDecisions("/p");
+    expect(list[0].scope).toBe("fleet");
+    expect(list[1].scope).toBe("project");
+  });
+
+  it("defaults to project scope when not specified", () => {
+    const d = db.createDecision({ project_root: "/p", title: "Default", content: "c", created_by: "x" });
+    expect(d.scope).toBe("project");
+  });
 });

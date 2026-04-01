@@ -59,10 +59,12 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
 // ── Shared Decisions ──────────────────────────────────────────
 
 export type DecisionStatus = "active" | "superseded" | "archived";
+export type DecisionScope = "project" | "fleet";
 
 export interface Decision {
   id: string;
   project_root: string;
+  scope: DecisionScope;
   title: string;
   content: string;
   tags: string[];
@@ -76,6 +78,7 @@ export interface Decision {
 
 export interface CreateDecisionParams {
   project_root: string;
+  scope?: DecisionScope; // "project" (default) or "fleet" (visible to all instances)
   title: string;
   content: string;
   tags?: string[];

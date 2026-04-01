@@ -140,14 +140,15 @@ export const TOOLS = [
     // ── Shared Decisions ──────────────────────────────────────────
     {
       name: "post_decision",
-      description: "Record a project decision that all instances sharing this working directory can see. Decisions are injected into system prompts so future sessions inherit them. Use for architectural choices, coding conventions, or any knowledge that should persist across context rotations.",
+      description: "Record a decision. scope='project' (default) is visible to instances sharing this working directory. scope='fleet' is visible to ALL instances regardless of directory — use for workflow rules, review policies, and team conventions.",
       inputSchema: {
         type: "object" as const,
         properties: {
           title: { type: "string", description: "Short title for the decision" },
           content: { type: "string", description: "Full decision description" },
+          scope: { type: "string", enum: ["project", "fleet"], description: "'project' (default) = same working directory. 'fleet' = all instances." },
           tags: { type: "array", items: { type: "string" }, description: "Optional tags for categorization" },
-          ttl_days: { type: "number", description: "Days until auto-archive. Default: permanent (no expiry). Set e.g. 7 for temporary decisions." },
+          ttl_days: { type: "number", description: "Days until auto-archive. Default: permanent. Set e.g. 7 for temporary decisions." },
           supersedes: { type: "string", description: "Decision ID to supersede (marks old one as superseded)" },
         },
         required: ["title", "content"],

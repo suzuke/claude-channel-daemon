@@ -36,6 +36,7 @@ export class SchedulerDb {
       CREATE TABLE IF NOT EXISTS decisions (
         id            TEXT PRIMARY KEY,
         project_root  TEXT NOT NULL,
+        scope         TEXT NOT NULL DEFAULT 'project',
         title         TEXT NOT NULL,
         content       TEXT NOT NULL,
         tags          TEXT,
@@ -48,6 +49,7 @@ export class SchedulerDb {
       );
       CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project_root);
       CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions(status);
+      CREATE INDEX IF NOT EXISTS idx_decisions_scope ON decisions(scope);
     `);
   }
 
@@ -147,6 +149,7 @@ export class SchedulerDb {
     return {
       id: row.id as string,
       project_root: row.project_root as string,
+      scope: (row.scope as Decision["scope"]) ?? "project",
       title: row.title as string,
       content: row.content as string,
       tags: row.tags ? JSON.parse(row.tags as string) : [],
@@ -165,10 +168,11 @@ export class SchedulerDb {
     const ttl = params.ttl_days ?? 0; // default: permanent
     const expiresAt = ttl > 0 ? new Date(Date.now() + ttl * 86_400_000).toISOString() : null;
 
+    const scope = params.scope ?? "project";
     this.db.prepare(`
-      INSERT INTO decisions (id, project_root, title, content, tags, created_by, created_at, expires_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, params.project_root, params.title, params.content, params.tags?.length ? JSON.stringify(params.tags) : null, params.created_by, now, expiresAt, now);
+      INSERT INTO decisions (id, project_root, scope, title, content, tags, created_by, created_at, expires_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, params.project_root, scope, params.title, params.content, params.tags?.length ? JSON.stringify(params.tags) : null, params.created_by, now, expiresAt, now);
 
     if (params.supersedes) {
       this.supersedeDecision(params.supersedes, id);
@@ -183,14 +187,16 @@ export class SchedulerDb {
   }
 
   listDecisions(projectRoot: string, opts?: { includeArchived?: boolean; tags?: string[] }): Decision[] {
-    let sql = "SELECT * FROM decisions WHERE project_root = ?";
+    // Return project-scoped decisions for this root + all fleet-scoped decisions
+    let sql = "SELECT * FROM decisions WHERE ((project_root = ? AND scope = 'project') OR scope = 'fleet')";
     const values: unknown[] = [projectRoot];
 
     if (!opts?.includeArchived) {
       sql += " AND status = 'active'";
     }
 
-    sql += " ORDER BY created_at DESC";
+    // Fleet decisions first, then project, newest first within each group
+    sql += " ORDER BY CASE scope WHEN 'fleet' THEN 0 ELSE 1 END, created_at DESC";
     let rows = this.db.prepare(sql).all(...values) as Record<string, unknown>[];
 
     if (opts?.tags?.length) {

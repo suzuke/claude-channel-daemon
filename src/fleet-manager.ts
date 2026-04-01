@@ -105,15 +105,17 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.webhookEmitter?.emit(event, name);
   }
 
-  // NOTE: Decisions are currently scoped by project_root (working directory path).
-  // Future versions may need a more abstract scope model (team/fleet/cross-repo).
-  getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[] }> {
+  // NOTE: Decisions support project scope (by working directory) and fleet scope (all instances).
+  // Future versions may add team or cross-repo scopes.
+  getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[]; scope: string }> {
     if (!this.scheduler) return [];
     try {
+      // listDecisions returns fleet-scoped + project-scoped decisions, fleet first
       return this.scheduler.db.listDecisions(projectRoot).map(d => ({
         title: d.title,
         content: d.content,
         tags: d.tags,
+        scope: d.scope,
       }));
     } catch { return []; }
   }
@@ -846,6 +848,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           db.pruneExpiredDecisions();
           result = db.createDecision({
             project_root: projectRoot,
+            scope: (payload.scope as "project" | "fleet" | undefined),
             title: payload.title as string,
             content: payload.content as string,
             tags: payload.tags as string[] | undefined,

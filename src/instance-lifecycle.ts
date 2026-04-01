@@ -37,7 +37,7 @@ export interface LifecycleContext {
   notifyInstanceTopic(name: string, text: string): void;
   webhookEmit(event: string, name: string): void;
   startStatuslineWatcher(name: string): void;
-  getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[] }>;
+  getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[]; scope: string }>;
 }
 
 type Daemon = InstanceType<typeof import("./daemon.js").Daemon>;
