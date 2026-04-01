@@ -468,6 +468,141 @@ fleet
     if (staleCount > 0) console.log(`Removed ${staleCount} stale files (memory.db, sandbox-bash).`);
   });
 
+// === Backend commands ===
+const backend = program.command("backend").description("Backend diagnostics");
+
+backend
+  .command("doctor")
+  .description("Check backend prerequisites and configuration")
+  .argument("[backend]", "Backend to check (claude-code, codex, gemini-cli, opencode)", "claude-code")
+  .action(async (backendName: string) => {
+    const backends: Record<string, { binary: string; label: string; install: string; auth: string }> = {
+      "claude-code": { binary: "claude", label: "Claude Code", install: "npm i -g @anthropic-ai/claude-code", auth: "claude (OAuth) or ANTHROPIC_API_KEY" },
+      "codex": { binary: "codex", label: "OpenAI Codex", install: "npm i -g @openai/codex", auth: "OPENAI_API_KEY" },
+      "gemini-cli": { binary: "gemini", label: "Gemini CLI", install: "npm i -g @google/gemini-cli", auth: "gemini (Google OAuth)" },
+      "opencode": { binary: "opencode", label: "OpenCode", install: "go install github.com/opencode-ai/opencode@latest", auth: "Configure provider API key" },
+    };
+    const info = backends[backendName];
+    if (!info) {
+      console.error(`Unknown backend: ${backendName}. Available: ${Object.keys(backends).join(", ")}`);
+      process.exit(1);
+    }
+
+    let issues = 0;
+    const ok = (msg: string) => console.log(`  \x1b[32m✓\x1b[0m ${msg}`);
+    const fail = (msg: string) => { issues++; console.log(`  \x1b[31m✗\x1b[0m ${msg}`); };
+
+    console.log(`\n  \x1b[1magend backend doctor ${backendName}\x1b[0m\n`);
+
+    // Binary
+    try {
+      const { execSync } = await import("node:child_process");
+      const ver = execSync(`${info.binary} --version`, { stdio: "pipe" }).toString().trim();
+      const which = execSync(`which ${info.binary}`, { stdio: "pipe" }).toString().trim();
+      ok(`${info.binary.padEnd(20)} ${which} (${ver})`);
+    } catch {
+      fail(`${info.binary.padEnd(20)} not found — Install: ${info.install}`);
+    }
+
+    // tmux
+    try {
+      const { execSync } = await import("node:child_process");
+      const ver = execSync("tmux -V", { stdio: "pipe" }).toString().trim();
+      ok(`tmux${" ".repeat(16)} ${ver}`);
+    } catch {
+      fail(`tmux${" ".repeat(16)} not found — brew install tmux / apt install tmux`);
+    }
+
+    // TERM
+    if (process.env.TERM) {
+      ok(`TERM${" ".repeat(16)} ${process.env.TERM}`);
+    } else {
+      fail(`TERM${" ".repeat(16)} not set — may cause TUI issues in daemon mode`);
+    }
+
+    // Gemini trust check
+    if (backendName === "gemini-cli") {
+      try {
+        const trustFile = join(homedir(), ".gemini", "trustedFolders.json");
+        if (existsSync(trustFile)) {
+          const trusted = JSON.parse(readFileSync(trustFile, "utf-8"));
+          const count = typeof trusted === "object" ? Object.keys(trusted).length : 0;
+          ok(`Trust config${" ".repeat(8)} ${count} folder(s) trusted`);
+        } else {
+          fail(`Trust config${" ".repeat(8)} ~/.gemini/trustedFolders.json not found`);
+        }
+      } catch {
+        fail(`Trust config${" ".repeat(8)} Could not read trust config`);
+      }
+    }
+
+    // Claude Code OAuth check
+    if (backendName === "claude-code") {
+      try {
+        const claudeJson = join(homedir(), ".claude.json");
+        if (existsSync(claudeJson)) {
+          const cfg = JSON.parse(readFileSync(claudeJson, "utf-8"));
+          if (cfg.oauthAccount?.accountUuid) {
+            ok(`OAuth${" ".repeat(15)} Signed in`);
+          } else if (process.env.ANTHROPIC_API_KEY) {
+            ok(`API Key${" ".repeat(13)} ANTHROPIC_API_KEY set`);
+          } else {
+            fail(`Auth${" ".repeat(16)} No OAuth session or ANTHROPIC_API_KEY`);
+          }
+        } else if (process.env.ANTHROPIC_API_KEY) {
+          ok(`API Key${" ".repeat(13)} ANTHROPIC_API_KEY set`);
+        } else {
+          fail(`Auth${" ".repeat(16)} No ~/.claude.json or ANTHROPIC_API_KEY`);
+        }
+      } catch {
+        fail(`Auth${" ".repeat(16)} Could not check auth status`);
+      }
+    }
+
+    console.log();
+    if (issues === 0) {
+      console.log(`  \x1b[32m✓ All checks passed\x1b[0m`);
+    } else {
+      console.log(`  \x1b[31m${issues} issue(s) found\x1b[0m`);
+    }
+    console.log();
+  });
+
+backend
+  .command("trust")
+  .description("Pre-trust working directories for a backend (prevents trust dialogs)")
+  .argument("<backend>", "Backend (gemini-cli)")
+  .argument("[directories...]", "Directories to trust (defaults to all fleet instance dirs)")
+  .action(async (backendName: string, directories: string[]) => {
+    if (backendName !== "gemini-cli") {
+      console.log(`${backendName} uses CLI flags to skip trust dialogs — no manual trust needed.`);
+      return;
+    }
+
+    const { GeminiCliBackend } = await import("./backend/gemini-cli.js");
+    const gemini = new GeminiCliBackend(DATA_DIR);
+
+    let dirs = directories;
+    if (dirs.length === 0) {
+      // Trust all fleet instance working directories
+      try {
+        const { loadFleetConfig } = await import("./config.js");
+        const config = loadFleetConfig(FLEET_CONFIG_PATH);
+        dirs = Object.values(config.instances).map(i => i.working_directory);
+      } catch {
+        console.error("No directories specified and no fleet config found.");
+        process.exit(1);
+      }
+    }
+
+    for (const dir of dirs) {
+      const expanded = dir.replace(/^~/, homedir());
+      gemini.preTrust(expanded);
+      console.log(`  \x1b[32m✓\x1b[0m Trusted: ${expanded}`);
+    }
+    console.log(`\n  ${dirs.length} directory(s) trusted for Gemini CLI.`);
+  });
+
 // === Topic commands ===
 const topic = program.command("topic").description("Topic binding management");
 

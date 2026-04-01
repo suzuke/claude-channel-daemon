@@ -1,5 +1,6 @@
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
 
 export class GeminiCliBackend implements CliBackend {
@@ -52,6 +53,17 @@ export class GeminiCliBackend implements CliBackend {
     // System prompt via GEMINI.md
     if (config.systemPrompt) {
       writeFileSync(join(geminiDir, "GEMINI.md"), config.systemPrompt);
+    }
+  }
+
+  preTrust(workDir: string): void {
+    const trustFile = join(homedir(), ".gemini", "trustedFolders.json");
+    let trusted: Record<string, string> = {};
+    try { trusted = JSON.parse(readFileSync(trustFile, "utf-8")); } catch {}
+    if (!trusted[workDir]) {
+      trusted[workDir] = "TRUST_FOLDER";
+      mkdirSync(dirname(trustFile), { recursive: true });
+      writeFileSync(trustFile, JSON.stringify(trusted, null, 2));
     }
   }
 
