@@ -185,9 +185,15 @@ const mcp = new Server(
 
 // --- Tool definitions (see mcp-tools.ts) ---
 
+import { TOOL_SETS } from "./mcp-tools.js";
 export { TOOLS } from "./mcp-tools.js";
 
-mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+const toolSet = process.env.AGEND_TOOL_SET ?? "full";
+const activeTools = TOOL_SETS[toolSet]
+  ? TOOLS.filter(t => TOOL_SETS[toolSet].includes(t.name))
+  : TOOLS;
+
+mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: activeTools }));
 
 // --- Tool call handler ---
 

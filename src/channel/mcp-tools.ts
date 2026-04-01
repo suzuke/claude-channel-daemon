@@ -4,7 +4,7 @@ export const TOOLS = [
     {
       name: "reply",
       description:
-        "Reply on the channel. Pass chat_id from the inbound message. Optionally pass reply_to (message_id) for threading, and files (absolute paths) to attach. IMPORTANT: chat_id and thread_id must come from the inbound <channel> message — never infer them from instance names or topic_ids.",
+        "Reply on the channel. Pass chat_id and thread_id from the inbound <channel> block — never infer from topic_ids.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -183,7 +183,7 @@ export const TOOLS = [
     // ── Cross-instance communication ──────────────────────────────
     {
       name: "send_to_instance",
-      description: "Send a message to another Claude instance. The message appears in their channel as a passive notification — they decide whether to respond. Use this to share information, request reviews, or coordinate work across instances.",
+      description: "Send a message to another instance. Use for cross-instance communication.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -322,9 +322,7 @@ export const TOOLS = [
     },
     {
       name: "start_instance",
-      description:
-        "Start a stopped AgEnD instance. Use list_instances() first to check available instances and their status. " +
-        "Only needed when the target instance status is 'stopped'.",
+      description: "Start a stopped instance by name.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -338,10 +336,7 @@ export const TOOLS = [
     },
     {
       name: "create_instance",
-      description:
-        "Create a new AgEnD instance bound to a project directory, with a new Telegram topic. " +
-        "Use this when the user wants to add a new project to the fleet. " +
-        "The directory must exist. Returns the instance name and topic ID.",
+      description: "Create a new instance bound to a project directory with a channel topic.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -377,9 +372,7 @@ export const TOOLS = [
     },
     {
       name: "delete_instance",
-      description:
-        "Delete a AgEnD instance: stop daemon, remove from fleet config, clean up worktree if applicable, and optionally delete the Telegram topic. " +
-        "Use this when an instance is no longer needed (e.g., feature branch work is done).",
+      description: "Delete an instance: stop daemon, remove config, optionally delete topic.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -396,3 +389,14 @@ export const TOOLS = [
       },
     },
 ];
+
+/** Predefined tool profiles to reduce token overhead per instance. */
+export const TOOL_SETS: Record<string, string[]> = {
+  full: TOOLS.map(t => t.name),
+  standard: [
+    "reply", "react", "edit_message",
+    "send_to_instance", "list_instances", "describe_instance",
+    "list_decisions", "post_decision",
+  ],
+  minimal: ["reply", "send_to_instance", "list_decisions"],
+};

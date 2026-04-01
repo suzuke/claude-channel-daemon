@@ -78,6 +78,8 @@ export interface InstanceConfig {
   log_level: "debug" | "info" | "warn" | "error";
   /** CLI backend to use. Default: "claude-code" */
   backend?: string;
+  /** MCP tool profile: "full" (20 tools), "standard" (8), "minimal" (3). Default: "full" */
+  tool_set?: string;
   /** Skip non-essential subsystems (transcript monitor, context guardian, approval server, prompt detector) */
   lightweight?: boolean;
   /** System prompt for the Claude instance */

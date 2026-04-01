@@ -693,7 +693,10 @@ export class Daemon extends EventEmitter {
         "agend": {
           command: "node",
           args: [serverJs],
-          env: { AGEND_SOCKET_PATH: sockPath },
+          env: {
+            AGEND_SOCKET_PATH: sockPath,
+            ...(this.config.tool_set ? { AGEND_TOOL_SET: this.config.tool_set } : {}),
+          },
         },
       },
       systemPrompt: this.buildSystemPrompt(),
