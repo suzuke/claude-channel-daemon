@@ -49,8 +49,14 @@ export class SchedulerDb {
       );
       CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project_root);
       CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions(status);
-      CREATE INDEX IF NOT EXISTS idx_decisions_scope ON decisions(scope);
     `);
+
+    // Migration: add scope column to existing decisions tables that lack it
+    const cols = this.db.prepare("PRAGMA table_info(decisions)").all() as { name: string }[];
+    if (cols.length > 0 && !cols.some(c => c.name === "scope")) {
+      this.db.exec("ALTER TABLE decisions ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'");
+    }
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_decisions_scope ON decisions(scope)");
   }
 
   private rowToSchedule(row: Record<string, unknown>): Schedule {

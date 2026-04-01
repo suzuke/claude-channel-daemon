@@ -146,4 +146,51 @@ describe("SchedulerDb — Decisions", () => {
     const d = db.createDecision({ project_root: "/p", title: "Default", content: "c", created_by: "x" });
     expect(d.scope).toBe("project");
   });
+
+  it("migrates existing DB without scope column", () => {
+    // Simulate a pre-v1.4 DB: create decisions table WITHOUT scope column
+    const oldDbPath = join(tmpDir, "old-schema.db");
+    const Database = require("better-sqlite3");
+    const oldDb = new Database(oldDbPath);
+    oldDb.exec(`
+      CREATE TABLE decisions (
+        id TEXT PRIMARY KEY, project_root TEXT NOT NULL, title TEXT NOT NULL,
+        content TEXT NOT NULL, tags TEXT, status TEXT NOT NULL DEFAULT 'active',
+        superseded_by TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+        expires_at TEXT, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE schedules (id TEXT PRIMARY KEY, cron TEXT, message TEXT,
+        source TEXT, target TEXT, reply_chat_id TEXT, reply_thread_id TEXT,
+        label TEXT, enabled INTEGER DEFAULT 1, timezone TEXT, created_at TEXT,
+        last_triggered_at TEXT, last_status TEXT);
+    `);
+    // Insert a row without scope
+    oldDb.prepare("INSERT INTO decisions VALUES (?, ?, ?, ?, NULL, 'active', NULL, ?, ?, NULL, ?)")
+      .run("old-1", "/p", "Old decision", "content", "agent", new Date().toISOString(), new Date().toISOString());
+    oldDb.close();
+
+    // Open with SchedulerDb — should auto-migrate
+    const migratedDb = new SchedulerDb(oldDbPath);
+
+    // Verify old row has scope = 'project' (default)
+    const old = migratedDb.getDecision("old-1");
+    expect(old).not.toBeNull();
+    expect(old!.scope).toBe("project");
+
+    // Verify CRUD works with scope
+    const fleet = migratedDb.createDecision({
+      project_root: "/other", scope: "fleet", title: "Fleet rule", content: "c", created_by: "x",
+    });
+    expect(fleet.scope).toBe("fleet");
+
+    // Verify listDecisions returns fleet + project correctly
+    const fromOther = migratedDb.listDecisions("/other");
+    expect(fromOther).toHaveLength(1);
+    expect(fromOther[0].scope).toBe("fleet");
+
+    const fromP = migratedDb.listDecisions("/p");
+    expect(fromP).toHaveLength(2); // old project + fleet
+
+    migratedDb.close();
+  });
 });
