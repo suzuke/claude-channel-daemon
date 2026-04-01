@@ -30,8 +30,8 @@ One Telegram bot, multiple CLI backends (Claude Code, Gemini CLI, Codex, OpenCod
 
 ```bash
 brew install tmux               # macOS (prerequisite)
-npm install -g @suzuke/agend    # install
-agend init                      # interactive setup
+npm install -g @suzuke/agend    # install AgEnD
+agend init                      # interactive setup (choose backend + channel)
 agend fleet start               # launch the fleet
 ```
 
@@ -58,8 +58,16 @@ agend fleet start               # launch the fleet
 
 - Node.js >= 20
 - tmux
-- Claude Code CLI (`claude`)
-- Telegram bot token ([@BotFather](https://t.me/BotFather))
+- One of the supported AI coding CLIs (installed and authenticated):
+
+| Backend | Install | Auth |
+|---------|---------|------|
+| Claude Code | `npm i -g @anthropic-ai/claude-code` | `claude` (OAuth) or `ANTHROPIC_API_KEY` |
+| OpenAI Codex | `npm i -g @openai/codex` | `OPENAI_API_KEY` |
+| Gemini CLI | `npm i -g @google/gemini-cli` | `gemini` (Google OAuth) |
+| OpenCode | `go install github.com/opencode-ai/opencode@latest` | Configure provider API key |
+
+- Telegram bot token ([@BotFather](https://t.me/BotFather)) or Discord bot token
 - Groq API key (optional, for voice)
 
 ## Documentation

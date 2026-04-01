@@ -30,8 +30,8 @@
 
 ```bash
 brew install tmux               # macOS（前置需求）
-npm install -g @suzuke/agend    # 安裝
-agend init                      # 互動式設定
+npm install -g @suzuke/agend    # 安裝 AgEnD
+agend init                      # 互動式設定（選 backend + channel）
 agend fleet start               # 啟動 fleet
 ```
 
@@ -58,8 +58,16 @@ agend fleet start               # 啟動 fleet
 
 - Node.js >= 20
 - tmux
-- Claude Code CLI（`claude`）
-- Telegram bot token（[@BotFather](https://t.me/BotFather)）
+- 以下任一 AI coding CLI（需安裝並完成認證）：
+
+| Backend | 安裝 | 認證 |
+|---------|------|------|
+| Claude Code | `npm i -g @anthropic-ai/claude-code` | `claude`（OAuth）或 `ANTHROPIC_API_KEY` |
+| OpenAI Codex | `npm i -g @openai/codex` | `OPENAI_API_KEY` |
+| Gemini CLI | `npm i -g @google/gemini-cli` | `gemini`（Google OAuth） |
+| OpenCode | `go install github.com/opencode-ai/opencode@latest` | 設定 provider API key |
+
+- Telegram bot token（[@BotFather](https://t.me/BotFather)）或 Discord bot token
 - Groq API key（選用，語音轉文字用）
 
 ## 文件

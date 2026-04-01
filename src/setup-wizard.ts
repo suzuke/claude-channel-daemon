@@ -191,10 +191,22 @@ export function buildFleetConfig(answers: WizardAnswers): Record<string, unknown
 // ── Prerequisite checks ──────────────────────────────────
 
 const BACKENDS = [
-  { id: "claude-code", binary: "claude", label: "Claude Code", installUrl: "https://docs.anthropic.com/en/docs/claude-code" },
-  { id: "codex", binary: "codex", label: "OpenAI Codex", installUrl: "https://github.com/openai/codex" },
-  { id: "gemini-cli", binary: "gemini", label: "Gemini CLI", installUrl: "https://github.com/google-gemini/gemini-cli" },
-  { id: "opencode", binary: "opencode", label: "OpenCode", installUrl: "https://github.com/opencode-ai/opencode" },
+  { id: "claude-code", binary: "claude", label: "Claude Code",
+    installUrl: "https://docs.anthropic.com/en/docs/claude-code",
+    install: "npm i -g @anthropic-ai/claude-code",
+    auth: "claude (OAuth) or set ANTHROPIC_API_KEY" },
+  { id: "codex", binary: "codex", label: "OpenAI Codex",
+    installUrl: "https://github.com/openai/codex",
+    install: "npm i -g @openai/codex",
+    auth: "set OPENAI_API_KEY" },
+  { id: "gemini-cli", binary: "gemini", label: "Gemini CLI",
+    installUrl: "https://github.com/google-gemini/gemini-cli",
+    install: "npm i -g @anthropic-ai/gemini  (or brew install gemini)",
+    auth: "gemini (Google OAuth)" },
+  { id: "opencode", binary: "opencode", label: "OpenCode",
+    installUrl: "https://github.com/opencode-ai/opencode",
+    install: "go install github.com/opencode-ai/opencode@latest",
+    auth: "configure provider API key in opencode settings" },
 ];
 
 interface PrereqResult {
@@ -249,7 +261,13 @@ export async function runSetupWizard(): Promise<void> {
     console.log(`  ${green("✓")} ${selectedBackend.label} ${dim(prereq.backendVersion)}`);
   } else {
     console.log(`  ${red("✗")} ${selectedBackend.label} (${selectedBackend.binary}) not found`);
-    console.log(`    Install: ${dim(selectedBackend.installUrl)}`);
+    console.log();
+    console.log(`  ${bold(`Prerequisites for ${selectedBackend.label}:`)}`);
+    console.log(`  ${dim("1. Install:")} ${selectedBackend.install}`);
+    console.log(`  ${dim("2. Auth:")}    ${selectedBackend.auth}`);
+    console.log(`  ${dim("3. Verify:")}  ${selectedBackend.binary} --version`);
+    console.log();
+    console.log(`  ${dim(`More info: ${selectedBackend.installUrl}`)}`);
     rl.close();
     process.exit(1);
   }
