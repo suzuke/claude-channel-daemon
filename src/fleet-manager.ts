@@ -461,7 +461,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }
 
     this.adapter.on("started", safeHandler((username: string) => {
-      this.logger.info(`Bot @${username} polling`);
+      this.logger.info(`Bot @${username} polling started. Ensure no other service is polling this bot token.`);
     }, this.logger, "adapter.started"));
     this.adapter.on("polling_conflict", safeHandler(({ attempt, delay }: { attempt: number; delay: number }) => {
       this.logger.warn(`409 Conflict (attempt ${attempt}), retry in ${delay / 1000}s`);

@@ -119,6 +119,75 @@ function expandHome(p: string): string {
   return resolve(p);
 }
 
+// ── Config builder (pure, testable) ─────────────────────
+
+export interface WizardAnswers {
+  backend: string;
+  botTokenEnv: string;
+  groupId?: number;
+  channelMode: string;
+  accessMode: "locked" | "pairing";
+  allowedUsers: (number | string)[];
+  projectRoots: string[];
+  instances: Array<{ name: string; workDir: string; topicId?: string | number }>;
+  costGuard: { enabled: boolean; dailyLimitUsd?: number; timezone?: string };
+  dailySummary: { enabled: boolean; hour?: number };
+}
+
+export function buildFleetConfig(answers: WizardAnswers): Record<string, unknown> {
+  const fleetData: Record<string, unknown> = {};
+
+  if (answers.projectRoots.length > 0) {
+    fleetData.project_roots = answers.projectRoots;
+  }
+
+  fleetData.channel = {
+    type: "telegram",
+    mode: answers.channelMode,
+    bot_token_env: answers.botTokenEnv,
+    ...(answers.groupId != null ? { group_id: answers.groupId } : {}),
+    access: {
+      mode: answers.accessMode,
+      ...(answers.allowedUsers.length > 0 ? { allowed_users: answers.allowedUsers } : {}),
+    },
+  };
+
+  fleetData.defaults = {
+    ...(answers.backend !== "claude-code" ? { backend: answers.backend } : {}),
+    restart_policy: {
+      max_retries: 10,
+      backoff: "exponential",
+      reset_after: 300,
+    },
+    log_level: "info",
+    ...(answers.costGuard.enabled && answers.costGuard.dailyLimitUsd ? {
+      cost_guard: {
+        daily_limit_usd: answers.costGuard.dailyLimitUsd,
+        warn_at_percentage: 80,
+        timezone: answers.costGuard.timezone ?? "UTC",
+      },
+    } : {}),
+    ...(answers.dailySummary.enabled ? {
+      daily_summary: {
+        enabled: true,
+        hour: answers.dailySummary.hour ?? 21,
+        minute: 0,
+      },
+    } : {}),
+  };
+
+  const instancesObj: Record<string, Record<string, unknown>> = {};
+  for (const inst of answers.instances) {
+    instancesObj[inst.name] = {
+      working_directory: inst.workDir,
+      ...(inst.topicId != null ? { topic_id: inst.topicId } : {}),
+    };
+  }
+  fleetData.instances = instancesObj;
+
+  return fleetData;
+}
+
 // ── Prerequisite checks ──────────────────────────────────
 
 const BACKENDS = [
@@ -250,6 +319,12 @@ export async function runSetupWizard(): Promise<void> {
     default: tokenEnvName,
     validate: (v) => /^[A-Z_][A-Z0-9_]*$/.test(v) ? null : "Must be uppercase with underscores (e.g., AGEND_BOT_TOKEN)",
   });
+
+  console.log();
+  console.log(`  ${yellow("⚠")}  Only one service can poll a bot token at a time.`);
+  console.log(`     ${dim("If this bot is also used by Claude Code's --channels telegram")}`);
+  console.log(`     ${dim("plugin or any other polling service, stop it first.")}`);
+  console.log(`     ${dim("Otherwise AgEnD will not receive messages.")}`);
 
   // ── Step 3: Mode ──
   step(3, TOTAL_STEPS, "Channel Mode");
@@ -514,55 +589,18 @@ export async function runSetupWizard(): Promise<void> {
 
   // fleet.yaml
   const yaml = await import("js-yaml");
-  const fleetData: Record<string, unknown> = {};
-
-  if (projectRoots.length > 0) {
-    fleetData.project_roots = projectRoots;
-  }
-
-  fleetData.channel = {
-    type: "telegram",
-    mode,
-    bot_token_env: tokenEnvName,
-    ...(groupId != null ? { group_id: groupId } : {}),
-    access: {
-      mode: accessMode,
-      ...(allowedUsers.length > 0 ? { allowed_users: allowedUsers } : {}),
-    },
-  };
-
-  fleetData.defaults = {
-    ...(selectedBackend.id !== "claude-code" ? { backend: selectedBackend.id } : {}),
-    restart_policy: {
-      max_retries: 10,
-      backoff: "exponential",
-      reset_after: 300,
-    },
-    log_level: "info",
-    ...(costGuardLimit > 0 ? {
-      cost_guard: {
-        daily_limit_usd: costGuardLimit,
-        warn_at_percentage: 80,
-        timezone: costGuardTimezone,
-      },
-    } : {}),
-    ...(enableSummary ? {
-      daily_summary: {
-        enabled: true,
-        hour: dailySummaryHour,
-        minute: 0,
-      },
-    } : {}),
-  };
-
-  const instancesObj: Record<string, Record<string, unknown>> = {};
-  for (const inst of instances) {
-    instancesObj[inst.name] = {
-      working_directory: inst.workDir,
-      ...(inst.topicId != null ? { topic_id: inst.topicId } : {}),
-    };
-  }
-  fleetData.instances = instancesObj;
+  const fleetData = buildFleetConfig({
+    backend: selectedBackend.id,
+    botTokenEnv: tokenEnvName,
+    groupId,
+    channelMode: mode,
+    accessMode,
+    allowedUsers,
+    projectRoots,
+    instances,
+    costGuard: { enabled: costGuardLimit > 0, dailyLimitUsd: costGuardLimit || undefined, timezone: costGuardTimezone },
+    dailySummary: { enabled: enableSummary, hour: dailySummaryHour },
+  });
 
   writeFileSync(FLEET_CONFIG_PATH, yaml.dump(fleetData, { lineWidth: 120 }));
   console.log(`  ${green("✓")} ${FLEET_CONFIG_PATH}`);
