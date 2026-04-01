@@ -35,6 +35,9 @@ export interface CliBackend {
   /** Regex to detect when the CLI is ready to accept input. */
   getReadyPattern(): RegExp;
 
+  /** Pre-approve a working directory to skip trust dialogs on startup. */
+  preTrust?(workingDirectory: string): void;
+
   /** Clean up config files on shutdown. */
   cleanup?(config: CliBackendConfig): void;
 }

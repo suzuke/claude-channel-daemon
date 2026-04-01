@@ -801,7 +801,8 @@ export class Daemon extends EventEmitter {
   private async trySpawn(): Promise<boolean> {
     const backendConfig = this.buildBackendConfig();
     this.backend!.writeConfig(backendConfig);
-    const cmd = `AGEND_INSTANCE_NAME=${this.name} ` + this.backend!.buildCommand(backendConfig);
+    this.backend!.preTrust?.(this.config.working_directory);
+    const cmd = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name} ` + this.backend!.buildCommand(backendConfig);
 
     const windowId = await this.tmux!.createWindow(cmd, this.config.working_directory, this.name);
     writeFileSync(join(this.instanceDir, "window-id"), windowId);

@@ -1,11 +1,12 @@
 [Unit]
-Description=Claude Channel Daemon
+Description=AgEnD — AI Engineering Daemon
 After=network.target
 
 [Service]
 Type=simple
 ExecStart=<%= execPath %> fleet start
 Environment=PATH=<%= path %>
+Environment=TERM=xterm-256color
 WorkingDirectory=<%= workingDirectory %>
 Restart=no
 StandardOutput=append:<%= logPath %>
