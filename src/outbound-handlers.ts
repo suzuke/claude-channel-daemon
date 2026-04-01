@@ -234,10 +234,50 @@ const deleteInstance: Handler = async (ctx, args, respond) => {
   await ctx.lifecycle.handleDelete(args, respond);
 };
 
+const broadcast: Handler = (ctx, args, respond, meta) => {
+  const message = args.message as string;
+  if (!message) { respond(null, "broadcast: missing required argument 'message'"); return; }
+
+  const senderLabel = meta.senderSessionName ?? meta.instanceName;
+  const targets = args.targets as string[] | undefined;
+
+  // Resolve target list: explicit or all running (excluding sender)
+  let targetNames: string[];
+  if (targets?.length) {
+    targetNames = targets;
+  } else {
+    targetNames = [...ctx.instanceIpcClients.keys()].filter(n => n !== meta.instanceName && n !== senderLabel);
+  }
+
+  const sentTo: string[] = [];
+  for (const targetName of targetNames) {
+    const targetIpc = ctx.instanceIpcClients.get(targetName) ?? ctx.instanceIpcClients.get(ctx.sessionRegistry.get(targetName) ?? "");
+    if (!targetIpc) continue;
+
+    const correlationId = `bcast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const ipcMeta: Record<string, string> = {
+      chat_id: "", message_id: `bcast-${Date.now()}`, user: `instance:${senderLabel}`,
+      user_id: `instance:${senderLabel}`, ts: new Date().toISOString(), thread_id: "",
+      from_instance: senderLabel, correlation_id: correlationId,
+    };
+    if (args.request_kind) ipcMeta.request_kind = args.request_kind as string;
+    if (args.requires_reply != null) ipcMeta.requires_reply = String(args.requires_reply);
+    if (args.task_summary) ipcMeta.task_summary = args.task_summary as string;
+
+    targetIpc.send({ type: "fleet_inbound", targetSession: targetName, content: message, meta: ipcMeta });
+    sentTo.push(targetName);
+  }
+
+  ctx.logger.info(`📢 ${senderLabel} broadcast to ${sentTo.length} instances: ${(message).slice(0, 80)}`);
+  ctx.eventLog?.logActivity("message", senderLabel, args.task_summary as string || message.slice(0, 200), `[${sentTo.join(", ")}]`);
+  respond({ sent_to: sentTo, count: sentTo.length });
+};
+
 // ── Registry ────────────────────────────────────────────────────────────
 
 export const outboundHandlers = new Map<string, Handler>([
   ["send_to_instance", sendToInstance],
+  ["broadcast", broadcast],
   ["list_instances", listInstances],
   ["request_information", requestInformation],
   ["delegate_task", delegateTask],

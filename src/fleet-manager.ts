@@ -899,6 +899,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   private summarizeToolCall(tool: string, args: Record<string, unknown>): string {
     switch (tool) {
       case "send_to_instance": return `send_to_instance(${args.instance_name})`;
+      case "broadcast": return `broadcast(${(args.targets as string[])?.join(", ") ?? "all"})`;
+
       case "request_information": return `request_information(${args.target_instance}, "${(args.question as string ?? "").slice(0, 60)}")`;
       case "delegate_task": return `delegate_task(${args.target_instance}, "${(args.task as string ?? "").slice(0, 60)}")`;
       case "report_result": return `report_result(${args.target_instance})`;

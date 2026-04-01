@@ -204,6 +204,21 @@ export const TOOLS = [
     },
     // ── Cross-instance communication ──────────────────────────────
     {
+      name: "broadcast",
+      description: "Send a message to multiple instances at once. Omit targets to send to all running instances.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          message: { type: "string", description: "Message to send" },
+          targets: { type: "array", items: { type: "string" }, description: "Instance names. Omit for all running." },
+          task_summary: { type: "string", description: "Brief summary shown in logs" },
+          request_kind: { type: "string", enum: ["query", "task", "update"], description: "Message intent" },
+          requires_reply: { type: "boolean", description: "Whether recipients should reply" },
+        },
+        required: ["message"],
+      },
+    },
+    {
       name: "send_to_instance",
       description: "Send a message to another instance. Use for cross-instance communication.",
       inputSchema: {
@@ -445,7 +460,7 @@ export const TOOL_SETS: Record<string, string[]> = {
   full: TOOLS.map(t => t.name),
   standard: [
     "reply", "react", "edit_message",
-    "send_to_instance", "list_instances", "describe_instance",
+    "send_to_instance", "broadcast", "list_instances", "describe_instance",
     "list_decisions", "post_decision", "task",
   ],
   minimal: ["reply", "send_to_instance", "list_decisions", "download_attachment"],
