@@ -44,9 +44,9 @@ function signalFleetReload(): void {
   try {
     const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
     process.kill(pid, "SIGHUP");
-    console.log("Fleet manager notified to reload schedules.");
+    console.log("Fleet manager notified to reload config.");
   } catch {
-    console.log("Fleet manager not running. Schedules will be loaded on next start.");
+    console.log("Fleet manager not running. Config will be loaded on next start.");
   }
 }
 
