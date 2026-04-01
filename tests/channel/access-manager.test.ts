@@ -79,4 +79,43 @@ describe("AccessManager", () => {
     expect(am.removeUser(111)).toBe(true);
     expect(am.isAllowed(111)).toBe(false);
   });
+
+  // String/number cross-type matching (Bug: snowflake fix regression)
+  it("isAllowed matches number userId against string allowlist", () => {
+    const am2 = new AccessManager(
+      { mode: "pairing", allowed_users: ["111", "222"], max_pending_codes: 3, code_expiry_minutes: 60 },
+      join(tmpDir, "cross-type.json"),
+    );
+    // Telegram sends number, YAML/wizard may store string
+    expect(am2.isAllowed(111)).toBe(true);
+    expect(am2.isAllowed("111")).toBe(true);
+    expect(am2.isAllowed(999)).toBe(false);
+  });
+
+  it("isAllowed matches string userId against number allowlist", () => {
+    const am2 = new AccessManager(
+      { mode: "pairing", allowed_users: [111, 222], max_pending_codes: 3, code_expiry_minutes: 60 },
+      join(tmpDir, "cross-type2.json"),
+    );
+    // Discord sends string
+    expect(am2.isAllowed("111")).toBe(true);
+    expect(am2.isAllowed(111)).toBe(true);
+  });
+
+  it("removeUser works across types", () => {
+    const am2 = new AccessManager(
+      { mode: "pairing", allowed_users: ["111"], max_pending_codes: 3, code_expiry_minutes: 60 },
+      join(tmpDir, "cross-remove.json"),
+    );
+    expect(am2.removeUser(111)).toBe(true); // number removes string entry
+    expect(am2.isAllowed("111")).toBe(false);
+  });
+
+  it("constructor deduplicates across types", () => {
+    const am2 = new AccessManager(
+      { mode: "pairing", allowed_users: [111, "111", 222], max_pending_codes: 3, code_expiry_minutes: 60 },
+      join(tmpDir, "cross-dedup.json"),
+    );
+    expect(am2.getAllowedUsers()).toHaveLength(2); // 111 and 222, not 111, "111", 222
+  });
 });

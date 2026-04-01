@@ -42,8 +42,8 @@ export class AccessManager {
       this.state = { allowed_users: [], pending_codes: [] };
     }
 
-    // Merge config's allowed_users with saved ones (deduplicated)
-    const merged = new Set([...this.state.allowed_users, ...config.allowed_users]);
+    // Merge config's allowed_users with saved ones (deduplicated, normalized to string)
+    const merged = new Set([...this.state.allowed_users, ...config.allowed_users].map(String));
     this.state.allowed_users = Array.from(merged);
 
     // If saved state has no mode, use config mode
@@ -72,11 +72,13 @@ export class AccessManager {
   }
 
   isAllowed(userId: number | string): boolean {
-    return this.state.allowed_users.includes(userId);
+    const key = String(userId);
+    return this.state.allowed_users.some(u => String(u) === key);
   }
 
   hasPairingQuota(userId: number | string): boolean {
-    const userCodes = this.state.pending_codes.filter((p) => p.userId === userId);
+    const key = String(userId);
+    const userCodes = this.state.pending_codes.filter((p) => String(p.userId) === key);
     return userCodes.length < 2;
   }
 
@@ -91,10 +93,10 @@ export class AccessManager {
       throw new Error(`User ${userId} has reached max pairing code attempts (2)`);
     }
 
-    // Count distinct users with pending codes
-    const usersWithPending = new Set(this.state.pending_codes.map((p) => p.userId));
+    // Count distinct users with pending codes (normalized to string)
+    const usersWithPending = new Set(this.state.pending_codes.map((p) => String(p.userId)));
     // If this user is new and we're already at max, throw
-    if (!usersWithPending.has(userId) && usersWithPending.size >= this.config.max_pending_codes) {
+    if (!usersWithPending.has(String(userId)) && usersWithPending.size >= this.config.max_pending_codes) {
       throw new Error(`Max pending codes reached for ${this.config.max_pending_codes} unique users`);
     }
 
@@ -152,14 +154,15 @@ export class AccessManager {
       return false;
     }
 
-    // Add user to allowlist if not already there
-    if (!this.state.allowed_users.includes(entry.userId)) {
-      this.state.allowed_users.push(entry.userId);
+    // Add user to allowlist if not already there (normalized to string)
+    const entryKey = String(entry.userId);
+    if (!this.state.allowed_users.some(u => String(u) === entryKey)) {
+      this.state.allowed_users.push(entryKey);
     }
 
     // Remove all pending codes for that user
     this.state.pending_codes = this.state.pending_codes.filter(
-      (p) => p.userId !== entry.userId,
+      (p) => String(p.userId) !== entryKey,
     );
 
     this.persist();
@@ -180,7 +183,8 @@ export class AccessManager {
   }
 
   removeUser(userId: number | string): boolean {
-    const idx = this.state.allowed_users.indexOf(userId);
+    const key = String(userId);
+    const idx = this.state.allowed_users.findIndex(u => String(u) === key);
     if (idx === -1) {
       return false;
     }
