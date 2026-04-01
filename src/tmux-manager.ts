@@ -35,10 +35,10 @@ export class TmuxManager {
   static async listWindows(sessionName: string): Promise<Array<{ id: string; name: string }>> {
     try {
       const { stdout } = await exec("tmux", [
-        "list-windows", "-t", sessionName, "-F", "#{window_id}\t#{window_name}"
+        "list-windows", "-t", sessionName, "-F", "#{window_id}|||#{window_name}"
       ]);
       return stdout.trim().split("\n").filter(Boolean).map(line => {
-        const [id, name] = line.split("\t");
+        const [id, name] = line.split("|||");
         return { id, name };
       });
     } catch { return []; }
