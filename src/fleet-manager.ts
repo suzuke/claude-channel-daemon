@@ -1614,6 +1614,13 @@ const ACTIVITY_VIEWER_HTML = `<!DOCTYPE html>
   .card-task { font-size: 12px; color: #d29922; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .board-empty { font-size: 13px; color: #8b949e; padding: 8px 0; }
   .section-label { font-size: 11px; color: #484f58; text-transform: uppercase; letter-spacing: 1px; padding: 10px 24px 0; }
+  .tabs { display: flex; gap: 0; padding: 0 24px; border-bottom: 1px solid #21262d; }
+  .tab { padding: 8px 16px; font-size: 13px; color: #8b949e; cursor: pointer; border: none; border-bottom: 2px solid transparent; background: none; }
+  .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+  .tab:hover { color: #c9d1d9; }
+  .view { display: none; }
+  .view.active { display: block; }
+  #graphCanvas { width: 100%; background: #0d1117; display: block; }
 </style>
 </head>
 <body>
@@ -1641,8 +1648,12 @@ const ACTIVITY_VIEWER_HTML = `<!DOCTYPE html>
 </div>
 <div class="section-label">Agents</div>
 <div class="board" id="board"><div class="board-empty">Loading...</div></div>
-<div class="section-label">Sequence</div>
-<div id="diagram"><div class="mermaid" id="mermaidEl"></div></div>
+<div class="tabs">
+  <button class="tab active" data-view="graph">Network Graph</button>
+  <button class="tab" data-view="seq">Sequence Diagram</button>
+</div>
+<div id="viewGraph" class="view active"><canvas id="graphCanvas" height="400"></canvas></div>
+<div id="viewSeq" class="view"><div id="diagram"><div class="mermaid" id="mermaidEl"></div></div></div>
 <div class="feed" id="feed"></div>
 
 <script>
@@ -1775,6 +1786,163 @@ function stepReplay() {
   }
   playTimeout = setTimeout(stepReplay, delayMs);
 }
+
+// ── Tab switching ────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('view' + (tab.dataset.view === 'graph' ? 'Graph' : 'Seq')).classList.add('active');
+    if (tab.dataset.view === 'graph') resizeCanvas();
+  });
+});
+
+// ── Network Graph ────────────────────────────────
+const canvas = document.getElementById('graphCanvas');
+const ctx2d = canvas.getContext('2d');
+let graphNodes = [];     // {name, x, y, color, isGeneral}
+let graphEdges = new Map(); // "a->b" → {from, to}
+let pulses = [];         // {fromX, fromY, toX, toY, progress, color}
+
+function resizeCanvas() {
+  canvas.width = canvas.parentElement.offsetWidth;
+  canvas.height = 400;
+  layoutNodes();
+}
+
+function layoutNodes() {
+  if (graphNodes.length === 0) return;
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const radius = Math.min(cx, cy) - 60;
+  // Find general (center)
+  const general = graphNodes.find(n => n.isGeneral);
+  const others = graphNodes.filter(n => !n.isGeneral);
+  if (general) { general.x = cx; general.y = cy; }
+  others.forEach((n, i) => {
+    const angle = (2 * Math.PI * i / others.length) - Math.PI / 2;
+    n.x = cx + radius * Math.cos(angle);
+    n.y = cy + radius * Math.sin(angle);
+  });
+}
+
+function updateGraphFromFleet(data) {
+  const names = new Set();
+  data.instances.forEach(inst => names.add(inst.name));
+  // Add user node if activity mentions it
+  rows.forEach(r => { names.add(r.sender); if (r.receiver) names.add(r.receiver); });
+  // Rebuild nodes (preserve positions if same set)
+  const oldMap = new Map(graphNodes.map(n => [n.name, n]));
+  graphNodes = [...names].map(name => {
+    const old = oldMap.get(name);
+    const inst = data.instances.find(i => i.name === name);
+    const color = !inst ? '#8b949e' : inst.status === 'running' ? '#3fb950' : inst.status === 'crashed' ? '#f85149' : '#484f58';
+    return { name, x: old?.x ?? 0, y: old?.y ?? 0, color, isGeneral: inst?.general_topic ?? false };
+  });
+  layoutNodes();
+  // Build edges from activity
+  graphEdges.clear();
+  rows.forEach(r => {
+    if (r.receiver && r.event === 'message') {
+      const key = r.sender + '->' + r.receiver;
+      graphEdges.set(key, { from: r.sender, to: r.receiver });
+    }
+  });
+}
+
+function spawnPulse(sender, receiver, event) {
+  const from = graphNodes.find(n => n.name === sender);
+  const to = graphNodes.find(n => n.name === (receiver || sender));
+  if (!from || !to) return;
+  const colors = { message: '#58a6ff', tool_call: '#d29922', task_update: '#3fb950' };
+  pulses.push({ fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, progress: 0, color: colors[event] || '#58a6ff' });
+}
+
+function drawGraph() {
+  if (!ctx2d) return;
+  ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+  // Draw edges
+  ctx2d.strokeStyle = '#21262d';
+  ctx2d.lineWidth = 1;
+  graphEdges.forEach(e => {
+    const from = graphNodes.find(n => n.name === e.from);
+    const to = graphNodes.find(n => n.name === e.to);
+    if (from && to) {
+      ctx2d.beginPath();
+      ctx2d.moveTo(from.x, from.y);
+      ctx2d.lineTo(to.x, to.y);
+      ctx2d.stroke();
+    }
+  });
+  // Draw pulses
+  pulses = pulses.filter(p => p.progress <= 1);
+  pulses.forEach(p => {
+    p.progress += 0.02;
+    const x = p.fromX + (p.toX - p.fromX) * p.progress;
+    const y = p.fromY + (p.toY - p.fromY) * p.progress;
+    ctx2d.beginPath();
+    ctx2d.arc(x, y, 5, 0, Math.PI * 2);
+    ctx2d.fillStyle = p.color;
+    ctx2d.shadowColor = p.color;
+    ctx2d.shadowBlur = 12;
+    ctx2d.fill();
+    ctx2d.shadowBlur = 0;
+  });
+  // Draw nodes
+  graphNodes.forEach(n => {
+    // Glow
+    ctx2d.beginPath();
+    ctx2d.arc(n.x, n.y, n.isGeneral ? 28 : 22, 0, Math.PI * 2);
+    ctx2d.fillStyle = n.color + '22';
+    ctx2d.fill();
+    // Circle
+    ctx2d.beginPath();
+    ctx2d.arc(n.x, n.y, n.isGeneral ? 24 : 18, 0, Math.PI * 2);
+    ctx2d.fillStyle = '#161b22';
+    ctx2d.strokeStyle = n.color;
+    ctx2d.lineWidth = 2;
+    ctx2d.fill();
+    ctx2d.stroke();
+    // Label
+    ctx2d.fillStyle = '#c9d1d9';
+    ctx2d.font = (n.isGeneral ? '12' : '11') + 'px -apple-system, monospace';
+    ctx2d.textAlign = 'center';
+    ctx2d.fillText(n.name.length > 14 ? n.name.slice(0, 12) + '..' : n.name, n.x, n.y + (n.isGeneral ? 38 : 32));
+  });
+  requestAnimationFrame(drawGraph);
+}
+
+// Hook into replay: spawn pulses when stepping
+const origStep = stepReplay;
+stepReplay = function() {
+  const prevCount = visibleCount;
+  origStep();
+  if (visibleCount > prevCount && visibleCount <= rows.length) {
+    const r = rows[visibleCount - 1];
+    spawnPulse(r.sender, r.receiver, r.event);
+  }
+};
+
+// Hook into full load: spawn pulses for all visible events on load
+const origRenderFull = renderFull;
+renderFull = function() {
+  origRenderFull();
+  // Update graph nodes from fleet data (if available)
+  fetch('/api/fleet').then(r => r.json()).then(data => {
+    updateGraphFromFleet(data);
+  }).catch(() => {
+    // Fallback: build nodes from activity only
+    const names = new Set();
+    rows.forEach(r => { names.add(r.sender); if (r.receiver) names.add(r.receiver); });
+    graphNodes = [...names].map(n => ({ name: n, x: 0, y: 0, color: '#8b949e', isGeneral: n === 'general' }));
+    layoutNodes();
+  });
+};
+
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+requestAnimationFrame(drawGraph);
 
 // ── Agent Board ──────────────────────────────────
 
