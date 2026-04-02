@@ -373,40 +373,32 @@ export async function runSetupWizard(): Promise<void> {
 
   // ── Step 4: Access control ──
   step(4, TOTAL_STEPS, "Access Control");
-  const accessIndex = await choose(
-    rl,
-    "Who can interact with the bot?",
-    [
-      { label: "Locked", hint: "only whitelisted Telegram user IDs" },
-      { label: "Pairing", hint: "anyone with a pairing code can join" },
-    ],
-    0,
-  );
-  const accessMode = accessIndex === 0 ? "locked" : "pairing";
+  const accessMode = "locked";
+
+  console.log(`  ${dim("Only whitelisted Telegram user IDs can interact with the bot.")}`);
+  console.log(`  ${dim("You can add more users later with: agend access add <user-id>")}`);
+  console.log();
+  console.log(`  ${dim("Your Telegram user ID — send /start to @userinfobot or @getidsbot")}`);
 
   const allowedUsers: (number | string)[] = [];
-  if (accessMode === "locked") {
-    console.log();
-    console.log(`  ${dim("Your Telegram user ID — send /start to @userinfobot or @getidsbot")}`);
-    const uidStr = await ask(rl, "Your Telegram user ID", {
+  const uidStr = await ask(rl, "Your Telegram user ID", {
+    validate: (v) => {
+      const n = parseInt(v, 10);
+      return isNaN(n) || n <= 0 ? "Must be a positive number" : null;
+    },
+  });
+  allowedUsers.push(uidStr);
+
+  let addMore = await confirm(rl, "Add another user?", false);
+  while (addMore) {
+    const uid = await ask(rl, "User ID", {
       validate: (v) => {
         const n = parseInt(v, 10);
         return isNaN(n) || n <= 0 ? "Must be a positive number" : null;
       },
     });
-    allowedUsers.push(uidStr);
-
-    let addMore = await confirm(rl, "Add another user?", false);
-    while (addMore) {
-      const uid = await ask(rl, "User ID", {
-        validate: (v) => {
-          const n = parseInt(v, 10);
-          return isNaN(n) || n <= 0 ? "Must be a positive number" : null;
-        },
-      });
-      allowedUsers.push(uid);
-      addMore = await confirm(rl, "Add another user?", false);
-    }
+    allowedUsers.push(uid);
+    addMore = await confirm(rl, "Add another user?", false);
   }
 
   // ── Step 5: Project roots ──
