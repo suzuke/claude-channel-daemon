@@ -391,8 +391,7 @@ export const TOOLS = [
           },
           model: {
             type: "string",
-            description: "Claude model to use for this instance. Omit to use the default (usually opus).",
-            enum: ["sonnet", "opus", "haiku"],
+            description: "Model to use. Claude: sonnet, opus, haiku, opusplan, best, sonnet[1m], opus[1m]. Codex: gpt-4o, o3. Gemini: gemini-2.5-pro. Omit for default.",
           },
           backend: {
             type: "string",
