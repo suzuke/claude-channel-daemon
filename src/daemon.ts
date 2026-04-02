@@ -278,11 +278,10 @@ export class Daemon extends EventEmitter {
     process.env.AGEND_SOCKET_PATH = sockPath;
 
     // 10. Health check — detect crashed tmux window and respawn
+    // Re-enabled: orphan window issue fixed by killing same-name windows before respawn.
+    // Without this, a dead CLI window goes undetected and messages are silently lost.
     if (!this.config.lightweight) {
-    // Health check disabled — Claude Code handles its own crash recovery.
-    // The daemon-level respawn was causing orphan tmux windows and stale
-    // window-id mismatches. If the CLI exits, it stays down until the
-    // next fleet restart or manual intervention.
+      this.startHealthCheck();
     }
 
     this.logger.info(`${this.name} ready`);
