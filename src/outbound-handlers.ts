@@ -118,6 +118,7 @@ const listInstances: Handler = (ctx, args, respond, meta) => {
       status: ctx.lifecycle.daemons.has(name) ? "running" : "stopped",
       working_directory: config.working_directory,
       topic_id: config.topic_id ?? null,
+      display_name: config.display_name ?? null,
       description: config.description ?? null,
       tags: config.tags ?? [],
       last_activity: ctx.lastActivityMs(name) ? new Date(ctx.lastActivityMs(name)).toISOString() : null,

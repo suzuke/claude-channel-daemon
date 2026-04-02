@@ -435,6 +435,18 @@ export const TOOLS = [
         required: ["name"],
       },
     },
+    // ── Identity ──────────────────────────────────────────────
+    {
+      name: "set_display_name",
+      description: "Set your display name. This name will be shown in Telegram messages, activity logs, and when other agents refer to you.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: { type: "string", description: "Your chosen display name" },
+        },
+        required: ["name"],
+      },
+    },
     // ── Repo checkout ──────────────────────────────────────────
     {
       name: "checkout_repo",
@@ -467,7 +479,7 @@ export const TOOL_SETS: Record<string, string[]> = {
   standard: [
     "reply", "react", "edit_message",
     "send_to_instance", "broadcast", "list_instances", "describe_instance",
-    "list_decisions", "post_decision", "task",
+    "list_decisions", "post_decision", "task", "set_display_name",
   ],
   minimal: ["reply", "send_to_instance", "list_decisions", "download_attachment"],
 };
