@@ -44,6 +44,10 @@ export class GeminiCliBackend implements CliBackend {
       };
     }
     settings.mcpServers = mcpWithInstanceName;
+    // Write model to per-project settings (Gemini reads model.name from settings.json)
+    if (config.model) {
+      settings.model = { name: config.model };
+    }
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
     // System prompt via GEMINI.md

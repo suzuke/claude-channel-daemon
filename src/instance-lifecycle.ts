@@ -151,6 +151,13 @@ export class InstanceLifecycle {
           this.ctx.logger.warn({ err, worktree: config.working_directory }, "Failed to remove git worktree");
         }
       }
+      // Prune stale worktree records (e.g. if directory was manually deleted)
+      try {
+        const { execFile: execFileCb } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const execFileAsync = promisify(execFileCb);
+        await execFileAsync("git", ["worktree", "prune"], { cwd: config.worktree_source });
+      } catch { /* best effort */ }
     }
 
     // Clean up IPC
