@@ -211,6 +211,7 @@ export const TOOLS = [
         properties: {
           message: { type: "string", description: "Message to send" },
           targets: { type: "array", items: { type: "string" }, description: "Instance names. Omit for all running." },
+          tags: { type: "array", items: { type: "string" }, description: "Filter targets by tags. Only instances with matching tags receive the message." },
           task_summary: { type: "string", description: "Brief summary shown in logs" },
           request_kind: { type: "string", enum: ["query", "task", "update"], description: "Message intent" },
           requires_reply: { type: "boolean", description: "Whether recipients should reply" },
@@ -354,7 +355,9 @@ export const TOOLS = [
       description: "List all currently running instances that you can send messages to.",
       inputSchema: {
         type: "object" as const,
-        properties: {},
+        properties: {
+          tags: { type: "array", items: { type: "string" }, description: "Filter by tags" },
+        },
       },
     },
     {

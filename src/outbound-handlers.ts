@@ -107,9 +107,10 @@ const sendToInstance: Handler = (ctx, args, respond, meta) => {
   respond({ sent: true, target: targetName, correlation_id: correlationId });
 };
 
-const listInstances: Handler = (ctx, _args, respond, meta) => {
+const listInstances: Handler = (ctx, args, respond, meta) => {
   const senderLabel = meta.senderSessionName ?? meta.instanceName;
-  const allInstances = Object.entries(ctx.fleetConfig?.instances ?? {})
+  const filterTags = args.tags as string[] | undefined;
+  let allInstances = Object.entries(ctx.fleetConfig?.instances ?? {})
     .filter(([name]) => name !== meta.instanceName && name !== senderLabel)
     .map(([name, config]) => ({
       name,
@@ -121,6 +122,9 @@ const listInstances: Handler = (ctx, _args, respond, meta) => {
       tags: config.tags ?? [],
       last_activity: ctx.lastActivityMs(name) ? new Date(ctx.lastActivityMs(name)).toISOString() : null,
     }));
+  if (filterTags?.length) {
+    allInstances = allInstances.filter(i => i.tags.some(t => filterTags.includes(t)));
+  }
   const externalSessions = [...ctx.sessionRegistry.entries()]
     .filter(([sessName]) => sessName !== senderLabel)
     .map(([sessName, hostInstance]) => ({ name: sessName, type: "session" as const, host: hostInstance }));
@@ -241,10 +245,17 @@ const broadcast: Handler = (ctx, args, respond, meta) => {
   const senderLabel = meta.senderSessionName ?? meta.instanceName;
   const targets = args.targets as string[] | undefined;
 
-  // Resolve target list: explicit or all running (excluding sender)
+  // Resolve target list: explicit targets, tag filter, or all running
   let targetNames: string[];
+  const filterTags = args.tags as string[] | undefined;
   if (targets?.length) {
     targetNames = targets;
+  } else if (filterTags?.length) {
+    // Filter by tags from fleet config
+    targetNames = Object.entries(ctx.fleetConfig?.instances ?? {})
+      .filter(([name, config]) => name !== meta.instanceName && name !== senderLabel
+        && config.tags?.some((t: string) => filterTags.includes(t)))
+      .map(([name]) => name);
   } else {
     targetNames = [...ctx.instanceIpcClients.keys()].filter(n => n !== meta.instanceName && n !== senderLabel);
   }
