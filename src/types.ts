@@ -60,6 +60,8 @@ export interface ChannelConfig {
 
 export interface InstanceConfig {
   working_directory: string;
+  /** Agent display name (e.g. "Kuro", "Luna") — chosen by the agent itself */
+  display_name?: string;
   /** Human-readable description of what this instance does */
   description?: string;
   /** Tags for capability discovery (e.g. ["code-reviewer", "researcher", "executor"]) */

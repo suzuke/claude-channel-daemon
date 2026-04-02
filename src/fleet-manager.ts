@@ -530,6 +530,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           this.handleDecisionCrud(name, msg);
         } else if (msg.type === "fleet_task") {
           this.handleTaskCrud(name, msg);
+        } else if (msg.type === "fleet_set_display_name") {
+          this.handleSetDisplayName(name, msg);
         }
       }, this.logger, `ipc.message[${name}]`));
       // Ask daemon for any sessions that registered before we connected
@@ -894,6 +896,29 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     } catch (err) {
       ipc.send({ type: "fleet_decision_response", fleetRequestId, error: (err as Error).message });
     }
+  }
+
+  /** Resolve display name for an instance, fallback to instance name. */
+  resolveDisplayName(instanceName: string): string {
+    return this.fleetConfig?.instances[instanceName]?.display_name ?? instanceName;
+  }
+
+  private handleSetDisplayName(instanceName: string, msg: Record<string, unknown>): void {
+    const fleetRequestId = msg.fleetRequestId as string;
+    const payload = (msg.payload ?? {}) as Record<string, unknown>;
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (!ipc || !this.fleetConfig) return;
+
+    const displayName = payload.name as string;
+    if (!displayName || displayName.length > 30) {
+      ipc.send({ type: "fleet_display_name_response", fleetRequestId, error: "Name must be 1-30 characters" });
+      return;
+    }
+
+    this.fleetConfig.instances[instanceName].display_name = displayName;
+    this.saveFleetConfig();
+    this.logger.info({ instanceName, displayName }, "Display name set");
+    ipc.send({ type: "fleet_display_name_response", fleetRequestId, result: { display_name: displayName } });
   }
 
   private summarizeToolCall(tool: string, args: Record<string, unknown>): string {

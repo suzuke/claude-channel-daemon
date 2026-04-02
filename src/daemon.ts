@@ -94,7 +94,7 @@ export class Daemon extends EventEmitter {
       if (!type) return;
       // Build lookup key matching the pattern used when registering
       let key: string | undefined;
-      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response" || type === "fleet_decision_response" || type === "fleet_task_response") && msg.fleetRequestId) {
+      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response" || type === "fleet_decision_response" || type === "fleet_task_response" || type === "fleet_display_name_response") && msg.fleetRequestId) {
         key = String(msg.fleetRequestId);
       } else if (type === "fleet_outbound_response" && msg.requestId != null) {
         key = `fleet_out_${msg.requestId}`;
@@ -579,6 +579,25 @@ export class Daemon extends EventEmitter {
       return;
     }
 
+    if (tool === "set_display_name") {
+      const fleetReqId = `dn_${requestId}`;
+      this.ipcServer?.broadcast({
+        type: "fleet_set_display_name",
+        payload: args,
+        meta: { instance_name: this.name },
+        fleetRequestId: fleetReqId,
+      });
+      const timeout = setTimeout(() => {
+        this.pendingIpcRequests.delete(fleetReqId);
+        respond(null, "Set display name timed out");
+      }, 10_000);
+      this.pendingIpcRequests.set(fleetReqId, (respMsg) => {
+        clearTimeout(timeout);
+        respond(respMsg.result, respMsg.error as string | undefined);
+      });
+      return;
+    }
+
     if (tool === TASK_TOOL) {
       const fleetReqId = `task_${requestId}`;
       this.ipcServer?.broadcast({
@@ -743,6 +762,11 @@ export class Daemon extends EventEmitter {
       workingDirectory: this.config.working_directory,
     });
     let prompt = fleetContext;
+    if (this.config.display_name) {
+      prompt += `\n\nYour display name is "${this.config.display_name}". Use this when introducing yourself.`;
+    } else {
+      prompt += "\n\nYou don't have a display name yet. Use set_display_name to choose one that reflects your personality.";
+    }
     if (this.config.systemPrompt) {
       prompt += "\n\n" + this.config.systemPrompt;
     }
