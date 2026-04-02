@@ -109,6 +109,16 @@ export class InstanceLifecycle {
       }
     }, this.ctx.logger, `daemon.pty_error[${name}]`));
 
+    daemon.on("pty_recovered", safeHandler((data: { name: string; downtime_s: number }) => {
+      const mins = Math.floor(data.downtime_s / 60);
+      const secs = data.downtime_s % 60;
+      const duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      this.ctx.eventLog?.insert(name, "pty_recovered", { downtime_s: data.downtime_s });
+      this.ctx.logger.info({ name, downtime_s: data.downtime_s }, "PTY error recovered");
+      this.ctx.notifyInstanceTopic(name, `✅ ${name}: recovered after ${duration}`);
+      this.ctx.webhookEmit("pty_recovered", name, { downtime_s: data.downtime_s });
+    }, this.ctx.logger, `daemon.pty_recovered[${name}]`));
+
     this.ctx.setTopicIcon(name, "green");
     this.ctx.touchActivity(name);
   }

@@ -66,6 +66,7 @@ export class Daemon extends EventEmitter {
   // PTY error pattern monitoring
   private errorMonitorTimer: ReturnType<typeof setInterval> | null = null;
   private errorWaitingForRecovery = false; // true = error detected, waiting for ready pattern
+  private errorDetectedAt = 0; // timestamp when error was first detected
 
   constructor(
     private name: string,
@@ -399,8 +400,11 @@ export class Daemon extends EventEmitter {
         // State: waiting for recovery — check if agent is back to ready
         if (this.errorWaitingForRecovery) {
           if (readyPattern.test(pane)) {
+            const downtime = Math.round((Date.now() - this.errorDetectedAt) / 1000);
             this.errorWaitingForRecovery = false;
-            this.logger.info("PTY error recovered — agent is ready again");
+            this.errorDetectedAt = 0;
+            this.logger.info({ downtime_s: downtime }, "PTY error recovered — agent is ready again");
+            this.emit("pty_recovered", { name: this.name, downtime_s: downtime });
           }
           return; // Don't check for errors while waiting for recovery
         }
@@ -410,6 +414,7 @@ export class Daemon extends EventEmitter {
           if (!ep.pattern.test(pane)) continue;
 
           this.errorWaitingForRecovery = true;
+          this.errorDetectedAt = Date.now();
           this.logger.warn({ errorType: ep.type, action: ep.action }, `PTY error detected: ${ep.message}`);
           this.emit("pty_error", { name: this.name, ...ep });
 
