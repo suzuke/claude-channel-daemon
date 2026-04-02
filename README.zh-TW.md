@@ -74,7 +74,7 @@ agend fleet start               # 啟動 fleet
 
 - [Features](docs/features.md) — 功能詳細說明
 - [CLI Reference](docs/cli.md) — 所有指令與選項
-- [Configuration](docs/configuration.md) — fleet.yaml、.env、資料目錄
+- [Configuration](docs/configuration.zh-TW.md) — fleet.yaml 完整設定參考
 - [Security](SECURITY.md) — 信任模型與安全強化
 
 ## 已知限制
