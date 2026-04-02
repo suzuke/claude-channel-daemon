@@ -65,8 +65,7 @@ export class Daemon extends EventEmitter {
   private pasteLock: Promise<void> = Promise.resolve();
   // PTY error pattern monitoring
   private errorMonitorTimer: ReturnType<typeof setInterval> | null = null;
-  private lastDetectedError: string | null = null;
-  private lastErrorAt = 0;
+  private errorWaitingForRecovery = false; // true = error detected, waiting for ready pattern
 
   constructor(
     private name: string,
@@ -375,12 +374,19 @@ export class Daemon extends EventEmitter {
     scheduleNext();
   }
 
-  /** Periodically scan PTY output for backend-defined error patterns. */
+  /**
+   * Periodically scan PTY output for backend-defined error patterns.
+   *
+   * State machine to avoid false positives from stale buffer text:
+   *   MONITORING → (error pattern match) → WAITING_FOR_RECOVERY → (ready pattern match) → MONITORING
+   *
+   * Only emits pty_error once per error occurrence. After the agent recovers
+   * (ready pattern visible), it goes back to monitoring for new errors.
+   */
   private startErrorMonitor(): void {
     const patterns = this.backend?.getErrorPatterns?.();
     if (!patterns?.length || !this.tmux) return;
-
-    const ERROR_COOLDOWN_MS = 120_000; // Don't re-alert same error within 2 minutes
+    const readyPattern = this.backend!.getReadyPattern();
 
     this.errorMonitorTimer = setInterval(async () => {
       if (!this.tmux || this.spawning || this.guardian?.state === "RESTARTING") return;
@@ -389,15 +395,21 @@ export class Daemon extends EventEmitter {
         if (!alive) return;
 
         const pane = await this.tmux.capturePane();
+
+        // State: waiting for recovery — check if agent is back to ready
+        if (this.errorWaitingForRecovery) {
+          if (readyPattern.test(pane)) {
+            this.errorWaitingForRecovery = false;
+            this.logger.info("PTY error recovered — agent is ready again");
+          }
+          return; // Don't check for errors while waiting for recovery
+        }
+
+        // State: monitoring — check for new errors
         for (const ep of patterns) {
           if (!ep.pattern.test(pane)) continue;
 
-          // Deduplicate: skip if same error detected recently
-          const now = Date.now();
-          if (this.lastDetectedError === ep.type && now - this.lastErrorAt < ERROR_COOLDOWN_MS) continue;
-          this.lastDetectedError = ep.type;
-          this.lastErrorAt = now;
-
+          this.errorWaitingForRecovery = true;
           this.logger.warn({ errorType: ep.type, action: ep.action }, `PTY error detected: ${ep.message}`);
           this.emit("pty_error", { name: this.name, ...ep });
 
@@ -763,6 +775,18 @@ export class Daemon extends EventEmitter {
     }
 
     const adapter = adapters[0];
+
+    // Auto-correct invalid chat_id: some models (e.g. minimax) confuse topic_id with chat_id.
+    // Valid Telegram group chat_ids are negative numbers starting with -100.
+    if (args.chat_id && this.lastChatId) {
+      const cid = String(args.chat_id);
+      if (!cid.startsWith("-") && this.lastChatId.startsWith("-")) {
+        this.logger.warn({ given: cid, corrected: this.lastChatId }, "Auto-corrected invalid chat_id from model");
+        args.chat_id = this.lastChatId;
+      }
+    } else if (!args.chat_id && this.lastChatId) {
+      args.chat_id = this.lastChatId;
+    }
 
     if (!routeToolCall(adapter, tool, args, this.lastThreadId, respond)) {
       respond(null, `Unknown tool: ${tool}`);
