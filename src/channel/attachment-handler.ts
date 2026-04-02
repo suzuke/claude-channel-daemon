@@ -28,6 +28,7 @@ export async function processAttachments(
     try {
       const localPath = await adapter.downloadAttachment(photoAttachment.fileId);
       extraMeta.image_path = localPath;
+      text = `[📷 Image: ${localPath}]\n${text}`;
     } catch (err) {
       logger.warn({ err: (err as Error).message }, "Photo download failed");
     }
