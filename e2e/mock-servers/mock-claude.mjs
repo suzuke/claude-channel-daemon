@@ -3,10 +3,11 @@
  * Mock CLI backend for E2E testing.
  *
  * Replaces the real claude/gemini/codex CLI. It:
- * 1. Spawns the real agend MCP server as a child (stdio inherited for debug)
- * 2. Writes periodic statusline.json updates
- * 3. Reads stdin for inbound messages from daemon
- * 4. Outputs "MOCK_READY" once MCP server is connected
+ * 1. Spawns the real agend MCP server as a child (JSON-RPC over stdio)
+ * 2. Initializes MCP protocol handshake
+ * 3. Writes periodic statusline.json updates
+ * 4. On inbound messages, calls the `reply` MCP tool via JSON-RPC
+ * 5. Outputs "MOCK_READY" once MCP server is connected
  *
  * Environment variables:
  *   AGEND_SOCKET_PATH  — path to daemon's Unix socket (required)
@@ -18,7 +19,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { writeFileSync, existsSync, readFileSync, watchFile, unwatchFile } from "node:fs";
+import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
@@ -39,7 +40,7 @@ if (!SOCKET_PATH || !INSTANCE_NAME || !INSTANCE_DIR) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Find and spawn the real MCP server
+// 1. Find and spawn the real MCP server (JSON-RPC over stdio)
 // ---------------------------------------------------------------------------
 
 const projectRoot = join(__dirname, "..", "..");
@@ -63,10 +64,9 @@ if (existsSync(mcpConfigPath)) {
 
 const runner = mcpServerPath.endsWith(".ts") ? "tsx" : "node";
 
-// Fix #2: inherit stdout so MCP server's JSON-RPC output doesn't fill pipe buffer.
-// In mock mode, no real AI reads the stdio transport — inheriting is safe and helps debug.
+// Pipe both stdin and stdout for JSON-RPC communication
 const mcpChild = spawn(runner, [mcpServerPath], {
-  stdio: ["pipe", "inherit", "inherit"],
+  stdio: ["pipe", "pipe", "inherit"],
   env: {
     ...process.env,
     ...mcpEnv,
@@ -84,7 +84,82 @@ mcpChild.on("exit", (code) => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. Write periodic statusline.json (matching real Claude Code format)
+// 2. MCP JSON-RPC protocol layer
+// ---------------------------------------------------------------------------
+
+let jsonrpcId = 0;
+const pendingRequests = new Map();
+let mcpInitialized = false;
+
+// Read JSON-RPC responses from MCP server stdout
+const mcpRl = createInterface({ input: mcpChild.stdout });
+mcpRl.on("line", (line) => {
+  try {
+    const msg = JSON.parse(line);
+    if (msg.id != null && pendingRequests.has(msg.id)) {
+      const { resolve } = pendingRequests.get(msg.id);
+      pendingRequests.delete(msg.id);
+      resolve(msg);
+    }
+  } catch {
+    // Not JSON — ignore (debug output, etc.)
+  }
+});
+
+function mcpRequest(method, params = {}) {
+  return new Promise((resolve, reject) => {
+    const id = ++jsonrpcId;
+    const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+    const timer = setTimeout(() => {
+      pendingRequests.delete(id);
+      reject(new Error(`MCP request ${method} timed out`));
+    }, 15_000);
+    pendingRequests.set(id, {
+      resolve: (resp) => { clearTimeout(timer); resolve(resp); },
+      reject: (err) => { clearTimeout(timer); reject(err); },
+    });
+    mcpChild.stdin.write(msg + "\n");
+  });
+}
+
+function mcpNotify(method, params = {}) {
+  const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
+  mcpChild.stdin.write(msg + "\n");
+}
+
+async function initializeMcp() {
+  try {
+    await mcpRequest("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "mock-claude", version: "1.0.0" },
+    });
+    mcpNotify("notifications/initialized");
+    mcpInitialized = true;
+    process.stderr.write("mock-claude: MCP protocol initialized\n");
+  } catch (err) {
+    process.stderr.write(`mock-claude: MCP initialize failed: ${err.message}\n`);
+  }
+}
+
+async function callReplyTool(text) {
+  if (!mcpInitialized) {
+    process.stderr.write("mock-claude: MCP not initialized, skipping reply\n");
+    return;
+  }
+  try {
+    const resp = await mcpRequest("tools/call", {
+      name: "reply",
+      arguments: { text },
+    });
+    process.stderr.write(`mock-claude: reply tool result: ${JSON.stringify(resp.result ?? resp.error)}\n`);
+  } catch (err) {
+    process.stderr.write(`mock-claude: reply tool call failed: ${err.message}\n`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Write periodic statusline.json (matching real Claude Code format)
 // ---------------------------------------------------------------------------
 
 let contextPct = MOCK_CONTEXT_PCT;
@@ -111,7 +186,7 @@ writeStatusline();
 const statusTimer = setInterval(writeStatusline, 5000);
 
 // ---------------------------------------------------------------------------
-// 3. Handle stdin (daemon sends messages to the CLI via tmux sendKeys)
+// 4. Handle stdin (daemon sends messages to the CLI via tmux sendKeys)
 // ---------------------------------------------------------------------------
 
 const rl = createInterface({ input: process.stdin });
@@ -123,12 +198,12 @@ rl.on("line", (line) => {
   process.stderr.write(`mock-claude: received input: ${trimmed.slice(0, 100)}\n`);
 
   setTimeout(() => {
-    process.stdout.write(`${MOCK_RESPONSE}\n`);
+    callReplyTool(MOCK_RESPONSE);
   }, MOCK_DELAY);
 });
 
 // ---------------------------------------------------------------------------
-// 4. Signal ready — wait for channel.sock to appear (MCP server connected)
+// 5. Signal ready — wait for channel.sock + initialize MCP
 // ---------------------------------------------------------------------------
 
 function signalReady() {
@@ -136,15 +211,13 @@ function signalReady() {
   process.stderr.write("mock-claude: ready\n");
 }
 
-// Poll for channel.sock existence (MCP server creates IPC connection)
 const READY_TIMEOUT = parseInt(process.env.MOCK_READY_TIMEOUT ?? "10000", 10) || 10_000;
 let readySignaled = false;
 const readyTimeout = setTimeout(() => {
-  // Fallback: signal ready after timeout even if socket not found
   if (!readySignaled) {
     readySignaled = true;
     process.stderr.write("mock-claude: timeout waiting for channel.sock, signaling ready anyway\n");
-    signalReady();
+    initializeMcp().then(signalReady);
   }
 }, READY_TIMEOUT);
 
@@ -157,13 +230,15 @@ const socketCheckInterval = setInterval(() => {
     readySignaled = true;
     clearInterval(socketCheckInterval);
     clearTimeout(readyTimeout);
-    // Give MCP server a moment to complete IPC handshake
-    setTimeout(signalReady, 200);
+    // Give MCP server a moment to complete IPC handshake, then initialize MCP protocol
+    setTimeout(() => {
+      initializeMcp().then(signalReady);
+    }, 200);
   }
 }, 200);
 
 // ---------------------------------------------------------------------------
-// 5. Cleanup on exit — wait for child to exit
+// 6. Cleanup on exit — wait for child to exit
 // ---------------------------------------------------------------------------
 
 function cleanup() {
@@ -185,7 +260,7 @@ process.on("SIGTERM", () => gracefulExit(0));
 process.on("SIGINT", () => gracefulExit(0));
 
 // ---------------------------------------------------------------------------
-// 6. Runtime control via file (tests can adjust behavior)
+// 7. Runtime control via file (tests can adjust behavior)
 // ---------------------------------------------------------------------------
 
 const controlFile = join(INSTANCE_DIR, "mock-control.json");
