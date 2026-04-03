@@ -1,6 +1,7 @@
 /**
  * Shared utilities for E2E mock servers and test helpers.
  */
+import { createServer as createNetServer } from "node:net";
 
 /** Wait for a condition to become true, polling at interval. Exceptions in fn are treated as false. */
 export async function waitFor(
@@ -27,6 +28,18 @@ export async function waitFor(
 /** Sleep for ms milliseconds. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Find a free port by binding to 0 and releasing. */
+export function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createNetServer();
+    srv.listen(0, () => {
+      const port = (srv.address() as { port: number }).port;
+      srv.close(() => resolve(port));
+    });
+    srv.on("error", reject);
+  });
 }
 
 /** Cache for VM IPs to avoid repeated `tart ip` calls. */

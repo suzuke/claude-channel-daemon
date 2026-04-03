@@ -13,28 +13,15 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
 
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { createServer } from "node:net";
 import yaml from "js-yaml";
 import { createTelegramMock, type TelegramMock } from "../mock-servers/telegram-mock.js";
-import { waitFor, sleep } from "../mock-servers/shared.js";
+import { waitFor, sleep, getFreePort } from "../mock-servers/shared.js";
 import { TmuxManager } from "../../src/tmux-manager.js";
 import { FleetManager } from "../../src/fleet-manager.js";
 
 const TEST_GROUP_ID = -1001234567890;
 const TEST_USER_ID = 111222333;
 const TMUX_SESSION = `agend-e2e-${process.pid}`;
-
-/** Find a free port by binding to 0 and releasing. */
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, () => {
-      const port = (srv.address() as { port: number }).port;
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
 
 let telegramMock: TelegramMock;
 let telegramMockPort: number;
@@ -199,6 +186,105 @@ describe("Fleet Lifecycle E2E (B Layer)", () => {
       { timeout: 10_000, label: "health endpoint" },
     );
   });
+
+  // --- Phase 2b: Message routing ---
+
+  it("T5: message routed to correct instance via topic_id", async () => {
+    // Reset to isolate this test's calls
+    const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
+
+    // Inject message to alpha's topic (topic_id: 42)
+    telegramMock.injectMessage({
+      text: "Hello alpha",
+      chatId: TEST_GROUP_ID,
+      userId: TEST_USER_ID,
+      username: "testuser",
+      threadId: 42,
+    });
+
+    // Wait for bot to reply in alpha's topic
+    await waitFor(
+      () => {
+        const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
+        return sends.some(
+          (c) => String(c.params.message_thread_id) === "42",
+        );
+      },
+      { timeout: 30_000, label: "sendMessage to alpha topic" },
+    );
+
+    const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
+    const alphaReply = sends.find(
+      (c) => String(c.params.message_thread_id) === "42",
+    );
+    expect(alphaReply).toBeDefined();
+    expect(String(alphaReply!.params.chat_id)).toBe(String(TEST_GROUP_ID));
+  }, 60_000);
+
+  it("T5: message to beta topic routes to beta, not alpha", async () => {
+    const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
+
+    telegramMock.injectMessage({
+      text: "Hello beta",
+      chatId: TEST_GROUP_ID,
+      userId: TEST_USER_ID,
+      username: "testuser",
+      threadId: 87,
+    });
+
+    await waitFor(
+      () => {
+        const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
+        return sends.some(
+          (c) => String(c.params.message_thread_id) === "87",
+        );
+      },
+      { timeout: 30_000, label: "sendMessage to beta topic" },
+    );
+
+    const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
+    const betaReply = sends.find(
+      (c) => String(c.params.message_thread_id) === "87",
+    );
+    expect(betaReply).toBeDefined();
+    expect(String(betaReply!.params.chat_id)).toBe(String(TEST_GROUP_ID));
+
+    // Negative assertion: alpha should NOT receive this message's reply
+    const alphaMisroute = sends.find(
+      (c) => String(c.params.message_thread_id) === "42",
+    );
+    expect(alphaMisroute).toBeUndefined();
+  }, 60_000);
+
+  it("T6: reply contains mock backend response text", async () => {
+    const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
+
+    telegramMock.injectMessage({
+      text: "ping",
+      chatId: TEST_GROUP_ID,
+      userId: TEST_USER_ID,
+      username: "testuser",
+      threadId: 42,
+    });
+
+    await waitFor(
+      () => {
+        const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
+        return sends.some(
+          (c) => String(c.params.message_thread_id) === "42" && typeof c.params.text === "string",
+        );
+      },
+      { timeout: 30_000, label: "reply text from mock backend" },
+    );
+
+    const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
+    const reply = sends.find(
+      (c) => String(c.params.message_thread_id) === "42" && typeof c.params.text === "string",
+    );
+    expect(reply).toBeDefined();
+    expect(typeof reply!.params.text).toBe("string");
+    expect((reply!.params.text as string).length).toBeGreaterThan(0);
+  }, 60_000);
 
   // --- Phase 3: Fleet shutdown ---
 
