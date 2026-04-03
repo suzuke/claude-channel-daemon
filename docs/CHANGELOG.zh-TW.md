@@ -6,6 +6,25 @@
 
 ## [未發佈] (Unreleased)
 
+### 新增
+- Fleet 事件（輪轉、懸掛、成本警報）的 Webhook 通知
+- 用於外部監控的 HTTP 健康檢查端點 (`/health`, `/status`)
+- 在 Context 輪轉時具有驗證與重試機制的結構化交接範本
+- 權限中繼 UX 改進（逾時倒數、持久化的「一律允許」、決定後的回饋）
+- 主題圖示自動更新（執行中/已停止）+ 閒置封存
+- 過濾 Telegram 服務訊息（主題重新命名、置頂等）以節省 token
+
+### 修復
+- 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
+
+## [1.9.1] - 2026-04-03
+
+### 修復
+- Health-check 重新啟動時注入 session snapshot — 崩潰/kill 恢復也能還原 context
+- Snapshot 貼入時附加「不要回覆」指令，防止模型嘗試 IPC 回覆導致逾時
+
+## [1.9.0] - 2026-04-03
+
 ### 破壞性變更
 - **System prompt 注入改為 MCP instructions。** Fleet context、自訂 `systemPrompt`、協作規則現在透過 MCP server instructions 注入，不再使用 CLI 的 `--system-prompt` 等 flag。變更原因：
   - Claude Code：`--system-prompt` 傳了檔案路徑而非檔案內容 — fleet prompt **自始至終都沒有正確注入**
@@ -19,16 +38,11 @@
   - Active Decisions 不再預載到 system prompt — 改用 `list_decisions` 工具按需查詢
   - Session snapshot（context rotation 接續）改為第一則 inbound 訊息送入（`[system:session-snapshot]`），不再嵌入 system prompt
 
-### 新增
-- Fleet 事件（輪轉、懸掛、成本警報）的 Webhook 通知
-- 用於外部監控的 HTTP 健康檢查端點 (`/health`, `/status`)
-- 在 Context 輪轉時具有驗證與重試機制的結構化交接範本
-- 權限中繼 UX 改進（逾時倒數、持久化的「一律允許」、決定後的回饋）
-- 主題圖示自動更新（執行中/已停止）+ 閒置封存
-- 過濾 Telegram 服務訊息（主題重新命名、置頂等）以節省 token
+## [1.8.5] - 2026-04-03
 
 ### 修復
-- 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
+- 統一 log 與通知格式為 `sender → receiver: summary` 風格，適用於所有跨 instance 訊息
+- Task/query 通知顯示完整訊息內容；report/update 通知僅顯示摘要
 
 ## [1.8.4] - 2026-04-03
 

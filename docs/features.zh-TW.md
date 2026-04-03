@@ -41,15 +41,12 @@ NORMAL → RESTARTING → GRACE
 
 **核心 MCP 工具：**
 
-- `list_instances` — 發現所有配置的實例（執行中或已停止），包括狀態、工作目錄、標籤和最後活動
+- `list_instances` — 發現所有配置的實例（執行中或已停止），包括狀態、工作目錄和最後活動
 - `send_to_instance` — 向另一個實例或外部 session 發送訊息；支援結構化元數據 (`request_kind`、`requires_reply`、`correlation_id`、`task_summary`)
 - `start_instance` — 喚醒已停止的實例，以便您可以向其發送訊息
-- `create_instance` — 從專案目錄建立帶有主題的新實例（支援 `--branch` 用於 git worktree 隔離）
+- `create_instance` — 建立帶有主題的新實例（目錄選填；省略時自動建立 `~/.agend/workspaces/<name>`）；支援 `branch` 用於 git worktree 隔離
 - `delete_instance` — 移除實例及其主題
-- `describe_instance` — 獲取有關特定實例的詳細資訊（描述、標籤、模型、最後活動）
-
-**廣播工具 (Broadcast tool)：**
-- `broadcast` — 一次向多個實例發送訊息。支援按標籤 (tags) 過濾或發送給所有在線實例。
+- `describe_instance` — 獲取有關特定實例的詳細資訊（描述、模型、最後活動）
 
 **高階協作工具**（優於原始的 `send_to_instance`）：
 
@@ -57,7 +54,15 @@ NORMAL → RESTARTING → GRACE
 - `delegate_task` — 指派工作給另一個實例並附帶成功標準 (`request_kind=task`、`requires_reply=true`)
 - `report_result` — 向請求者返回結果，回應 `correlation_id` 以將回應與其請求連結
 
-訊息會發佈到接收者的 Telegram 主題以提高可見性。發送者主題通知僅針對實例間訊息發佈（不針對外部 session）。
+**Team 工具**（對 instance 群組操作）：
+
+- `create_team` — 定義具名的 instance 群組
+- `list_teams` — 列出所有 team 及其成員
+- `update_team` — 新增/移除成員或更新描述
+- `delete_team` — 移除 team 定義
+- `broadcast(team: "name", ...)` — 向指定 team 的所有成員發送訊息
+
+當一個 instance 發訊息給另一個時，目標的 topic 會顯示通知：`sender → receiver: summary`。General Topic instance 不會收到這些通知，以降低噪音。
 
 如果您對已停止的實例執行 `send_to_instance`，錯誤會提示您先使用 `start_instance()` — agent 會在無需人工介入的情況下自我修正。
 

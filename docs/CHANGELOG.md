@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Webhook notifications for fleet events (rotation, hang, cost alerts)
+- HTTP health endpoint (`/health`, `/status`) for external monitoring
+- Structured handover template with validation and retry on context rotation
+- Permission relay UX improvements (timeout countdown, "Always Allow" persistence, post-decision feedback)
+- Topic icon auto-update (running/stopped) + idle archive
+- Filter out Telegram service messages (topic rename, pin, etc.) to save tokens
+
+### Fixed
+- Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
+
+## [1.9.1] - 2026-04-03
+
+### Fixed
+- Session snapshot now injected on health-check respawn — crash/kill recovery also gets context restored
+- Snapshot paste includes "do NOT reply" instruction to prevent model from attempting an IPC reply that times out
+
+## [1.9.0] - 2026-04-03
+
 ### Breaking Changes
 - **System prompt injection replaced with MCP instructions.** Fleet context, custom `systemPrompt`, and collaboration rules are now injected via MCP server instructions instead of CLI `--system-prompt` flags. This change was necessary because:
   - Claude Code: `--system-prompt` was passed a file path as literal text instead of file contents — the fleet prompt was **never correctly injected** since inception
@@ -19,16 +38,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Active Decisions are no longer preloaded into the system prompt — use `list_decisions` tool on demand
   - Session snapshots (context rotation) are now delivered as the first inbound message (`[system:session-snapshot]`) instead of being embedded in the system prompt
 
-### Added
-- Webhook notifications for fleet events (rotation, hang, cost alerts)
-- HTTP health endpoint (`/health`, `/status`) for external monitoring
-- Structured handover template with validation and retry on context rotation
-- Permission relay UX improvements (timeout countdown, "Always Allow" persistence, post-decision feedback)
-- Topic icon auto-update (running/stopped) + idle archive
-- Filter out Telegram service messages (topic rename, pin, etc.) to save tokens
+## [1.8.5] - 2026-04-03
 
 ### Fixed
-- Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
+- Unified log and notification format to `sender → receiver: summary` style across all cross-instance messages
+- Task/query notifications now show the full message body; report/update notifications show only the summary
 
 ## [1.8.4] - 2026-04-03
 

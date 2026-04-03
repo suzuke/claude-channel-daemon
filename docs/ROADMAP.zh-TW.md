@@ -1,6 +1,6 @@
 # AgEnD 發展藍圖
 
-> 最後更新：2026-04-03 (v1.8.4)
+> 最後更新：2026-04-03 (v1.9.1)
 > 由多代理共識產出：Claude Code, Codex, Gemini CLI, OpenCode
 
 ## 已完成 (v1.0–v1.3)

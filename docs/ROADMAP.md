@@ -1,6 +1,6 @@
 # AgEnD Roadmap
 
-> Last updated: 2026-04-03 (v1.8.4)
+> Last updated: 2026-04-03 (v1.9.1)
 > Produced by multi-agent consensus: Claude Code, Codex, Gemini CLI, OpenCode
 
 ## Completed (v1.0–v1.3)
