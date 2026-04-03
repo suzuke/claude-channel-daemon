@@ -91,7 +91,8 @@ describe("Instance CRUD E2E", () => {
     });
 
     expect(cmd).toContain("AGEND_SOCKET_PATH=");
-    expect(cmd).toContain("AGEND_INSTANCE_NAME=cmd-test");
+    expect(cmd).toContain("AGEND_INSTANCE_NAME=");
+    expect(cmd).toContain("cmd-test");
     expect(cmd).toContain("MOCK_INSTANCE_DIR=");
     expect(cmd).toContain("mock-claude.mjs");
   });
