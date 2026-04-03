@@ -37,7 +37,7 @@ import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
 import { StatuslineWatcher, type StatuslineWatcherContext } from "./statusline-watcher.js";
 import { outboundHandlers, type OutboundContext } from "./outbound-handlers.js";
 
-import { TMUX_SESSION } from "./config.js";
+import { getTmuxSession } from "./config.js";
 
 export function resolveReplyThreadId(
   argsThreadId: unknown,
@@ -206,11 +206,11 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     const fleet = this.loadConfig(configPath);
     const topicMode = fleet.channel?.mode === "topic";
 
-    await TmuxManager.ensureSession(TMUX_SESSION);
+    await TmuxManager.ensureSession(getTmuxSession());
 
     // Start tmux control mode client for idle detection
     if (!this.controlClient) {
-      this.controlClient = new TmuxControlClient(TMUX_SESSION, 2000, this.logger);
+      this.controlClient = new TmuxControlClient(getTmuxSession(), 2000, this.logger);
       this.controlClient.start();
     }
     // Stop any running daemons first (their health checks would respawn killed windows)
@@ -219,10 +219,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }
 
     // Then kill all remaining agend instance windows to prevent orphans
-    const existingWindows = await TmuxManager.listWindows(TMUX_SESSION);
+    const existingWindows = await TmuxManager.listWindows(getTmuxSession());
     for (const w of existingWindows) {
       if (w.name !== "zsh") {
-        const tm = new TmuxManager(TMUX_SESSION, w.id);
+        const tm = new TmuxManager(getTmuxSession(), w.id);
         await tm.killWindow();
       }
     }

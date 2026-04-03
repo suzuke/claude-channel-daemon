@@ -13,7 +13,7 @@ import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import type { CliBackend, CliBackendConfig, ErrorPattern } from "./backend/types.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
-import { TMUX_SESSION } from "./config.js";
+import { getTmuxSession } from "./config.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { HangDetector } from "./hang-detector.js";
 import type { TmuxControlClient } from "./tmux-control.js";
@@ -79,7 +79,7 @@ export class Daemon extends EventEmitter {
   ) {
     super();
     this.logger = createLogger(config.log_level);
-    this.tmuxSessionName = TMUX_SESSION;
+    this.tmuxSessionName = getTmuxSession();
     this.messageBus = new MessageBus();
     this.messageBus.setLogger(this.logger);
   }
