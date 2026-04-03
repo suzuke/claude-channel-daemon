@@ -321,13 +321,6 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       this.saveFleetConfig();
     }
 
-    const instanceEntries = Object.entries(fleet.instances);
-    for (const [name, config] of instanceEntries) {
-      await this.startInstance(name, config, topicMode).catch(err =>
-        this.logger.error({ err, name }, "Failed to start instance")
-      );
-    }
-
     if (topicMode && fleet.channel) {
       const schedulerConfig: SchedulerConfig = {
         ...DEFAULT_SCHEDULER_CONFIG,
@@ -342,6 +335,16 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       );
       this.scheduler.init();
       this.logger.info("Scheduler initialized");
+    }
+
+    const instanceEntries = Object.entries(fleet.instances);
+    for (const [name, config] of instanceEntries) {
+      await this.startInstance(name, config, topicMode).catch(err =>
+        this.logger.error({ err, name }, "Failed to start instance")
+      );
+    }
+
+    if (topicMode && fleet.channel) {
 
       await this.startSharedAdapter(fleet);
 
