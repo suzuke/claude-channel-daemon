@@ -42,13 +42,13 @@ for cmd in tart sshpass; do
 done
 
 # Check if golden image already exists
-if tart list | grep -q "^${GOLDEN_IMAGE}$" && [[ "$FORCE" != "true" ]]; then
+if tart list --quiet | grep -q "^${GOLDEN_IMAGE}$" && [[ "$FORCE" != "true" ]]; then
   echo "✅ Golden image '${GOLDEN_IMAGE}' already exists. Use --force to rebuild."
   exit 0
 fi
 
 # Clean up existing image if force rebuild
-if tart list | grep -q "^${GOLDEN_IMAGE}$"; then
+if tart list --quiet | grep -q "^${GOLDEN_IMAGE}$"; then
   echo "🗑️  Deleting existing golden image..."
   tart delete "$GOLDEN_IMAGE" || true
 fi

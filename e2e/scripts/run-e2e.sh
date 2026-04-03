@@ -32,18 +32,20 @@ for arg in "$@"; do
 done
 
 cleanup() {
-  if [[ "$NO_VM" == "false" && "$KEEP_VM" == "false" ]]; then
+  if [[ "$NO_VM" == "false" ]]; then
     echo "🧹 Cleaning up VM..."
     tart stop "$TEST_VM" 2>/dev/null || true
     [[ -n "$VM_PID" ]] && kill "$VM_PID" 2>/dev/null || true
-    tart delete "$TEST_VM" 2>/dev/null || true
+    if [[ "$KEEP_VM" == "false" ]]; then
+      tart delete "$TEST_VM" 2>/dev/null || true
+    fi
   fi
 }
 trap cleanup EXIT INT TERM
 
 if [[ "$NO_VM" == "false" ]]; then
   # Ensure golden image exists
-  if ! tart list 2>/dev/null | grep -q "^${GOLDEN_IMAGE}$"; then
+  if ! tart list --quiet 2>/dev/null | grep -q "^${GOLDEN_IMAGE}$"; then
     echo "📦 Golden image not found. Building..."
     "$SCRIPT_DIR/../vm-setup/setup-vm.sh"
   fi
