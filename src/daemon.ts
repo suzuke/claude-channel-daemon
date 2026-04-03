@@ -377,6 +377,7 @@ export class Daemon extends EventEmitter {
           await this.spawnClaudeWindow();
           await this.injectSnapshotMessage();
           this.logger.info("Respawned Claude window after crash");
+          this.emit("crash_respawn", this.name);
         } catch (err) {
           this.logger.error({ err }, "Failed to respawn Claude window");
         }

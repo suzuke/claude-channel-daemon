@@ -94,6 +94,16 @@ export class InstanceLifecycle {
       }, this.ctx.logger, `hangDetector[${name}]`));
     }
 
+    daemon.on("crash_respawn", safeHandler(() => {
+      this.ctx.eventLog?.insert(name, "crash_respawn", {});
+      this.ctx.logger.warn({ name }, "Instance crashed and respawned");
+      this.ctx.notifyInstanceTopic(name, `⚠️ ${name} crashed and respawned.`);
+      const generalName = this.findGeneralInstance();
+      if (generalName && generalName !== name) {
+        this.ctx.notifyInstanceTopic(generalName, `⚠️ ${name} crashed and respawned. Check ~/.agend/daemon.log for details.`);
+      }
+    }, this.ctx.logger, `daemon.crash_respawn[${name}]`));
+
     daemon.on("crash_loop", safeHandler(() => {
       this.ctx.eventLog?.insert(name, "crash_loop", {});
       this.ctx.logger.error({ name }, "Instance in crash loop — respawn paused");
@@ -415,5 +425,13 @@ export class InstanceLifecycle {
 
   has(name: string): boolean {
     return this.daemons.has(name);
+  }
+
+  private findGeneralInstance(): string | undefined {
+    const instances = this.ctx.fleetConfig?.instances ?? {};
+    for (const [n, config] of Object.entries(instances)) {
+      if (config.general_topic) return n;
+    }
+    return undefined;
   }
 }
