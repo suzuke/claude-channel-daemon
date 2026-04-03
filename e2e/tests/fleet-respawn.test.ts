@@ -16,30 +16,18 @@ import {
   existsSync,
   readFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
 import yaml from "js-yaml";
 import {
   createTelegramMock,
   type TelegramMock,
 } from "../mock-servers/telegram-mock.js";
-import { waitFor, sleep } from "../mock-servers/shared.js";
+import { waitFor, sleep, getFreePort } from "../mock-servers/shared.js";
 import { TmuxManager } from "../../src/tmux-manager.js";
 import { FleetManager } from "../../src/fleet-manager.js";
 
 const TEST_GROUP_ID = -1001234567890;
 const TEST_USER_ID = 111222333;
 const TMUX_SESSION = `agend-respawn-${process.pid}`;
-
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, () => {
-      const port = (srv.address() as { port: number }).port;
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
 
 let telegramMock: TelegramMock;
 let telegramMockPort: number;
@@ -172,6 +160,8 @@ describe("Fleet Respawn E2E", () => {
 
     // Wait for respawn: health check runs every 30s, then backoff (1s linear).
     // New statusline.json should have a different session_id after respawn.
+    // Clean up control file as soon as new session appears to prevent re-crash.
+    let cleaned = false;
     await waitFor(
       () => {
         try {
@@ -180,10 +170,14 @@ describe("Fleet Respawn E2E", () => {
             "utf-8",
           );
           const status = JSON.parse(raw);
-          return (
+          const respawned =
             status.session_id !== sessionBefore &&
-            status.session_id.startsWith("mock-crasher-")
-          );
+            status.session_id.startsWith("mock-crasher-");
+          if (respawned && !cleaned) {
+            rmSync(join(instanceDir, "mock-control.json"), { force: true });
+            cleaned = true;
+          }
+          return respawned;
         } catch {
           return false;
         }
@@ -197,13 +191,6 @@ describe("Fleet Respawn E2E", () => {
     );
     expect(statusAfter.session_id).not.toBe(sessionBefore);
     expect(statusAfter.session_id).toMatch(/^mock-crasher-/);
-
-    // Clean up control file
-    try {
-      rmSync(join(instanceDir, "mock-control.json"), { force: true });
-    } catch {
-      /* ignore */
-    }
   }, 90_000);
 
   it("T7: respawned instance responds to messages", async () => {

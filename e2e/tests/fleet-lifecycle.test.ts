@@ -13,28 +13,15 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
 
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { createServer } from "node:net";
 import yaml from "js-yaml";
 import { createTelegramMock, type TelegramMock } from "../mock-servers/telegram-mock.js";
-import { waitFor, sleep } from "../mock-servers/shared.js";
+import { waitFor, sleep, getFreePort } from "../mock-servers/shared.js";
 import { TmuxManager } from "../../src/tmux-manager.js";
 import { FleetManager } from "../../src/fleet-manager.js";
 
 const TEST_GROUP_ID = -1001234567890;
 const TEST_USER_ID = 111222333;
 const TMUX_SESSION = `agend-e2e-${process.pid}`;
-
-/** Find a free port by binding to 0 and releasing. */
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, () => {
-      const port = (srv.address() as { port: number }).port;
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
 
 let telegramMock: TelegramMock;
 let telegramMockPort: number;
@@ -261,6 +248,12 @@ describe("Fleet Lifecycle E2E (B Layer)", () => {
     );
     expect(betaReply).toBeDefined();
     expect(String(betaReply!.params.chat_id)).toBe(String(TEST_GROUP_ID));
+
+    // Negative assertion: alpha should NOT receive this message's reply
+    const alphaMisroute = sends.find(
+      (c) => String(c.params.message_thread_id) === "42",
+    );
+    expect(alphaMisroute).toBeUndefined();
   }, 60_000);
 
   it("T6: reply contains mock backend response text", async () => {
@@ -283,6 +276,14 @@ describe("Fleet Lifecycle E2E (B Layer)", () => {
       },
       { timeout: 30_000, label: "reply text from mock backend" },
     );
+
+    const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
+    const reply = sends.find(
+      (c) => String(c.params.message_thread_id) === "42" && typeof c.params.text === "string",
+    );
+    expect(reply).toBeDefined();
+    expect(typeof reply!.params.text).toBe("string");
+    expect((reply!.params.text as string).length).toBeGreaterThan(0);
   }, 60_000);
 
   // --- Phase 3: Fleet shutdown ---
