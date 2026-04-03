@@ -85,18 +85,15 @@ const sendToInstance: Handler = (ctx, args, respond, meta) => {
 
   targetIpc.send({ type: "fleet_inbound", targetSession, content: message, meta: ipcMeta });
 
-  // Post to channel topics for visibility
+  // Post a one-line summary to the target topic only (full message delivered via IPC)
   const groupId = ctx.fleetConfig?.channel?.group_id;
   if (groupId && ctx.adapter) {
-    const senderTopicId = ctx.fleetConfig?.instances[meta.instanceName]?.topic_id;
     const targetTopicId = ctx.fleetConfig?.instances[targetInstanceName]?.topic_id;
-    if (senderTopicId && !isExternalSender) {
-      ctx.adapter.sendText(String(groupId), `→ ${targetName}:\n${message}`, {
-        threadId: String(senderTopicId),
-      }).catch(e => ctx.logger.warn({ err: e }, "Failed to post cross-instance notification"));
-    }
     if (targetTopicId && !ctx.sessionRegistry.has(targetName)) {
-      ctx.adapter.sendText(String(groupId), `← ${senderLabel}:\n${message}`, {
+      const visibilityText = ipcMeta.task_summary
+        ? `← ${senderLabel}: ${ipcMeta.task_summary}`
+        : `← ${senderLabel}: ${message.slice(0, 100)}${message.length > 100 ? "…" : ""}`;
+      ctx.adapter.sendText(String(groupId), visibilityText, {
         threadId: String(targetTopicId),
       }).catch(e => ctx.logger.warn({ err: e }, "Failed to post cross-instance notification"));
     }
