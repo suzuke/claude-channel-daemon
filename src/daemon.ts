@@ -565,9 +565,7 @@ export class Daemon extends EventEmitter {
     if (fromInstance) {
       formatted = `[from:${fromInstance}] ${content}\n(Reply using send_to_instance tool, NOT direct text)`;
     } else {
-      const chatId = meta.chat_id || "";
-      const threadId = meta.thread_id || "";
-      formatted = `[user:${user} chat_id:${chatId} thread_id:${threadId}] ${content}\n(Reply using the reply tool with chat_id="${chatId}" — do NOT respond with direct text)`;
+      formatted = `[user:${user}] ${content}\n(Reply using the reply tool — do NOT respond with direct text)`;
     }
 
     // Serialize deliveries: each message waits for the previous to complete,
@@ -799,16 +797,15 @@ export class Daemon extends EventEmitter {
 
     const adapter = adapters[0];
 
-    // Auto-correct invalid chat_id: some models (e.g. minimax) confuse topic_id with chat_id.
-    // Valid Telegram group chat_ids are negative numbers starting with -100.
-    if (args.chat_id && this.lastChatId) {
-      const cid = String(args.chat_id);
-      if (!cid.startsWith("-") && this.lastChatId.startsWith("-")) {
-        this.logger.warn({ given: cid, corrected: this.lastChatId }, "Auto-corrected invalid chat_id from model");
-        args.chat_id = this.lastChatId;
+    // Context-bound routing: reply/react/edit_message always use the daemon's last known context.
+    // chat_id and thread_id are not exposed in the tool schema — daemon is solely responsible for routing.
+    if (["reply", "react", "edit_message"].includes(tool)) {
+      if (!this.lastChatId) {
+        respond(null, "No active chat context — awaiting inbound message");
+        return;
       }
-    } else if (!args.chat_id && this.lastChatId) {
       args.chat_id = this.lastChatId;
+      if (tool === "reply") args.thread_id = this.lastThreadId;
     }
 
     if (!routeToolCall(adapter, tool, args, this.lastThreadId, respond)) {

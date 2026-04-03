@@ -4,24 +4,15 @@ export const TOOLS = [
     {
       name: "reply",
       description:
-        "Reply on the channel. Pass chat_id and thread_id from the inbound <channel> block — never infer from topic_ids.",
+        "Reply on the channel. Routing is handled automatically — do not pass chat_id or thread_id.",
       inputSchema: {
         type: "object" as const,
         properties: {
-          chat_id: {
-            type: "string",
-            description: "chat_id from the inbound <channel> block. Do NOT use an instance's topic_id here.",
-          },
           text: { type: "string" },
           reply_to: {
             type: "string",
             description:
-              "Message ID to thread under. Use message_id from the inbound <channel> block.",
-          },
-          thread_id: {
-            type: "string",
-            description:
-              "Telegram topic thread ID. Use thread_id from the inbound <channel> block only. Never set this to an instance's topic_id from list_instances.",
+              "Message ID to thread under. Use message_id from the inbound block.",
           },
           files: {
             type: "array",
@@ -34,7 +25,7 @@ export const TOOLS = [
             description: "Rendering mode. Default: 'text'.",
           },
         },
-        required: ["chat_id", "text"],
+        required: ["text"],
       },
     },
     {
@@ -43,11 +34,10 @@ export const TOOLS = [
       inputSchema: {
         type: "object" as const,
         properties: {
-          chat_id: { type: "string" },
           message_id: { type: "string" },
           emoji: { type: "string" },
         },
-        required: ["chat_id", "message_id", "emoji"],
+        required: ["message_id", "emoji"],
       },
     },
     {
@@ -57,7 +47,6 @@ export const TOOLS = [
       inputSchema: {
         type: "object" as const,
         properties: {
-          chat_id: { type: "string" },
           message_id: { type: "string" },
           text: { type: "string" },
           format: {
@@ -66,7 +55,7 @@ export const TOOLS = [
             description: "Rendering mode. Default: 'text'.",
           },
         },
-        required: ["chat_id", "message_id", "text"],
+        required: ["message_id", "text"],
       },
     },
     {
