@@ -62,8 +62,6 @@ export class Daemon extends EventEmitter {
   private recentEvents: RotationSnapshotEvent[] = [];
   private recentToolActivity: string[] = [];
   private snapshotConsumed = false;
-  /** Callback to query active decisions for system prompt injection (set by fleet manager) */
-  getActiveDecisions?: () => Array<{ title: string; content: string; tags: string[]; scope: string }>;
   private pasteLock: Promise<void> = Promise.resolve();
   // PTY error pattern monitoring
   private errorMonitorTimer: ReturnType<typeof setInterval> | null = null;
@@ -1136,39 +1134,6 @@ export class Daemon extends EventEmitter {
       return null;
     }
   }
-
-  // ── Active Decisions: Prompt injection ─────────────────────
-
-  private buildDecisionsPrompt(): string | null {
-    if (!this.getActiveDecisions) return null;
-    try {
-      const decisions = this.getActiveDecisions();
-      if (decisions.length === 0) return null;
-
-      const BUDGET = 2000;
-      const lines: string[] = ["## Active Decisions"];
-      let used = lines[0].length;
-
-      for (const d of decisions) {
-        // listDecisions returns fleet-scoped first, then project-scoped
-        const scopePrefix = d.scope === "fleet" ? "[fleet] " : "";
-        const tagStr = d.tags.length ? `[${d.tags.join(", ")}] ` : "";
-        const line = `- ${scopePrefix}${tagStr}**${d.title}**: ${d.content}`;
-        if (used + line.length + 1 > BUDGET) {
-          lines.push(`\n(${decisions.length - (lines.length - 1)} more — use \`list_decisions\` to see all)`);
-          break;
-        }
-        lines.push(line);
-        used += line.length + 1;
-      }
-
-      return lines.join("\n");
-    } catch {
-      return null;
-    }
-  }
-
-  // ── Context Rotation v3: Prompt injection ─────────────────────
 
   // ── Repo Checkout ─────────────────────────────────────────
 

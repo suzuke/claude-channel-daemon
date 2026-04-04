@@ -1,6 +1,10 @@
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export class OpenCodeBackend implements CliBackend {
   readonly binaryName = "opencode";
@@ -56,7 +60,65 @@ export class OpenCodeBackend implements CliBackend {
     oc.mcp = mcp;
     delete oc.mcpServers;
 
+    // Write fleet instructions file for OpenCode to pick up
+    // (OpenCode doesn't inject MCP instructions into its system prompt)
+    const instructionsPath = join(this.instanceDir, "fleet-instructions.md");
+    writeFileSync(instructionsPath, this.buildInstructions(config));
+    const instructions = (oc.instructions ?? []) as string[];
+    if (!instructions.includes(instructionsPath)) {
+      instructions.push(instructionsPath);
+    }
+    oc.instructions = instructions;
+
     writeFileSync(configPath, JSON.stringify(oc, null, 2));
+  }
+
+  private buildInstructions(config: CliBackendConfig): string {
+    const name = config.instanceName;
+    const workDir = config.workingDirectory;
+    const env = config.mcpServers["agend"]?.env ?? {};
+    const displayName = env.AGEND_DISPLAY_NAME;
+    const description = env.AGEND_DESCRIPTION;
+
+    const sections: string[] = [];
+    sections.push(`# AgEnD Fleet Context\nYou are **${name}**, an instance in an AgEnD fleet.\nYour working directory is \`${workDir}\`.`);
+    if (displayName) {
+      sections.push(`Your display name is "${displayName}". Use this when introducing yourself.`);
+    }
+    if (description) {
+      sections.push(`## Role\n${description}`);
+    }
+    sections.push([
+      "## Message Format",
+      "- `[user:name]` — from a Telegram/Discord user → reply with the `reply` tool.",
+      "- `[from:instance-name]` — from another fleet instance → reply with `send_to_instance`, NOT the reply tool.",
+      "",
+      "**Always use the `reply` tool for ALL responses to users.** Do not respond directly in the terminal.",
+      "",
+      "## Collaboration Rules",
+      "1. Use fleet tools for cross-instance communication. Never assume direct file access to another instance's repo.",
+      "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
+      "3. Use list_instances to discover available instances before sending messages.",
+      "4. You only have direct access to files under your own working directory.",
+    ].join("\n"));
+
+    // Load workflow template
+    const workflowEnv = env.AGEND_WORKFLOW;
+    if (workflowEnv !== "false") {
+      let workflowContent: string | null = null;
+      if (workflowEnv) {
+        workflowContent = workflowEnv;
+      } else {
+        try {
+          workflowContent = readFileSync(join(__dirname, "../workflow-templates/default.md"), "utf-8");
+        } catch { /* not found */ }
+      }
+      if (workflowContent) {
+        sections.push(`## Development Workflow\n\n${workflowContent}`);
+      }
+    }
+
+    return sections.join("\n\n");
   }
 
   getReadyPattern(): RegExp {
@@ -82,7 +144,7 @@ export class OpenCodeBackend implements CliBackend {
   }
 
   cleanup(config: CliBackendConfig): void {
-    // Clean up instance-specific MCP entries from opencode.json
+    // Clean up instance-specific MCP entries and instructions from opencode.json
     try {
       const configPath = join(config.workingDirectory, "opencode.json");
       if (existsSync(configPath)) {
@@ -92,8 +154,14 @@ export class OpenCodeBackend implements CliBackend {
             delete oc.mcp[`${name}-${config.instanceName}`];
             delete oc.mcp[name]; // also clean old non-namespaced key
           }
-          writeFileSync(configPath, JSON.stringify(oc, null, 2));
         }
+        // Remove fleet instructions reference
+        const instructionsPath = join(this.instanceDir, "fleet-instructions.md");
+        if (Array.isArray(oc.instructions)) {
+          oc.instructions = oc.instructions.filter((p: string) => p !== instructionsPath);
+          if (oc.instructions.length === 0) delete oc.instructions;
+        }
+        writeFileSync(configPath, JSON.stringify(oc, null, 2));
       }
     } catch { /* best effort */ }
   }

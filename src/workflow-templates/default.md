@@ -29,7 +29,7 @@ Use **Shared Decisions** (`post_decision` / `list_decisions`) for:
 - Agreed-upon conventions (naming, patterns, tools)
 - Scope changes or priority shifts
 
-Decisions are fleet-wide context that survives context rotation.
+Decisions are fleet-wide context that survives context rotation. After context rotation, run `list_decisions` to reload fleet-wide decisions.
 
 ## Progress Tracking
 

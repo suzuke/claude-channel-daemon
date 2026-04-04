@@ -39,7 +39,6 @@ export interface LifecycleContext {
   webhookEmit(event: string, name: string, data?: Record<string, unknown>): void;
   checkModelFailover(name: string, fiveHourPct: number): void;
   startStatuslineWatcher(name: string): void;
-  getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[]; scope: string }>;
 }
 
 type Daemon = InstanceType<typeof import("./daemon.js").Daemon>;
@@ -74,8 +73,6 @@ export class InstanceLifecycle {
     daemon.on("error", (err: Error) => {
       this.ctx.logger.error({ err, name }, "Daemon emitted error — instance isolated");
     });
-    // Wire up decisions callback so system prompt includes active decisions
-    daemon.getActiveDecisions = () => this.ctx.getActiveDecisionsForProject(config.working_directory);
     await daemon.start();
     this.daemons.set(name, daemon);
 
