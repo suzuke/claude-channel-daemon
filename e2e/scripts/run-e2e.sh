@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# E2E test lifecycle runner — runs tests fully inside a Tart VM for isolation.
+# E2E test lifecycle runner — runs tests inside a Tart VM for isolation.
 #
-# Full VM mode (default):
+# Steps:
 #   1. Clone golden image → ephemeral test VM
 #   2. rsync repo into VM
 #   3. npm ci inside VM
@@ -10,17 +10,9 @@
 #   5. rsync test results back to host
 #   6. Cleanup VM
 #
-# Mock-only mode (--no-vm):
-#   Runs tests directly on host (no VM). For LOCAL DEV iteration only.
-#   Requires AGEND_ALLOW_HOST_E2E=1 to explicitly opt in.
-#
 # Usage:
-#   ./e2e/scripts/run-e2e.sh              # Full E2E inside VM (default)
-#   ./e2e/scripts/run-e2e.sh --no-vm      # Mock-only on host (requires opt-in)
+#   ./e2e/scripts/run-e2e.sh              # Run E2E tests inside VM
 #   ./e2e/scripts/run-e2e.sh --keep-vm    # Don't delete VM after tests
-#
-# Environment:
-#   AGEND_ALLOW_HOST_E2E=1  — Allow --no-vm flag. Without this, --no-vm is blocked.
 
 set -euo pipefail
 
@@ -31,14 +23,12 @@ TEST_VM="agend-e2e-test-$$"
 VM_PID=""
 VM_IP=""
 
-NO_VM=false
 KEEP_VM=false
 VITEST_ARGS=()
 
 # Parse our flags separately from Vitest args
 for arg in "$@"; do
   case "$arg" in
-    --no-vm)   NO_VM=true ;;
     --keep-vm) KEEP_VM=true ;;
     *)         VITEST_ARGS+=("$arg") ;;
   esac
@@ -72,7 +62,7 @@ rsync_from_vm() {
 
 # --- Cleanup ---
 cleanup() {
-  if [[ "$NO_VM" == "false" && -n "$VM_PID" ]]; then
+  if [[ -n "$VM_PID" ]]; then
     echo "🧹 Cleaning up VM..."
     # Try to rsync results back before stopping (best-effort)
     if [[ -n "$VM_IP" ]]; then
@@ -89,34 +79,6 @@ cleanup() {
   fi
 }
 trap cleanup EXIT INT TERM
-
-# --- Guard: --no-vm requires explicit opt-in ---
-if [[ "$NO_VM" == "true" && "${AGEND_ALLOW_HOST_E2E:-0}" != "1" ]]; then
-  echo "❌ --no-vm requires AGEND_ALLOW_HOST_E2E=1 (explicit opt-in)."
-  echo "   Default is VM mode to prevent host daemon impact."
-  echo "   Run: AGEND_ALLOW_HOST_E2E=1 $0 --no-vm"
-  exit 1
-fi
-
-# --- No-VM mode: run tests directly on host ---
-if [[ "$NO_VM" == "true" ]]; then
-  echo ""
-  echo "⚠️  WARNING: Running E2E tests directly on host WITHOUT VM isolation."
-  echo "   This may affect the main daemon and other fleet instances."
-  echo ""
-  echo "🧪 Running E2E tests on host (--no-vm mode)..."
-  cd "$PROJECT_ROOT"
-  set +e
-  npx vitest run --config e2e/vitest.config.e2e.ts ${VITEST_ARGS[@]+"${VITEST_ARGS[@]}"}
-  TEST_EXIT=$?
-  set -e
-  if [[ $TEST_EXIT -eq 0 ]]; then
-    echo "✅ All E2E tests passed!"
-  else
-    echo "❌ Some E2E tests failed (exit code: $TEST_EXIT)"
-  fi
-  exit $TEST_EXIT
-fi
 
 # --- VM mode: full isolation ---
 
