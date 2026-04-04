@@ -168,8 +168,8 @@ const sessionId = `mock-${INSTANCE_NAME}-${Date.now()}`;
 function writeStatusline() {
   const statusline = {
     session_id: sessionId,
-    model: "mock-model",
-    cost_usd: 0,
+    model: { display_name: "mock-model" },
+    cost: { total_cost_usd: 0 },
     total_tokens: 1000,
     context_window: {
       used_percentage: contextPct,
@@ -264,11 +264,21 @@ process.on("SIGINT", () => gracefulExit(0));
 // ---------------------------------------------------------------------------
 
 const controlFile = join(INSTANCE_DIR, "mock-control.json");
-const controlTimer = setInterval(() => {
+const controlTimer = setInterval(async () => {
   try {
     if (existsSync(controlFile)) {
       const ctrl = JSON.parse(readFileSync(controlFile, "utf-8"));
       if (typeof ctrl.context_pct === "number") contextPct = ctrl.context_pct;
+      if (ctrl.call_tool && mcpInitialized) {
+        const { name, args } = ctrl.call_tool;
+        process.stderr.write(`mock-claude: calling tool ${name} via mock-control\n`);
+        try {
+          const resp = await mcpRequest("tools/call", { name, arguments: args });
+          process.stderr.write(`mock-claude: tool ${name} result: ${JSON.stringify(resp.result ?? resp.error)}\n`);
+        } catch (err) {
+          process.stderr.write(`mock-claude: tool ${name} failed: ${err.message}\n`);
+        }
+      }
       if (ctrl.exit) gracefulExit(0);
     }
   } catch { /* ignore */ }
