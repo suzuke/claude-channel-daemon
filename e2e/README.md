@@ -4,76 +4,118 @@
 
 ```
 Host (macOS, Apple Silicon)
-├── Mock Telegram Bot API    (localhost:8443)
-├── Mock Anthropic API       (localhost:8444)
+├── Mock Telegram Bot API    (localhost:<random>)
+├── Mock Claude Backend      (mock-claude.mjs via tmux)
 ├── Tart VM (macOS, headless, SSH)
-│   ├── agend (npm linked from shared dir)
+│   ├── agend (rsync'd from host)
 │   ├── fleet.yaml → mock servers via host IP
-│   ├── .env (mock bot token, mock API key)
+│   ├── .env (mock bot token)
 │   └── tmux session running fleet
 └── Test Runner (Vitest)
     ├── Controls mock servers (inject messages, set responses)
-    ├── SSH into VM to trigger/verify agend behavior
-    └── Asserts on mock server call logs
+    ├── Asserts on mock server call logs
+    └── Verifies instance state via filesystem
 ```
 
 ## How It Works
 
 1. **Golden Image**: A Tart macOS VM with Node.js, tmux, and agend dependencies pre-installed.
-2. **Mock Servers**: Express servers on the host that mimic Telegram Bot API and Anthropic API.
-   - Telegram mock: accepts `sendMessage`, `getUpdates`, webhook calls, etc.
-   - AI mock: returns canned Claude API responses.
-3. **Test Flow**: `tart clone → tart run --no-graphics → SSH provision → run tests → tart delete`
+2. **Mock Servers**: Telegram mock (Express) on the host mimics the Bot API. Mock Claude backend runs inside tmux as part of the fleet.
+3. **Test Flow**: `tart clone → tart run --no-graphics → rsync repo → npm ci → vitest → rsync results → tart delete`
 4. **No real APIs**: Everything runs locally with fake tokens and mock endpoints.
+
+## Setting Up on Another Machine
+
+### Requirements
+
+- macOS on Apple Silicon (M1/M2/M3/M4). Tart uses Apple's Virtualization.framework which only supports arm64.
+- Homebrew installed.
+
+### Installation
+
+```bash
+# 1. Install Tart (lightweight macOS VM manager)
+brew install cirruslabs/cli/tart
+
+# 2. Install sshpass (for non-interactive SSH to VM)
+brew install cirruslabs/cli/sshpass
+
+# 3. Clone the repo and install dependencies
+git clone <repo-url>
+cd agend
+npm ci
+
+# 4. Build the golden VM image (first time only, ~10 min)
+#    Downloads macOS Sequoia base image from ghcr.io/cirruslabs,
+#    then provisions Node.js + tmux via Homebrew inside the VM.
+./e2e/vm-setup/setup-vm.sh
+
+# 5. Run E2E tests
+./e2e/scripts/run-e2e.sh
+```
+
+### Golden Image Details
+
+`setup-vm.sh` creates an `agend-e2e-golden` image in Tart's local registry:
+
+- **Base**: `ghcr.io/cirruslabs/macos-sequoia-base:latest` (~15 GB download on first run)
+- **Provisions**: Homebrew, Node.js, tmux, Spotlight indexing disabled
+- **Credentials**: user `admin`, password `admin` (SSH access)
+- **Rebuild**: `./e2e/vm-setup/setup-vm.sh --force` to recreate from scratch
+
+Each test run clones this golden image into an ephemeral VM (`agend-e2e-test-<pid>`), which is automatically deleted after tests complete. Use `--keep-vm` to preserve it for debugging.
+
+### Limitations
+
+- **Apple Silicon only** — Tart's Virtualization.framework does not support Intel Macs.
+- **No nested virtualization** — cannot run inside another VM or most CI runners.
+- **Disk space** — golden image + ephemeral clone requires ~30 GB free.
 
 ## Key Design Decisions
 
 - **Mock servers on host, not in VM** — simpler, easier to debug, VM just runs agend.
 - **Shell script for VM setup** (not Packer) — KISS, Packer is overkill for local dev.
 - **Vitest as test runner** — consistent with existing test infrastructure.
+- **VM-only execution** — tests must run inside a VM to prevent host daemon impact.
 - **grammy apiRoot override** — grammy `Bot` supports `client.apiRoot` option; we add
   `telegram_api_root` field in `fleet.yaml`'s channel config to redirect API calls to our mock.
-- **ANTHROPIC_BASE_URL** — already supported by agend, points to mock AI server.
 
 ## Directory Structure
 
 ```
 e2e/
-├── README.md                 # This file
+├── README.md                          # This file
+├── vitest.config.e2e.ts               # E2E-specific Vitest config
 ├── mock-servers/
-│   ├── telegram-mock.ts      # Mock Telegram Bot API
-│   ├── ai-mock.ts            # Mock Anthropic/Claude API
-│   └── shared.ts             # Shared utilities (logging, state)
+│   ├── telegram-mock.ts               # Mock Telegram Bot API
+│   ├── mock-claude.mjs                # Mock Claude backend (tmux-based)
+│   └── shared.ts                      # Shared utilities (waitFor, sleep, getFreePort)
 ├── vm-setup/
-│   ├── setup-vm.sh           # Golden image provisioning script
-│   └── fleet-test.yaml       # Test fleet configuration template
+│   └── setup-vm.sh                    # Golden image provisioning script
 ├── scripts/
-│   ├── run-e2e.sh            # Full E2E test lifecycle
-│   └── ssh-cmd.sh            # Helper: run command in VM via SSH
+│   └── run-e2e.sh                     # Full E2E test lifecycle (VM only)
 ├── tests/
-│   ├── mock-infrastructure.test.ts # Mock server + backend verification
-│   ├── instance-crud.test.ts       # Instance create/delete (T3/T4)
-│   ├── fleet-lifecycle.test.ts     # Fleet start/stop (T1/T2) [TODO]
-│   ├── cross-instance.test.ts      # send_to_instance (T7) [TODO]
-│   ├── context-rotation.test.ts    # Context rotation (T10) [TODO]
-│   ├── mcp-instructions.test.ts    # MCP injection (T16) [TODO]
-│   └── team-broadcast.test.ts      # Team broadcast (T8) [TODO]
-└── vitest.config.e2e.ts      # E2E-specific Vitest config
+│   ├── mock-infrastructure.test.ts    # T1: Mock server + backend verification
+│   ├── instance-crud.test.ts          # T3/T4/T13/T14: Instance create/delete/validation
+│   ├── adapter-integration.test.ts    # T5/T6: Telegram adapter integration
+│   ├── fleet-lifecycle.test.ts        # T1/T2/T5/T6: Fleet start/stop/routing
+│   ├── fleet-respawn.test.ts          # T7/T8/T10: Crash respawn, notifications, snapshots
+│   └── log-truncate.test.ts           # T9: Log file truncation
+└── results/                           # Test output (gitignored)
 ```
 
-## Prerequisites
+## Running Tests
 
 ```bash
-brew install cirruslabs/cli/tart
-brew install cirruslabs/cli/sshpass
-```
-
-## Quick Start
-
-```bash
-# 1. Build golden image (first time only, ~10 min)
-./e2e/vm-setup/setup-vm.sh
-
-# 2. Run E2E tests
+# Run all E2E tests in VM
 ./e2e/scripts/run-e2e.sh
+
+# Keep VM after tests (for debugging)
+./e2e/scripts/run-e2e.sh --keep-vm
+
+# Run specific test file
+./e2e/scripts/run-e2e.sh fleet-respawn
+
+# Pass extra Vitest flags
+./e2e/scripts/run-e2e.sh --reporter=verbose
 ```
