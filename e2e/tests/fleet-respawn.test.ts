@@ -205,29 +205,36 @@ describe("Fleet Respawn E2E", () => {
   }, 90_000);
 
   it("T8: crash notification sent to crasher topic", async () => {
-    // After respawn, daemon emits crash_respawn → notifyInstanceTopic sends to crasher's topic
-    const sends = telegramMock.getCallsFor("sendMessage");
-    const crasherNotification = sends.find(
-      (c) =>
-        String(c.params.message_thread_id) === "50" &&
-        typeof c.params.text === "string" &&
-        (c.params.text as string).includes("crashed and respawned"),
+    // notifyInstanceTopic is fire-and-forget async — poll for the sendMessage call
+    await waitFor(
+      () => {
+        const sends = telegramMock.getCallsFor("sendMessage");
+        return sends.some(
+          (c) =>
+            String(c.params.message_thread_id) === "50" &&
+            typeof c.params.text === "string" &&
+            (c.params.text as string).includes("crashed and respawned"),
+        );
+      },
+      { timeout: 10_000, label: "crash notification to crasher topic" },
     );
-    expect(crasherNotification).toBeDefined();
-  });
+  }, 15_000);
 
   it("T8: crash notification sent to general topic with daemon.log path", async () => {
-    // General topic should receive notification with daemon.log reference
-    const sends = telegramMock.getCallsFor("sendMessage");
-    const generalNotification = sends.find(
-      (c) =>
-        String(c.params.message_thread_id) === "51" &&
-        typeof c.params.text === "string" &&
-        (c.params.text as string).includes("crashed and respawned") &&
-        (c.params.text as string).includes("daemon.log"),
+    await waitFor(
+      () => {
+        const sends = telegramMock.getCallsFor("sendMessage");
+        return sends.some(
+          (c) =>
+            String(c.params.message_thread_id) === "51" &&
+            typeof c.params.text === "string" &&
+            (c.params.text as string).includes("crashed and respawned") &&
+            (c.params.text as string).includes("daemon.log"),
+        );
+      },
+      { timeout: 10_000, label: "crash notification to general topic" },
     );
-    expect(generalNotification).toBeDefined();
-  });
+  }, 15_000);
 
   it("T7: respawned instance responds to messages", async () => {
     const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
