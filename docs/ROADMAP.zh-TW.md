@@ -1,11 +1,11 @@
 # AgEnD 發展藍圖
 
 > 最後更新：2026-04-03 (v1.9.1)
-> 由多代理共識產出：Claude Code, Codex, Gemini CLI, OpenCode
+> 由多代理共識產出：Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI
 
 ## 已完成 (v1.0–v1.3)
 
-- [x] 多後端支援 (Claude Code, Codex, Gemini CLI, OpenCode)
+- [x] 多後端支援 (Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI)
 - [x] 多頻道支援 (Telegram, Discord)
 - [x] Fleet 編排（持久化專案 instance）
 - [x] 跨 instance 委派 (`send_to_instance`, `delegate_task`, `report_result`)

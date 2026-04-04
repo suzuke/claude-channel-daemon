@@ -1,11 +1,11 @@
 # AgEnD Roadmap
 
 > Last updated: 2026-04-03 (v1.9.1)
-> Produced by multi-agent consensus: Claude Code, Codex, Gemini CLI, OpenCode
+> Produced by multi-agent consensus: Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI
 
 ## Completed (v1.0–v1.3)
 
-- [x] Multi-backend support (Claude Code, Codex, Gemini CLI, OpenCode)
+- [x] Multi-backend support (Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI)
 - [x] Multi-channel support (Telegram, Discord)
 - [x] Fleet orchestration (persistent project instances)
 - [x] Cross-instance delegation (send_to_instance, delegate_task, report_result)

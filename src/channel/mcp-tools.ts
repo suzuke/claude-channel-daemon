@@ -435,7 +435,7 @@ export const TOOLS = [
           backend: {
             type: "string",
             description: "CLI backend to use. Defaults to claude-code.",
-            enum: ["claude-code", "gemini-cli", "codex", "opencode"],
+            enum: ["claude-code", "gemini-cli", "codex", "opencode", "kiro-cli"],
           },
           branch: {
             type: "string",

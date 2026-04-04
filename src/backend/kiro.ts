@@ -68,7 +68,7 @@ export class KiroBackend implements CliBackend {
     return [
       { pattern: /rate.?limit|429|too many requests/i, type: "rate_limit", action: "failover", message: "Rate limit reached" },
       { pattern: /auth.*error|unauthorized|401/i, type: "auth_error", action: "pause", message: "Authentication error" },
-      { pattern: /usage limit|credit/i, type: "quota", action: "pause", message: "Usage limit reached" },
+      { pattern: /usage limit|insufficient.?credit|credit.*exhaust/i, type: "quota", action: "pause", message: "Usage limit reached" },
     ];
   }
 

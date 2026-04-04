@@ -6,7 +6,7 @@
 
 **Agent Engineering Daemon** — run a fleet of AI coding agents from your phone.
 
-One Telegram bot, multiple CLI backends (Claude Code, Gemini CLI, Codex, OpenCode), unlimited projects. Each Forum Topic is an independent agent session with crash recovery and zero babysitting.
+One Telegram bot, multiple CLI backends (Claude Code, Gemini CLI, Codex, OpenCode, Kiro CLI), unlimited projects. Each Forum Topic is an independent agent session with crash recovery and zero babysitting.
 
 [繁體中文](README.zh-TW.md)
 
@@ -66,6 +66,7 @@ agend fleet start               # launch the fleet
 | OpenAI Codex | `npm i -g @openai/codex` | `codex` (ChatGPT login) or `OPENAI_API_KEY` |
 | Gemini CLI | `npm i -g @google/gemini-cli` | `gemini` (Google OAuth) |
 | OpenCode | `curl -fsSL https://opencode.ai/install \| bash` | `opencode` (configure provider) |
+| Kiro CLI | `brew install --cask kiro-cli` | `kiro-cli login` (AWS Builder ID) |
 
 - Telegram bot token ([@BotFather](https://t.me/BotFather)) or Discord bot token
 - Groq API key (optional, for voice)

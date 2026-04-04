@@ -164,8 +164,8 @@ teams:
 | `description` | string | — | 角色描述。透過 MCP server instructions 注入為 `## Role` |
 | `topic_id` | number\|string | 自動 | 頻道 topic/thread ID。建立時自動分配 |
 | `general_topic` | boolean | `false` | 標記為 General Topic（接收未路由的訊息） |
-| `backend` | string | `"claude-code"` | CLI backend：`claude-code`、`codex`、`gemini-cli`、`opencode` |
-| `model` | string | — | 模型。Claude：`sonnet`、`opus`、`haiku`、`opusplan`。Codex：`gpt-4o`。Gemini：`gemini-2.5-pro` |
+| `backend` | string | `"claude-code"` | CLI backend：`claude-code`、`codex`、`gemini-cli`、`opencode`、`kiro-cli` |
+| `model` | string | — | 模型。Claude：`sonnet`、`opus`、`haiku`、`opusplan`。Codex：`gpt-4o`。Gemini：`gemini-2.5-pro`。Kiro：`auto`、`claude-sonnet-4.5`、`claude-haiku-4.5` |
 | `model_failover` | string[] | — | 被限速時的備用模型（例：`["opus", "sonnet"]`） |
 | `tool_set` | string | `"full"` | MCP tool 設定：`full`（全部）、`standard`（10 個）、`minimal`（4 個） |
 | `systemPrompt` | string | — | 自訂指令，透過 MCP server instructions 注入。內嵌字串或 `file:./path.md` 從外部檔案載入（路徑相對於 `working_directory`）。不會修改 CLI 的內建 system prompt。範例：`systemPrompt: "file:./prompts/role.md"` |
@@ -221,7 +221,7 @@ MCP server 將這些組合成一個 `instructions` 字串，CLI 透過 MCP proto
 這個方式的好處：
 - CLI 的內建 system prompt **不會被修改**（Claude Code 保留 tool 指引、Gemini 保留 skills 等）
 - 專案的 instruction 檔案（CLAUDE.md、AGENTS.md、GEMINI.md）**不受影響**
-- 四個 backend（Claude Code、Codex、Gemini CLI、OpenCode）使用相同的注入路徑
+- 所有 backend（Claude Code、Codex、Gemini CLI、OpenCode、Kiro CLI）使用相同的注入路徑
 
 ### Session snapshot（context rotation 接續）
 

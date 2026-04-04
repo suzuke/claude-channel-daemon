@@ -6,7 +6,7 @@
 
 **Agent Engineering Daemon** — 用手機管理一整個 AI coding agent 團隊。
 
-一個 Telegram bot，多種 CLI 後端（Claude Code、Gemini CLI、Codex、OpenCode），無限專案。每個 Forum Topic 就是一個獨立的 agent session，crash 自動恢復，不用顧。
+一個 Telegram bot，多種 CLI 後端（Claude Code、Gemini CLI、Codex、OpenCode、Kiro CLI），無限專案。每個 Forum Topic 就是一個獨立的 agent session，crash 自動恢復，不用顧。
 
 [English](README.md)
 
@@ -66,6 +66,7 @@ agend fleet start               # 啟動 fleet
 | OpenAI Codex | `npm i -g @openai/codex` | `codex`（ChatGPT 登入）或 `OPENAI_API_KEY` |
 | Gemini CLI | `npm i -g @google/gemini-cli` | `gemini`（Google OAuth） |
 | OpenCode | `curl -fsSL https://opencode.ai/install \| bash` | `opencode`（設定 provider） |
+| Kiro CLI | `brew install --cask kiro-cli` | `kiro-cli login`（AWS Builder ID） |
 
 - Telegram bot token（[@BotFather](https://t.me/BotFather)）或 Discord bot token
 - Groq API key（選用，語音轉文字用）

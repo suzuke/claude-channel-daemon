@@ -207,6 +207,10 @@ const BACKENDS = [
     installUrl: "https://opencode.ai/download",
     install: "curl -fsSL https://opencode.ai/install | bash",
     auth: "opencode (configure provider)" },
+  { id: "kiro-cli", binary: "kiro-cli", label: "Kiro CLI",
+    installUrl: "https://kiro.dev/docs/cli/",
+    install: "brew install --cask kiro-cli",
+    auth: "kiro-cli login (AWS Builder ID)" },
 ];
 
 interface PrereqResult {

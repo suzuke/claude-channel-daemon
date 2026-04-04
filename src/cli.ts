@@ -475,13 +475,14 @@ const backend = program.command("backend").description("Backend diagnostics");
 backend
   .command("doctor")
   .description("Check backend prerequisites and configuration")
-  .argument("[backend]", "Backend to check (claude-code, codex, gemini-cli, opencode)", "claude-code")
+  .argument("[backend]", "Backend to check (claude-code, codex, gemini-cli, opencode, kiro-cli)", "claude-code")
   .action(async (backendName: string) => {
     const backends: Record<string, { binary: string; label: string; install: string; auth: string }> = {
       "claude-code": { binary: "claude", label: "Claude Code", install: "npm i -g @anthropic-ai/claude-code", auth: "claude (OAuth) or ANTHROPIC_API_KEY" },
       "codex": { binary: "codex", label: "OpenAI Codex", install: "npm i -g @openai/codex", auth: "OPENAI_API_KEY" },
       "gemini-cli": { binary: "gemini", label: "Gemini CLI", install: "npm i -g @google/gemini-cli", auth: "gemini (Google OAuth)" },
       "opencode": { binary: "opencode", label: "OpenCode", install: "go install github.com/opencode-ai/opencode@latest", auth: "Configure provider API key" },
+      "kiro-cli": { binary: "kiro-cli", label: "Kiro CLI", install: "brew install --cask kiro-cli", auth: "kiro-cli login (AWS Builder ID)" },
     };
     const info = backends[backendName];
     if (!info) {
