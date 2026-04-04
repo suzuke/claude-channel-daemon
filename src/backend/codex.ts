@@ -12,16 +12,23 @@ export class CodexBackend implements CliBackend {
   }
 
   buildCommand(config: CliBackendConfig): string {
-    // --dangerously-bypass-approvals-and-sandbox skips all approval prompts
-    // including MCP tool calls; --full-auto alone only auto-approves shell commands
-    let cmd = config.skipPermissions !== false
-      ? `${this.binaryPath} --dangerously-bypass-approvals-and-sandbox`
-      : `${this.binaryPath} --full-auto`;
+    const approvalFlag = config.skipPermissions !== false
+      ? "--dangerously-bypass-approvals-and-sandbox"
+      : "--full-auto";
 
-    if (config.model) {
-      cmd += ` -c model="${config.model}"`;
+    // Check for existing session to resume
+    const sessionIdFile = join(this.instanceDir, "session-id");
+    if (existsSync(sessionIdFile)) {
+      const sid = readFileSync(sessionIdFile, "utf-8").trim();
+      if (sid && /^[a-zA-Z0-9_-]+$/.test(sid)) {
+        let cmd = `${this.binaryPath} resume ${sid} ${approvalFlag}`;
+        if (config.model) cmd += ` -c model="${config.model}"`;
+        return cmd;
+      }
     }
 
+    let cmd = `${this.binaryPath} ${approvalFlag}`;
+    if (config.model) cmd += ` -c model="${config.model}"`;
     return cmd;
   }
 

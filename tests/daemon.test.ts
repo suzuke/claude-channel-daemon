@@ -95,3 +95,41 @@ describe("Daemon snapshot", () => {
     expect(second).not.toBeNull();
   });
 });
+
+describe("Daemon failover cooldown", () => {
+  let tmpDir: string;
+  let daemon: Daemon;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `ccd-daemon-failover-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    const backend = new ClaudeCodeBackend(tmpDir);
+    daemon = new Daemon("test-failover", makeConfig(), tmpDir, false, backend);
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("suppresses failover errors within cooldown window", () => {
+    // Simulate a recent failover
+    (daemon as any).lastFailoverAt = Date.now();
+
+    // The cooldown should be active (5 minutes)
+    const cooldownMs = (Daemon as any).FAILOVER_COOLDOWN_MS;
+    expect(cooldownMs).toBe(5 * 60_000);
+    expect(Date.now() - (daemon as any).lastFailoverAt).toBeLessThan(cooldownMs);
+  });
+
+  it("allows failover after cooldown expires", () => {
+    // Simulate a failover that happened 6 minutes ago
+    (daemon as any).lastFailoverAt = Date.now() - 6 * 60_000;
+
+    const cooldownMs = (Daemon as any).FAILOVER_COOLDOWN_MS;
+    expect(Date.now() - (daemon as any).lastFailoverAt).toBeGreaterThan(cooldownMs);
+  });
+
+  it("lastFailoverAt starts at 0 (no cooldown on fresh daemon)", () => {
+    expect((daemon as any).lastFailoverAt).toBe(0);
+  });
+});

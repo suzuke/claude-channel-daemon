@@ -69,6 +69,8 @@ export class Daemon extends EventEmitter {
   private errorMonitorTimer: ReturnType<typeof setInterval> | null = null;
   private errorWaitingForRecovery = false; // true = error detected, waiting for ready pattern
   private errorDetectedAt = 0; // timestamp when error was first detected
+  private lastFailoverAt = 0; // cooldown: prevent repeated failover triggers
+  private static FAILOVER_COOLDOWN_MS = 5 * 60_000; // 5 minutes
 
   constructor(
     private name: string,
@@ -447,8 +449,15 @@ export class Daemon extends EventEmitter {
         for (const ep of patterns) {
           if (!ep.pattern.test(pane)) continue;
 
+          // Cooldown: skip failover-type errors if recently triggered
+          if (ep.action === "failover" && Date.now() - this.lastFailoverAt < Daemon.FAILOVER_COOLDOWN_MS) {
+            this.logger.debug({ errorType: ep.type }, "PTY error suppressed (failover cooldown active)");
+            break;
+          }
+
           this.errorWaitingForRecovery = true;
           this.errorDetectedAt = Date.now();
+          if (ep.action === "failover") this.lastFailoverAt = Date.now();
           this.logger.warn({ errorType: ep.type, action: ep.action }, `PTY error detected: ${ep.message}`);
           this.emit("pty_error", { name: this.name, ...ep });
 
