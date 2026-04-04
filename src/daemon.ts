@@ -61,6 +61,7 @@ export class Daemon extends EventEmitter {
   private recentUserMessages: Array<{ text: string; ts: string }> = [];
   private recentEvents: RotationSnapshotEvent[] = [];
   private recentToolActivity: string[] = [];
+  private snapshotConsumed = false;
   /** Callback to query active decisions for system prompt injection (set by fleet manager) */
   getActiveDecisions?: () => Array<{ title: string; content: string; tags: string[]; scope: string }>;
   private pasteLock: Promise<void> = Promise.resolve();
@@ -374,6 +375,7 @@ export class Daemon extends EventEmitter {
               await tm.killWindow();
             }
           }
+          this.writeRotationSnapshot("crash");
           await this.spawnClaudeWindow();
           await this.injectSnapshotMessage();
           this.logger.info("Respawned Claude window after crash");
@@ -877,6 +879,7 @@ export class Daemon extends EventEmitter {
    * This replaces the old system-prompt injection approach.
    */
   private async injectSnapshotMessage(): Promise<void> {
+    if (this.snapshotConsumed) return;
     const snapshot = this.buildSnapshotPrompt();
     if (!snapshot || !this.tmux) return;
     // Small delay to let the CLI fully render its ready prompt
@@ -1092,6 +1095,7 @@ export class Daemon extends EventEmitter {
     };
     const snapshotPath = join(this.instanceDir, "rotation-state.json");
     writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2));
+    this.snapshotConsumed = false;
     this.logger.info({
       reason,
       context_pct: snapshot.context_pct,
@@ -1220,9 +1224,9 @@ export class Daemon extends EventEmitter {
       if (!existsSync(snapshotPath)) return null;
       const snapshot: RotationSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
 
-      // Single-consume: delete after reading so it's not re-injected on
-      // crash respawn, manual restart, or future rotations.
-      try { unlinkSync(snapshotPath); } catch { /* best-effort */ }
+      // Mark consumed in-memory to prevent re-injection on crash respawn.
+      // File stays on disk so daemon restart can re-read it.
+      this.snapshotConsumed = true;
 
       const lines: string[] = ["## Previous Session Snapshot", ""];
       lines.push(`Restart reason: ${snapshot.reason}`);
