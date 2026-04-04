@@ -942,9 +942,24 @@ program
       console.log("No service installed. Run: agend install");
       return;
     }
+    const pidPath = join(DATA_DIR, "fleet.pid");
+    let oldPid: number | null = null;
+    try { oldPid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10); } catch {}
+
     stopService();
-    // Brief pause for clean shutdown
-    await new Promise(r => setTimeout(r, 1000));
+
+    // Wait for old process to exit (up to 30s)
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      // Check if process is still alive
+      if (oldPid) {
+        try { process.kill(oldPid, 0); } catch { break; }
+      } else if (!existsSync(pidPath)) {
+        break;
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+
     if (startService()) {
       console.log("Service restarted.");
     } else {
@@ -1147,7 +1162,7 @@ program
 
 // === Quick management commands ===
 
-function fuzzyMatch(query: string, names: string[]): string | null {
+async function fuzzyMatch(query: string, names: string[]): Promise<string | null> {
   const q = query.toLowerCase();
   // Exact match
   const exact = names.find(n => n.toLowerCase() === q);
@@ -1159,15 +1174,28 @@ function fuzzyMatch(query: string, names: string[]): string | null {
   const contains = names.filter(n => n.toLowerCase().includes(q));
   if (contains.length === 1) return contains[0];
   if (contains.length > 1) {
-    console.error(`Ambiguous match for "${query}": ${contains.join(", ")}`);
+    // Interactive selection
+    console.log(`Multiple matches for "${query}":`);
+    for (let i = 0; i < contains.length; i++) {
+      console.log(`  ${i + 1}) ${contains[i]}`);
+    }
+    const { createInterface } = await import("node:readline");
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise<string>(resolve => {
+      rl.question("Select [1]: ", resolve);
+    });
+    rl.close();
+    const idx = parseInt(answer.trim() || "1", 10) - 1;
+    if (idx >= 0 && idx < contains.length) return contains[idx];
+    console.error("Invalid selection.");
     process.exit(1);
   }
   return null;
 }
 
-function resolveInstance(query: string, config: import("./types.js").FleetConfig): string {
+async function resolveInstance(query: string, config: import("./types.js").FleetConfig): Promise<string> {
   const names = Object.keys(config.instances);
-  const match = fuzzyMatch(query, names);
+  const match = await fuzzyMatch(query, names);
   if (!match) {
     console.error(`No instance matching "${query}". Available: ${names.join(", ")}`);
     process.exit(1);
@@ -1190,10 +1218,17 @@ function getInstanceStatusStandalone(name: string): "running" | "stopped" | "cra
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")   // CSI sequences (including private ? prefix)
-    .replace(/\x1b\][^\x07]*\x07/g, "")         // OSC sequences
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")     // CSI sequences (including private ? prefix)
+    .replace(/\x1b\[[0-9;]*m/g, "")              // SGR color/style sequences
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC sequences (BEL or ST terminated)
     .replace(/\x1b\([A-Z]/g, "")                 // Character set selection
-    .replace(/\x1b[=>]/g, "");                   // Keypad mode
+    .replace(/\x1b[=>]/g, "")                    // Keypad mode
+    .replace(/\x1b\[?[0-9;]*[hl]/g, "")         // DEC private mode set/reset
+    .replace(/\x1b\[[0-9]*[ABCDHJ]/g, "")       // Cursor movement & erase
+    .replace(/\x1b\[?[0-9;]*[KJsu]/g, "")       // Erase line/screen, save/restore cursor
+    .replace(/\r/g, "")                          // Carriage returns from TUI redraws
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0e-\x1f]/g, "");      // Remaining control chars (except \t \n)
 }
 
 function getTeamsForInstance(config: import("./types.js").FleetConfig, instanceName: string): string[] {
@@ -1306,7 +1341,7 @@ program
   .action(async (query: string) => {
     const yaml = (await import("js-yaml")).default;
     const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
-    const name = resolveInstance(query, config);
+    const name = await resolveInstance(query, config);
     const status = getInstanceStatusStandalone(name);
 
     if (status !== "running") {
@@ -1376,7 +1411,7 @@ program
   .action(async (query: string, opts: { lines: string; follow?: boolean }) => {
     const yaml = (await import("js-yaml")).default;
     const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
-    const name = resolveInstance(query, config);
+    const name = await resolveInstance(query, config);
 
     const outputPath = join(DATA_DIR, "instances", name, "output.log");
     if (!existsSync(outputPath)) {
