@@ -167,8 +167,8 @@ Use `broadcast(team: "backend-squad", message: "...")` to send to all members.
 | `description` | string | — | Role description. Injected via MCP server instructions as `## Role` |
 | `topic_id` | number\|string | auto | Channel topic/thread ID. Auto-assigned on create |
 | `general_topic` | boolean | `false` | Mark as General Topic (receives unrouted messages) |
-| `backend` | string | `"claude-code"` | CLI backend: `claude-code`, `codex`, `gemini-cli`, `opencode` |
-| `model` | string | — | Model alias. Claude: `sonnet`, `opus`, `haiku`, `opusplan`, `best`, `sonnet[1m]`, `opus[1m]`. Codex: `gpt-4o`, `o3`. Gemini: `gemini-2.5-pro` |
+| `backend` | string | `"claude-code"` | CLI backend: `claude-code`, `codex`, `gemini-cli`, `opencode`, `kiro-cli` |
+| `model` | string | — | Model alias. Claude: `sonnet`, `opus`, `haiku`, `opusplan`, `best`, `sonnet[1m]`, `opus[1m]`. Codex: `gpt-4o`, `o3`. Gemini: `gemini-2.5-pro`. Kiro: `auto`, `claude-sonnet-4.5`, `claude-sonnet-4`, `claude-haiku-4.5` |
 | `model_failover` | string[] | — | Fallback models when rate-limited (e.g. `["opus", "sonnet"]`) |
 | `tool_set` | string | `"full"` | MCP tool profile: `full` (all), `standard` (10), `minimal` (4) |
 | `systemPrompt` | string | — | Custom instructions injected via MCP server instructions. Inline string or `file:./path.md` to load from an external file (path relative to `working_directory`). Does not modify the CLI's built-in system prompt. Example: `systemPrompt: "file:./prompts/role.md"` |
@@ -224,7 +224,7 @@ The MCP server assembles these into a single `instructions` string that the CLI 
 This approach means:
 - The CLI's built-in system prompt is **never modified** (Claude Code keeps its tool usage instructions, Gemini keeps its skills, etc.)
 - Project-level instruction files (CLAUDE.md, AGENTS.md, GEMINI.md) are **not affected**
-- All four backends (Claude Code, Codex, Gemini CLI, OpenCode) use the same injection path
+- All backends (Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI) use the same injection path
 
 ### Known limitation: OpenCode MCP instructions
 
@@ -235,6 +235,10 @@ OpenCode (as of v1.3.10) does **not** read the MCP server `instructions` field. 
 - May not follow collaboration rules or the workflow template
 
 This is an upstream limitation. Once OpenCode adds support for MCP instructions, no changes to AgEnD are needed — the existing mechanism will work automatically.
+
+### Known limitation: Kiro CLI MCP instructions (unverified)
+
+Kiro CLI (as of v1.29.2) has **not been verified** to read the MCP server `instructions` field. If it does not, the same limitation as OpenCode applies: fleet context will not be injected. Kiro CLI supports `.kiro/steering/` files for context injection, but AgEnD uses the unified MCP instructions path for all backends.
 
 ### Session snapshots (context rotation)
 
