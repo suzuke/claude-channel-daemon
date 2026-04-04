@@ -226,11 +226,21 @@ This approach means:
 - Project-level instruction files (CLAUDE.md, AGENTS.md, GEMINI.md) are **not affected**
 - All four backends (Claude Code, Codex, Gemini CLI, OpenCode) use the same injection path
 
+### Known limitation: OpenCode MCP instructions
+
+OpenCode (as of v1.3.10) does **not** read the MCP server `instructions` field. It loads MCP tools correctly, but fleet context (identity, message format, collaboration rules, workflow template) is not injected into the OpenCode instance's system prompt. This means OpenCode instances:
+
+- Have all fleet MCP tools available (reply, send_to_instance, etc.)
+- Do **not** automatically know they are fleet instances or how to use fleet message formats
+- May not follow collaboration rules or the workflow template
+
+This is an upstream limitation. Once OpenCode adds support for MCP instructions, no changes to AgEnD are needed — the existing mechanism will work automatically.
+
 ### Session snapshots (context rotation)
 
 When a context rotation occurs, the daemon saves a snapshot of the previous session (recent messages, tool activity, context usage) to `rotation-state.json`. On the next spawn, the snapshot is delivered as the **first inbound message** with a `[system:session-snapshot]` prefix — not embedded in the system prompt.
 
-The snapshot is single-consume: it is deleted after being read so it is not re-injected on subsequent restarts.
+The snapshot file persists on disk (for daemon restart recovery). An in-memory flag prevents re-injection within the same daemon process.
 
 ### Decisions
 
