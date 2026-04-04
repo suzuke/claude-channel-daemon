@@ -4,6 +4,8 @@
  * T7: Trigger instance crash via mock-control.json → health check detects →
  *     respawn with backoff → instance recovers and responds to messages.
  * T8: Verify crash notification sent to both instance topic and general topic.
+ * T10: Verify crash-aware snapshot: rotation-state.json written on crash,
+ *      persists after injection (not deleted), updated on subsequent crashes.
  *
  * Uses a shorter health check assertion window. The daemon health check runs
  * every 30s, so total wait can be up to ~35s (30s detection + backoff).
@@ -205,29 +207,114 @@ describe("Fleet Respawn E2E", () => {
   }, 90_000);
 
   it("T8: crash notification sent to crasher topic", async () => {
-    // After respawn, daemon emits crash_respawn → notifyInstanceTopic sends to crasher's topic
-    const sends = telegramMock.getCallsFor("sendMessage");
-    const crasherNotification = sends.find(
-      (c) =>
-        String(c.params.message_thread_id) === "50" &&
-        typeof c.params.text === "string" &&
-        (c.params.text as string).includes("crashed and respawned"),
+    // notifyInstanceTopic is fire-and-forget async — poll for the sendMessage call
+    await waitFor(
+      () => {
+        const sends = telegramMock.getCallsFor("sendMessage");
+        return sends.some(
+          (c) =>
+            String(c.params.message_thread_id) === "50" &&
+            typeof c.params.text === "string" &&
+            (c.params.text as string).includes("crashed and respawned"),
+        );
+      },
+      { timeout: 10_000, label: "crash notification to crasher topic" },
     );
-    expect(crasherNotification).toBeDefined();
-  });
+  }, 15_000);
 
   it("T8: crash notification sent to general topic with daemon.log path", async () => {
-    // General topic should receive notification with daemon.log reference
-    const sends = telegramMock.getCallsFor("sendMessage");
-    const generalNotification = sends.find(
-      (c) =>
-        String(c.params.message_thread_id) === "51" &&
-        typeof c.params.text === "string" &&
-        (c.params.text as string).includes("crashed and respawned") &&
-        (c.params.text as string).includes("daemon.log"),
+    await waitFor(
+      () => {
+        const sends = telegramMock.getCallsFor("sendMessage");
+        return sends.some(
+          (c) =>
+            String(c.params.message_thread_id) === "51" &&
+            typeof c.params.text === "string" &&
+            (c.params.text as string).includes("crashed and respawned") &&
+            (c.params.text as string).includes("daemon.log"),
+        );
+      },
+      { timeout: 10_000, label: "crash notification to general topic" },
     );
-    expect(generalNotification).toBeDefined();
+  }, 15_000);
+
+  // --- Phase 2b: Crash-aware snapshot (T10) ---
+
+  it("T10: rotation-state.json written on crash with valid data", () => {
+    const snapshotPath = join(testDir, "instances", "crasher", "rotation-state.json");
+    expect(existsSync(snapshotPath)).toBe(true);
+
+    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
+    expect(snapshot.instance).toBe("crasher");
+    expect(snapshot.reason).toBe("crash");
+    expect(snapshot.created_at).toBeTruthy();
+    expect(new Date(snapshot.created_at).getTime()).toBeGreaterThan(0);
+    expect(snapshot.working_directory).toContain("work/crasher");
   });
+
+  it("T10: snapshot persists on disk after injection (not deleted)", () => {
+    // After respawn, injectSnapshotMessage reads the file but does NOT unlink it
+    const snapshotPath = join(testDir, "instances", "crasher", "rotation-state.json");
+    expect(existsSync(snapshotPath)).toBe(true);
+
+    // File should still be parseable
+    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
+    expect(snapshot.reason).toBe("crash");
+  });
+
+  it("T10: second crash updates rotation-state.json with new timestamp", async () => {
+    const instanceDir = join(testDir, "instances", "crasher");
+    const snapshotPath = join(instanceDir, "rotation-state.json");
+
+    // Record first snapshot timestamp
+    const firstSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
+    const firstTimestamp = firstSnapshot.created_at;
+
+    // Record current session ID
+    const statusBefore = JSON.parse(
+      readFileSync(join(instanceDir, "statusline.json"), "utf-8"),
+    );
+    const sessionBefore = statusBefore.session_id;
+
+    // Trigger second crash
+    writeFileSync(
+      join(instanceDir, "mock-control.json"),
+      JSON.stringify({ exit: true }),
+    );
+
+    // Wait for second respawn
+    let cleaned = false;
+    await waitFor(
+      () => {
+        try {
+          const raw = readFileSync(join(instanceDir, "statusline.json"), "utf-8");
+          const status = JSON.parse(raw);
+          const respawned =
+            status.session_id !== sessionBefore &&
+            status.session_id.startsWith("mock-crasher-");
+          if (respawned && !cleaned) {
+            rmSync(join(instanceDir, "mock-control.json"), { force: true });
+            cleaned = true;
+          }
+          return respawned;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 60_000, interval: 2000, label: "second respawn" },
+    );
+
+    // Snapshot should be updated with a newer timestamp
+    const secondSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
+    expect(secondSnapshot.reason).toBe("crash");
+    expect(secondSnapshot.created_at).not.toBe(firstTimestamp);
+    expect(new Date(secondSnapshot.created_at).getTime()).toBeGreaterThan(
+      new Date(firstTimestamp).getTime(),
+    );
+
+    // File still on disk after second injection
+    expect(existsSync(snapshotPath)).toBe(true);
+  }, 90_000);
 
   it("T7: respawned instance responds to messages", async () => {
     const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
