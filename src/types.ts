@@ -98,6 +98,8 @@ export interface InstanceConfig {
   cost_guard?: CostGuardConfig;
   /** Original repo path when this instance uses a git worktree */
   worktree_source?: string;
+  /** Workflow template: "builtin" (default), "file:path", inline string, or false to disable */
+  workflow?: string | false;
 }
 
 export interface WebhookConfig {

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "postbuild": "cp -r src/plugin dist/ && cd dist/plugin/agend && ln -sf ../../channel/mcp-server.js server.js",
+    "postbuild": "cp -r src/plugin dist/ && cp -r src/workflow-templates dist/ && cd dist/plugin/agend && ln -sf ../../channel/mcp-server.js server.js",
     "start": "tsx src/cli.ts start",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",

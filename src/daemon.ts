@@ -848,6 +848,20 @@ export class Daemon extends EventEmitter {
     if (this.config.tool_set) mcpEnv.AGEND_TOOL_SET = this.config.tool_set;
     if (this.config.display_name) mcpEnv.AGEND_DISPLAY_NAME = this.config.display_name;
     if (this.config.description) mcpEnv.AGEND_DESCRIPTION = this.config.description;
+    // Workflow template: pass resolved content or "false" to disable
+    if (this.config.workflow === false) {
+      mcpEnv.AGEND_WORKFLOW = "false";
+    } else {
+      const wf = this.config.workflow ?? "builtin";
+      if (wf !== "builtin") {
+        let content = wf;
+        if (wf.startsWith("file:")) {
+          try { content = readFileSync(wf.slice(5), "utf-8"); } catch { content = ""; }
+        }
+        if (content) mcpEnv.AGEND_WORKFLOW = content;
+      }
+      // "builtin" → no env var, mcp-server.ts reads the bundled template
+    }
     // Custom systemPrompt: resolve file: prefix before passing
     if (this.config.systemPrompt) {
       let userPrompt = this.config.systemPrompt;

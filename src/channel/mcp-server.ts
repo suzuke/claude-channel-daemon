@@ -14,7 +14,9 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { basename } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { IpcClient } from "./ipc-bridge.js";
 import { TOOLS } from "./mcp-tools.js";
 
@@ -175,6 +177,7 @@ function buildMcpInstructions(): string {
   const displayName = process.env.AGEND_DISPLAY_NAME;
   const description = process.env.AGEND_DESCRIPTION;
   const customPrompt = process.env.AGEND_CUSTOM_PROMPT;
+  const workflowEnv = process.env.AGEND_WORKFLOW;
 
   const sections: string[] = [];
 
@@ -211,6 +214,24 @@ function buildMcpInstructions(): string {
     "3. Use list_instances to discover available instances before sending messages.",
     "4. You only have direct access to files under your own working directory.",
   ].join("\n"));
+
+  // ── Workflow template ──
+  if (workflowEnv !== "false") {
+    let workflowContent: string | null = null;
+    if (workflowEnv) {
+      // Custom workflow passed from daemon (inline or file: already resolved)
+      workflowContent = workflowEnv;
+    } else {
+      // Default: load built-in template
+      try {
+        const here = dirname(fileURLToPath(import.meta.url));
+        workflowContent = readFileSync(join(here, "../workflow-templates/default.md"), "utf-8");
+      } catch { /* template not found — skip */ }
+    }
+    if (workflowContent) {
+      sections.push(`## Development Workflow\n\n${workflowContent}`);
+    }
+  }
 
   // ── Custom user prompt ──
   if (customPrompt) {

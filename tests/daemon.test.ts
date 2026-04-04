@@ -53,7 +53,7 @@ describe("Daemon snapshot", () => {
     expect(snapshot.instance).toBe("test-snap");
   });
 
-  it("snapshot file is deleted after prompt injection (single-consume)", () => {
+  it("snapshot file persists after prompt read (no longer deleted)", () => {
     // Write a snapshot file
     const snapshotData = {
       instance: "test-snap",
@@ -67,14 +67,15 @@ describe("Daemon snapshot", () => {
     writeFileSync(filePath, JSON.stringify(snapshotData));
     expect(existsSync(filePath)).toBe(true);
 
-    // Call private buildSnapshotPrompt via cast — it should read + delete
     const result = (daemon as any).buildSnapshotPrompt();
     expect(result).toContain("Previous Session Snapshot");
     expect(result).toContain("max_age");
     expect(result).toContain("hello");
 
-    // File should be consumed (deleted)
-    expect(existsSync(filePath)).toBe(false);
+    // File stays on disk for daemon restart recovery
+    expect(existsSync(filePath)).toBe(true);
+    // In-memory flag prevents re-injection
+    expect((daemon as any).snapshotConsumed).toBe(true);
   });
 
   it("buildSnapshotPrompt returns null when no snapshot exists", () => {
@@ -82,11 +83,15 @@ describe("Daemon snapshot", () => {
     expect(result).toBeNull();
   });
 
-  it("second call to buildSnapshotPrompt returns null after consume", () => {
+  it("snapshotConsumed flag resets when new snapshot is written", () => {
     daemon.writeRotationSnapshot("context_full");
     const first = (daemon as any).buildSnapshotPrompt();
     expect(first).not.toBeNull();
+    expect((daemon as any).snapshotConsumed).toBe(true);
+    // Writing a new snapshot resets the flag
+    daemon.writeRotationSnapshot("crash");
+    expect((daemon as any).snapshotConsumed).toBe(false);
     const second = (daemon as any).buildSnapshotPrompt();
-    expect(second).toBeNull();
+    expect(second).not.toBeNull();
   });
 });
