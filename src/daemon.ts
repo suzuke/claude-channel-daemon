@@ -70,6 +70,15 @@ export class Daemon extends EventEmitter {
   private lastFailoverAt = 0; // cooldown: prevent repeated failover triggers
   private static FAILOVER_COOLDOWN_MS = 5 * 60_000; // 5 minutes
 
+  /** Cheap hash for pane content dedup — not cryptographic, just identity check */
+  private static cheapPaneHash(pane: string): string {
+    return `${pane.length}:${pane.slice(-200)}`;
+  }
+  // Hash dedup: suppress stale error re-detection after recovery
+  private lastRecoveryPaneHash: string | null = null;
+  private lastRecoveredErrorType: string | null = null;
+  private lastDetectedErrorType: string | null = null;
+
   constructor(
     private name: string,
     private config: InstanceConfig,
@@ -435,6 +444,9 @@ export class Daemon extends EventEmitter {
         if (this.errorWaitingForRecovery) {
           if (readyPattern.test(pane)) {
             const downtime = Math.round((Date.now() - this.errorDetectedAt) / 1000);
+            // Record pane hash at recovery to suppress stale re-detection
+            this.lastRecoveryPaneHash = Daemon.cheapPaneHash(pane);
+            this.lastRecoveredErrorType = this.lastDetectedErrorType;
             this.errorWaitingForRecovery = false;
             this.errorDetectedAt = 0;
             this.logger.info({ downtime_s: downtime }, "PTY error recovered — agent is ready again");
@@ -444,8 +456,19 @@ export class Daemon extends EventEmitter {
         }
 
         // State: monitoring — check for new errors
+        const currentPaneHash = Daemon.cheapPaneHash(pane);
         for (const ep of patterns) {
           if (!ep.pattern.test(pane)) continue;
+
+          // Dedup: suppress if same error on same screen as last recovery
+          if (this.lastRecoveryPaneHash && ep.type === this.lastRecoveredErrorType) {
+            if (currentPaneHash === this.lastRecoveryPaneHash) {
+              break; // same screen, same error → stale
+            }
+            // Screen changed — stop suppressing
+            this.lastRecoveryPaneHash = null;
+            this.lastRecoveredErrorType = null;
+          }
 
           // Cooldown: skip failover-type errors if recently triggered
           if (ep.action === "failover" && Date.now() - this.lastFailoverAt < Daemon.FAILOVER_COOLDOWN_MS) {
@@ -455,6 +478,7 @@ export class Daemon extends EventEmitter {
 
           this.errorWaitingForRecovery = true;
           this.errorDetectedAt = Date.now();
+          this.lastDetectedErrorType = ep.type;
           if (ep.action === "failover") this.lastFailoverAt = Date.now();
           this.logger.warn({ errorType: ep.type, action: ep.action }, `PTY error detected: ${ep.message}`);
           this.emit("pty_error", { name: this.name, ...ep });
