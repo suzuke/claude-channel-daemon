@@ -100,7 +100,11 @@ e2e/
 │   ├── adapter-integration.test.ts    # T5/T6: Telegram adapter integration
 │   ├── fleet-lifecycle.test.ts        # T1/T2/T5/T6: Fleet start/stop/routing
 │   ├── fleet-respawn.test.ts          # T7/T8/T10: Crash respawn, notifications, snapshots
-│   └── log-truncate.test.ts           # T9: Log file truncation
+│   ├── log-truncate.test.ts           # T9: Log file truncation
+│   ├── cross-instance.test.ts         # T11: Cross-instance communication
+│   ├── context-rotation.test.ts       # T12: Context rotation via max_age
+│   ├── scheduling.test.ts             # T13: Schedule create/trigger/delete
+│   └── workflow-template.test.ts      # T15: Workflow template injection
 └── results/                           # Test output (gitignored)
 ```
 
@@ -114,8 +118,86 @@ e2e/
 ./e2e/scripts/run-e2e.sh --keep-vm
 
 # Run specific test file
-./e2e/scripts/run-e2e.sh fleet-respawn
+./e2e/scripts/run-e2e.sh workflow-template
 
 # Pass extra Vitest flags
 ./e2e/scripts/run-e2e.sh --reporter=verbose
+```
+
+## Manual Verification
+
+Step-by-step guide for manually verifying E2E tests.
+
+### Prerequisites
+
+```bash
+# Verify tools are installed
+which tart sshpass
+
+# Confirm golden image exists
+tart list --quiet | grep agend-e2e-golden
+# If missing, build it (~10 min):
+./e2e/vm-setup/setup-vm.sh
+```
+
+### Run All Tests
+
+```bash
+./e2e/scripts/run-e2e.sh
+```
+
+Tests run inside an ephemeral Tart VM. The script handles clone, boot, rsync, npm ci, vitest, results collection, and cleanup automatically.
+
+### Run Specific Test File
+
+```bash
+# Only run workflow template tests
+./e2e/scripts/run-e2e.sh workflow-template
+
+# Only run cross-instance tests
+./e2e/scripts/run-e2e.sh cross-instance
+
+# Only run fleet respawn + crash tests
+./e2e/scripts/run-e2e.sh fleet-respawn
+```
+
+### Debug a Failing Test
+
+Use `--keep-vm` to preserve the VM after tests complete:
+
+```bash
+./e2e/scripts/run-e2e.sh --keep-vm fleet-respawn
+```
+
+After the run, the script prints the VM name and IP. SSH in to inspect:
+
+```bash
+# Find the VM IP
+tart ip agend-e2e-test-<pid>
+
+# SSH into the VM (user: admin, password: admin)
+sshpass -p admin ssh -o StrictHostKeyChecking=no admin@<VM_IP>
+
+# Inside the VM:
+cd ~/agend
+ls e2e/results/              # JUnit XML test results
+cat /tmp/ae2e-*/instances/*/mcp-instructions.txt  # MCP instructions
+cat /tmp/ae2e-*/instances/*/statusline.json       # Instance status
+cat /tmp/ae2e-*/instances/*/rotation-state.json   # Rotation snapshots
+```
+
+When done, clean up the VM manually:
+
+```bash
+tart stop agend-e2e-test-<pid>
+tart delete agend-e2e-test-<pid>
+```
+
+### View Test Results
+
+Test results are rsync'd back to `e2e/results/` on the host after each run:
+
+```bash
+# JUnit XML (for CI integration)
+cat e2e/results/junit.xml
 ```
