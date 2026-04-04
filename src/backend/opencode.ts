@@ -64,11 +64,11 @@ export class OpenCodeBackend implements CliBackend {
     // (OpenCode doesn't inject MCP instructions into its system prompt)
     const instructionsPath = join(this.instanceDir, "fleet-instructions.md");
     writeFileSync(instructionsPath, this.buildInstructions(config));
-    const instructions = (oc.instructions ?? []) as string[];
-    if (!instructions.includes(instructionsPath)) {
-      instructions.push(instructionsPath);
+    const contextPaths = (oc.contextPaths ?? []) as string[];
+    if (!contextPaths.includes(instructionsPath)) {
+      contextPaths.push(instructionsPath);
     }
-    oc.instructions = instructions;
+    oc.contextPaths = contextPaths;
 
     writeFileSync(configPath, JSON.stringify(oc, null, 2));
   }
@@ -173,9 +173,9 @@ export class OpenCodeBackend implements CliBackend {
         }
         // Remove fleet instructions reference and file
         const instructionsPath = join(this.instanceDir, "fleet-instructions.md");
-        if (Array.isArray(oc.instructions)) {
-          oc.instructions = oc.instructions.filter((p: string) => p !== instructionsPath);
-          if (oc.instructions.length === 0) delete oc.instructions;
+        if (Array.isArray(oc.contextPaths)) {
+          oc.contextPaths = oc.contextPaths.filter((p: string) => p !== instructionsPath);
+          if (oc.contextPaths.length === 0) delete oc.contextPaths;
         }
         try { unlinkSync(instructionsPath); } catch { /* may not exist */ }
         writeFileSync(configPath, JSON.stringify(oc, null, 2));
