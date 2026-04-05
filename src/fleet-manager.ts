@@ -272,30 +272,41 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       this.logger.info("Auto-creating general instance for General Topic");
       const generalDir = join(homedir(), ".agend", "general");
       mkdirSync(generalDir, { recursive: true });
-      const claudeMdPath = join(generalDir, "CLAUDE.md");
-      if (!existsSync(claudeMdPath)) {
-        writeFileSync(claudeMdPath, `# General Assistant
+      const INSTRUCTIONS_FILENAME: Record<string, string> = {
+        "claude-code": "CLAUDE.md",
+        "codex": "AGENTS.md",
+        "gemini-cli": "GEMINI.md",
+        "opencode": "AGENTS.md",
+        "kiro-cli": ".kiro/steering/project.md",
+        "mock": "CLAUDE.md",
+      };
+      const backendName = (fleet.defaults as Record<string, unknown>)?.backend as string ?? "claude-code";
+      const instructionsFile = INSTRUCTIONS_FILENAME[backendName] ?? "CLAUDE.md";
+      const instructionsPath = join(generalDir, instructionsFile);
+      mkdirSync(dirname(instructionsPath), { recursive: true });
+      if (!existsSync(instructionsPath)) {
+        writeFileSync(instructionsPath, `# General Assistant
 
-你是這個 AgEnD fleet 的通用入口。
+You are the general entry point for this AgEnD fleet.
 
-## 行為準則
+## Guidelines
 
-- 簡單任務（搜尋、翻譯、一般問答）：自己處理。
-- 屬於特定專案的任務：用 list_instances() 找到對應 agent，需要時用 start_instance() 啟動，再用 send_to_instance() 委派。
-- 需要多個 agent 協作的任務：協調各 agent 並行或串行執行，收集結果後彙整。
-- 使用者想開新的專案 agent：用 create_instance() 建立。
-- 不再需要的 instance（例如功能完成）：用 delete_instance() 清除。
-- 收到其他 instance 委派的任務時，完成後一定要用 send_to_instance() 回報結果。
+- Simple tasks (search, translate, Q&A): handle yourself.
+- Project-specific tasks: use list_instances() to find the right agent, start_instance() if needed, then delegate via send_to_instance().
+- Multi-agent tasks: coordinate agents in parallel or series, collect and summarize results.
+- User wants a new project agent: use create_instance().
+- Instance no longer needed: use delete_instance().
+- When delegated a task, always report results back via send_to_instance().
 
-## 委派原則
+## Delegation Principles
 
-只在有具體理由時才委派：
-- 任務需要存取特定專案的檔案
-- 任務可以從多 agent 平行執行中受益
-- 保留自己的 context 更重要，把不相關的工作交出去
-- 絕不把任務回委給委派你的 instance
+Only delegate when there is a concrete reason:
+- Task needs access to a specific project's files
+- Task benefits from multi-agent parallel execution
+- Preserving your own context is more important — offload unrelated work
+- Never re-delegate back to the instance that delegated to you
 
-自己能做的，就自己做。
+If you can do it yourself, do it yourself.
 `, "utf-8");
       }
       const generalConfig: InstanceConfig = {
@@ -765,7 +776,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
       ipc.send({
         type: "fleet_schedule_trigger",
-        payload: { schedule_id: id, message: `[排程任務] ${message}`, label },
+        payload: { schedule_id: id, message: `[Scheduled] ${message}`, label },
         meta: { chat_id: reply_chat_id, thread_id: reply_thread_id, user: "scheduler" },
       });
       return true;
@@ -792,7 +803,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   private notifySourceTopic(schedule: Schedule): void {
     if (!this.adapter) return;
-    const text = `⏰ 排程「${schedule.label ?? schedule.id}」已觸發，目標實例：${schedule.target}`;
+    const text = `⏰ Schedule "${schedule.label ?? schedule.id}" triggered, target: ${schedule.target}`;
     this.adapter.sendText(schedule.reply_chat_id, text, {
       threadId: schedule.reply_thread_id ?? undefined,
     }).catch((err: unknown) => this.logger.error({ err }, "Failed to send cross-instance notification"));
@@ -800,7 +811,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   private notifyScheduleFailure(schedule: Schedule): void {
     if (!this.adapter) return;
-    const text = `⏰ 排程「${schedule.label ?? schedule.id}」觸發失敗：實例 ${schedule.target} 未在線。`;
+    const text = `⏰ Schedule "${schedule.label ?? schedule.id}" trigger failed: instance ${schedule.target} is offline.`;
     this.adapter.sendText(schedule.reply_chat_id, text, {
       threadId: schedule.reply_thread_id ?? undefined,
     }).catch((err: unknown) => this.logger.error({ err }, "Failed to send schedule failure notification"));

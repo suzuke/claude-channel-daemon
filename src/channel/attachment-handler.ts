@@ -43,14 +43,14 @@ export async function processAttachments(
         const localPath = await adapter.downloadAttachment(voiceAttachment.fileId);
         const result = await transcribe(localPath, groqKey);
         try { unlinkSync(localPath); } catch { /* ignore */ }
-        text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
+        text = text ? `${text}\n\n[Voice message] ${result.text}` : `[Voice message] ${result.text}`;
         logger.info({ ...(logPrefix ? { context: logPrefix } : {}), transcription: result.text.slice(0, 80) }, "Voice transcribed");
       } catch (err) {
         logger.warn({ err: (err as Error).message }, "Voice transcription failed");
-        text = text || "[語音訊息 — 轉錄失敗]";
+        text = text || "[Voice message — transcription failed]";
       }
     } else {
-      text = text || "[語音訊息 — 未設定 STT API key]";
+      text = text || "[Voice message — STT API key not set]";
     }
     extraMeta.attachment_file_id = voiceAttachment.fileId;
   }
