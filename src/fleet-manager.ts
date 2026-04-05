@@ -349,6 +349,21 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       for (const name of Object.keys(fleet.instances)) {
         this.startStatuslineWatcher(name);
       }
+
+      // Notify General topic that fleet is up
+      const total = Object.keys(fleet.instances).length;
+      const started = this.daemons.size;
+      const failedNames = Object.keys(fleet.instances).filter(n => !this.daemons.has(n));
+      const generalName = this.findGeneralInstance();
+      const generalThreadId = generalName ? fleet.instances[generalName]?.topic_id : undefined;
+      if (this.adapter && fleet.channel?.group_id) {
+        const text = failedNames.length === 0
+          ? `Fleet started. ${started}/${total} instances started.`
+          : `Fleet started. ${started}/${total} instances started. Failed: ${failedNames.join(", ")}`;
+        this.adapter.sendText(String(fleet.channel.group_id), text, {
+          threadId: generalThreadId != null ? String(generalThreadId) : undefined,
+        }).catch(e => this.logger.debug({ err: e }, "Failed to send fleet start notification"));
+      }
     }
 
     // Health HTTP endpoint
@@ -1465,8 +1480,11 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.logger.info(`Graceful restart: waiting for ${instanceNames.length} instances to idle...`);
 
     const groupId = this.fleetConfig?.channel?.group_id;
+    const generalName = this.findGeneralInstance();
+    const generalThreadId = generalName ? this.fleetConfig?.instances[generalName]?.topic_id : undefined;
+    const notifyOpts = { threadId: generalThreadId != null ? String(generalThreadId) : undefined };
     if (groupId && this.adapter) {
-      await this.adapter.sendText(String(groupId), `🔄 Graceful restart initiated — waiting for all instances to idle...`)
+      await this.adapter.sendText(String(groupId), `🔄 Graceful restart initiated — waiting for all instances to idle...`, notifyOpts)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart notification"));
     }
 
@@ -1529,7 +1547,13 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     this.logger.info("Graceful restart complete");
     if (groupId && this.adapter) {
-      await this.adapter.sendText(String(groupId), `✅ Graceful restart complete — ${this.daemons.size} instances running`)
+      const total = Object.keys(fleet.instances).length;
+      const started = this.daemons.size;
+      const failedNames = Object.keys(fleet.instances).filter(n => !this.daemons.has(n));
+      const restartText = failedNames.length === 0
+        ? `✅ Graceful restart complete. ${started}/${total} instances started.`
+        : `✅ Graceful restart complete. ${started}/${total} instances started. Failed: ${failedNames.join(", ")}`;
+      await this.adapter.sendText(String(groupId), restartText, notifyOpts)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
 
       // Notify each instance's channel so Claude resumes work
