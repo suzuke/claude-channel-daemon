@@ -17,58 +17,93 @@ const base = import.meta.env.BASE_URL;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AgEnD — {t(locale, 'hero.headline')}</title>
-    <meta name="description" content={t(locale, 'hero.subheadline')} />
-    <meta property="og:title" content={`AgEnD — ${t(locale, 'hero.headline')}`} />
-    <meta property="og:description" content={t(locale, 'hero.subheadline')} />
+    <title>AgEnD — {t(locale, 'hero.tagline')} {t(locale, 'hero.taglineAccent')}</title>
+    <meta name="description" content={t(locale, 'hero.subtitle')} />
+    <meta property="og:title" content={`AgEnD — ${t(locale, 'hero.tagline')} ${t(locale, 'hero.taglineAccent')}`} />
+    <meta property="og:description" content={t(locale, 'hero.subtitle')} />
     <meta property="og:type" content="website" />
     <meta property="og:image" content={`${Astro.site}${base.slice(1)}og-image.svg`} />
     <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet" />
     <script type="application/ld+json" set:html={JSON.stringify({
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "AgEnD",
-      "description": t(locale, 'hero.subheadline'),
+      "description": t(locale, 'hero.subtitle'),
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "macOS, Linux",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "license": "https://opensource.org/licenses/MIT"
     })} />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
   </head>
-  <body class="bg-bg text-text-primary font-sans antialiased">
+  <body class="bg-bg text-text-primary antialiased">
     <!-- Nav -->
-    <nav class="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur">
-      <div class="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-        <a href={locale === 'en' ? base : `${base}zh-tw/`} class="text-accent font-bold text-lg font-mono">AgEnD</a>
-        <div class="flex items-center gap-6 text-sm text-text-secondary">
-          <a href="#features" class="hover:text-text-primary">{t(locale, 'nav.features')}</a>
-          <a href="#quickstart" class="hover:text-text-primary">{t(locale, 'nav.quickstart')}</a>
-          <a href="#faq" class="hover:text-text-primary">{t(locale, 'nav.faq')}</a>
-          <a href={langSwitchHref(locale, base)} class="border border-border rounded px-2 py-0.5 hover:text-text-primary">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border/50 bg-bg/80 backdrop-blur-lg">
+      <div class="mx-auto flex max-w-6xl items-center justify-between px-6 h-16">
+        <a href={locale === 'en' ? base : `${base}zh-tw/`} class="flex items-center gap-2">
+          <span class="text-accent font-bold text-lg font-mono">AgEnD</span>
+        </a>
+        <div class="hidden md:flex items-center gap-8 text-sm text-text-secondary">
+          <a href="#features" class="hover:text-text-primary transition-colors">{t(locale, 'nav.features')}</a>
+          <a href="#quickstart" class="hover:text-text-primary transition-colors">{t(locale, 'nav.quickstart')}</a>
+          <a href="#howitworks" class="hover:text-text-primary transition-colors">{t(locale, 'nav.workflow')}</a>
+          <a href="#faq" class="hover:text-text-primary transition-colors">{t(locale, 'nav.faq')}</a>
+        </div>
+        <div class="flex items-center gap-4">
+          <a href={langSwitchHref(locale, base)}
+             class="text-sm text-text-secondary border border-border rounded-lg px-3 py-1.5 hover:text-text-primary hover:border-text-secondary transition-colors">
             {t(locale, 'nav.langSwitch')}
+          </a>
+          <a href="https://github.com/suzuke/AgEnD"
+             class="hidden sm:flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors">
+            <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+          <a href="#quickstart"
+             class="bg-accent text-bg font-semibold text-sm px-4 py-2 rounded-xl hover:opacity-90 transition-opacity">
+            {t(locale, 'hero.cta')}
           </a>
         </div>
       </div>
     </nav>
 
-    <main class="mx-auto max-w-5xl px-6">
+    <main>
       <slot />
     </main>
 
     <!-- Footer -->
-    <footer class="border-t border-border mt-24 py-8 text-center text-sm text-text-secondary">
-      <div class="flex items-center justify-center gap-4">
-        <a href="https://github.com/suzuke/AgEnD" class="hover:text-text-primary">GitHub</a>
-        <span>·</span>
-        <a href="https://www.npmjs.com/package/@suzuke/agend" class="hover:text-text-primary">npm</a>
-        <span>·</span>
-        <span>{t(locale, 'footer.license')}</span>
+    <footer class="border-t border-border py-10">
+      <div class="mx-auto max-w-6xl px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-text-muted">
+        <div class="flex items-center gap-2">
+          <span class="text-accent font-bold font-mono">AgEnD</span>
+          <span class="text-text-secondary">·</span>
+          <span>{t(locale, 'footer.tagline')}</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <a href="https://github.com/suzuke/AgEnD" class="hover:text-text-secondary transition-colors">GitHub</a>
+          <span>·</span>
+          <a href="https://www.npmjs.com/package/@suzuke/agend" class="hover:text-text-secondary transition-colors">npm</a>
+          <span>·</span>
+          <a href="https://github.com/suzuke/AgEnD/tree/main/docs" class="hover:text-text-secondary transition-colors">Docs</a>
+          <span>·</span>
+          <span>{t(locale, 'footer.license')}</span>
+        </div>
       </div>
     </footer>
+
+    <script>
+      // Scroll reveal
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+          }
+        });
+      }, { threshold: 0.1 });
+      document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+    </script>
   </body>
 </html>

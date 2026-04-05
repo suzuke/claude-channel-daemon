@@ -1,0 +1,30 @@
+---
+import type { Locale } from '../i18n/utils';
+import en from '../i18n/en.json';
+import zhTw from '../i18n/zh-tw.json';
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const data = locale === 'en' ? en : zhTw;
+---
+
+<section class="py-28 relative noise">
+  <div class="absolute inset-0 bg-surface/50"></div>
+  <div class="relative mx-auto max-w-5xl px-6">
+    <div class="text-center mb-16">
+      <p class="section-label mb-3">{data.backends.sectionLabel}</p>
+      <h2 class="font-display font-bold text-3xl sm:text-4xl tracking-tight">{data.backends.title}</h2>
+    </div>
+
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 stagger">
+      {data.backends.items.map((item: any) => (
+        <div class="reveal bg-bg border border-border rounded-2xl p-5 text-center feature-card">
+          <h3 class="font-display font-bold text-sm mb-1">{item.name}</h3>
+          <p class="text-xs text-text-muted">{item.by}</p>
+        </div>
+      ))}
+    </div>
+
+    <p class="text-center text-text-secondary text-sm mt-8">{data.backends.subtitle}</p>
+  </div>
+</section>

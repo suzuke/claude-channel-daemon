@@ -1,24 +1,30 @@
 ---
 import type { Locale } from '../i18n/utils';
-import { t } from '../i18n/utils';
+import en from '../i18n/en.json';
+import zhTw from '../i18n/zh-tw.json';
 
 interface Props { locale: Locale }
 const { locale } = Astro.props;
-
-const items = ['1', '2', '3', '4'];
+const data = locale === 'en' ? en : zhTw;
 ---
 
-<section id="faq" class="py-20">
-  <h2 class="text-2xl font-bold mb-10 text-center">{t(locale, 'faq.title')}</h2>
-  <div class="max-w-2xl mx-auto divide-y divide-border">
-    {items.map(i => (
-      <details class="group py-4">
-        <summary class="cursor-pointer font-semibold text-text-primary hover:text-accent flex items-center justify-between">
-          {t(locale, `faq.q${i}`)}
-          <span class="text-text-secondary group-open:rotate-45 transition-transform text-lg">+</span>
-        </summary>
-        <p class="mt-2 text-text-secondary text-sm">{t(locale, `faq.a${i}`)}</p>
-      </details>
-    ))}
+<section id="faq" class="py-28 relative">
+  <div class="mx-auto max-w-3xl px-6">
+    <div class="text-center mb-16">
+      <p class="section-label mb-3">{data.faq.sectionLabel}</p>
+      <h2 class="font-display font-bold text-3xl sm:text-4xl tracking-tight">{data.faq.title}</h2>
+    </div>
+
+    <div class="divide-y divide-border stagger">
+      {data.faq.items.map((item: any) => (
+        <details class="reveal group py-5">
+          <summary class="cursor-pointer font-display font-semibold text-text-primary hover:text-accent flex items-center justify-between transition-colors">
+            {item.q}
+            <span class="text-text-secondary group-open:rotate-45 transition-transform duration-200 text-lg ml-4 shrink-0">+</span>
+          </summary>
+          <p class="mt-3 text-text-secondary text-sm leading-relaxed">{item.a}</p>
+        </details>
+      ))}
+    </div>
   </div>
 </section>

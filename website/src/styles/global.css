@@ -3,12 +3,105 @@
 @theme {
   --color-bg: #0d1117;
   --color-surface: #161b22;
+  --color-raised: #1c2129;
   --color-border: #30363d;
   --color-text-primary: #f0f6fc;
   --color-text-secondary: #8b949e;
-  --color-accent: #58a6ff;
+  --color-text-muted: #484f58;
+  --color-accent: #2AABEE;
+  --color-accent-dim: rgba(42, 171, 238, 0.1);
   --color-success: #7ee787;
   --color-error: #f85149;
 
-  --font-family-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-family-display: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-family-sans);
+  }
+}
+
+/* Dot grid background for hero */
+.dot-grid {
+  background-image: radial-gradient(circle, var(--color-border) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Noise texture overlay */
+.noise::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.03;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+}
+
+/* Hero glow effect */
+.hero-glow {
+  background: radial-gradient(ellipse 60% 50% at 50% 40%, rgba(42, 171, 238, 0.08), transparent);
+}
+
+/* Scroll reveal animation */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Stagger children */
+.stagger > .reveal:nth-child(1) { transition-delay: 0ms; }
+.stagger > .reveal:nth-child(2) { transition-delay: 80ms; }
+.stagger > .reveal:nth-child(3) { transition-delay: 160ms; }
+.stagger > .reveal:nth-child(4) { transition-delay: 240ms; }
+.stagger > .reveal:nth-child(5) { transition-delay: 320ms; }
+.stagger > .reveal:nth-child(6) { transition-delay: 400ms; }
+.stagger > .reveal:nth-child(7) { transition-delay: 480ms; }
+.stagger > .reveal:nth-child(8) { transition-delay: 560ms; }
+.stagger > .reveal:nth-child(9) { transition-delay: 640ms; }
+.stagger > .reveal:nth-child(10) { transition-delay: 720ms; }
+
+/* Workflow pulse animation */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Flow arrow animation */
+@keyframes flow {
+  0% { stroke-dashoffset: 20; }
+  100% { stroke-dashoffset: 0; }
+}
+.animate-flow {
+  stroke-dasharray: 8 4;
+  animation: flow 1.5s linear infinite;
+}
+
+/* Feature card hover */
+.feature-card {
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.feature-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-accent);
+}
+
+/* Section label (uppercase accent) */
+.section-label {
+  font-family: var(--font-family-display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-accent);
 }

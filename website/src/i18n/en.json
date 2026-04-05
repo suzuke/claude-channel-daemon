@@ -2,74 +2,113 @@
   "nav": {
     "features": "Features",
     "quickstart": "Quick Start",
+    "workflow": "Workflow",
     "faq": "FAQ",
     "langSwitch": "中文"
   },
   "hero": {
-    "headline": "Your always-on AI engineering team",
-    "subheadline": "Manage multiple AI coding agents across Telegram and Discord. 4 backends, fleet mode, scheduling, cost guards. Always running.",
+    "tagline": "Stop staring at tmux.",
+    "taglineAccent": "Start shipping from Telegram.",
+    "subtitle": "Agent Engineering Daemon — manage a fleet of AI coding agents from your phone. 5 backends, fleet mode, agent collaboration, zero babysitting.",
     "cta": "Get Started",
-    "github": "GitHub →"
+    "github": "GitHub",
+    "badges": "macOS · Linux · MIT License"
   },
   "terminal": {
     "cmd": "$ agend fleet start",
-    "line1": "✓ web-app — Claude Code via Telegram",
-    "line2": "✓ api-server — Codex via Discord",
-    "line3": "✓ ml-pipeline — Gemini via Telegram",
-    "status": "Fleet running — 3 instances, 2 channels"
+    "line1": "✓ web-app     — Claude Code  (Telegram)",
+    "line2": "✓ api-server  — Codex        (Discord)",
+    "line3": "✓ ml-pipeline — Gemini CLI   (Telegram)",
+    "line4": "✓ infra       — Kiro CLI     (Telegram)",
+    "status": "Fleet ready — 4 instances, 2 channels"
   },
   "problem": {
-    "without": "Without AgEnD",
-    "withTitle": "With AgEnD",
-    "pain1": "One terminal = one session",
-    "pain2": "Close terminal = lost session",
-    "pain3": "No scheduling",
-    "pain4": "No cost control",
-    "pain5": "Agents can't talk to each other",
-    "gain1": "N projects in parallel",
-    "gain2": "Always-on via daemon",
-    "gain3": "Cron scheduling built-in",
-    "gain4": "Daily cost guards",
-    "gain5": "P2P agent collaboration"
+    "sectionLabel": "THE PROBLEM",
+    "title": "Why AgEnD?",
+    "pairs": [
+      {
+        "problem": "Close the terminal, agent goes offline",
+        "problemIcon": "terminal",
+        "solution": "System daemon — survives reboots, zero babysitting",
+        "solutionIcon": "server"
+      },
+      {
+        "problem": "One terminal = one project, no multitasking",
+        "problemIcon": "layout",
+        "solution": "One bot, unlimited projects running in parallel",
+        "solutionIcon": "layers"
+      },
+      {
+        "problem": "Agents work in silos, can't coordinate",
+        "problemIcon": "user",
+        "solution": "MCP peer-to-peer collaboration, auto-delegation",
+        "solutionIcon": "users"
+      }
+    ]
   },
   "features": {
-    "title": "Features",
-    "fleet": { "name": "Fleet Mode", "desc": "N agents running simultaneously" },
-    "schedule": { "name": "Scheduling", "desc": "Cron-based task scheduling" },
-    "cost": { "name": "Cost Guard", "desc": "Daily spending limits" },
-    "p2p": { "name": "P2P Collaboration", "desc": "Agents communicate with each other" },
-    "rotation": { "name": "Context Rotation", "desc": "Auto-refresh stale sessions" },
-    "backend": { "name": "Multi-Backend", "desc": "Claude Code, Codex, Gemini CLI, OpenCode" },
-    "diagnostics": { "name": "Fleet Diagnostics", "desc": "/status & /sysinfo health monitoring" }
+    "sectionLabel": "CAPABILITIES",
+    "title": "Everything you need to run a fleet",
+    "items": [
+      { "icon": "rocket", "name": "Fleet Mode", "desc": "N projects, each a Telegram Forum Topic. Independent sessions with crash recovery." },
+      { "icon": "shuffle", "name": "Multi-Backend", "desc": "Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI. Switch or mix freely." },
+      { "icon": "users", "name": "Agent Collaboration", "desc": "MCP tools for discovery, delegation, and result reporting between agents." },
+      { "icon": "smartphone", "name": "Mobile Control", "desc": "Approve tool use, restart sessions, manage your fleet from Telegram inline buttons." },
+      { "icon": "shield", "name": "Cost Guard", "desc": "Per-instance daily spending limits. Auto-pause and alerts before bill shock." },
+      { "icon": "clock", "name": "Persistent Schedules", "desc": "Cron-based tasks backed by SQLite. Survives restarts." },
+      { "icon": "monitor", "name": "Web Dashboard", "desc": "Live fleet monitoring with SSE updates and integrated chat UI." },
+      { "icon": "zap", "name": "Model Failover", "desc": "Auto-switch to backup model on rate limits with 5-minute cooldown." },
+      { "icon": "mic", "name": "Voice Messages", "desc": "Groq Whisper transcription — talk to your agents." },
+      { "icon": "file-text", "name": "HTML Export", "desc": "Export sessions as standalone HTML for sharing or archiving." }
+    ]
   },
   "quickstart": {
-    "title": "Quick Start",
-    "step1": { "label": "Install", "cmd": "npm i -g agend" },
-    "step2": { "label": "Configure", "cmd": "agend init" },
-    "step3": { "label": "Launch", "cmd": "agend fleet start" }
+    "sectionLabel": "GET STARTED",
+    "title": "Up and running in minutes",
+    "step1": { "label": "Install", "cmd": "npm install -g @suzuke/agend" },
+    "step2": { "label": "Setup", "cmd": "agend quickstart" },
+    "step3": { "label": "Launch", "cmd": "agend fleet start" },
+    "footer": "Open Telegram, send a message, start coding from your phone."
   },
-  "architecture": {
-    "title": "Architecture",
-    "channel1": "Telegram",
-    "channel2": "Discord",
-    "core": "AgEnD",
-    "backend1": "Claude Code",
-    "backend2": "Codex",
-    "backend3": "Gemini CLI",
-    "backend4": "OpenCode"
+  "howitworks": {
+    "sectionLabel": "HOW IT WORKS",
+    "title": "From your phone to your fleet",
+    "steps": [
+      { "icon": "send", "label": "You", "desc": "Send a message to your Telegram or Discord bot" },
+      { "icon": "bot", "label": "General Topic", "desc": "Interprets natural language, routes to the right agent" },
+      { "icon": "cpu", "label": "Agent Fleet", "desc": "Isolated tmux sessions, each with its own project and backend" },
+      { "icon": "git-merge", "label": "Collaborate", "desc": "Agents delegate tasks, share context via MCP tools" },
+      { "icon": "check-circle", "label": "Results", "desc": "Flow back to your chat. Permissions arrive as inline buttons." }
+    ]
+  },
+  "backends": {
+    "sectionLabel": "BACKENDS",
+    "title": "Supported backends",
+    "subtitle": "Any CLI that reads stdin/stdout. Extensible via the CliBackend interface.",
+    "items": [
+      { "name": "Claude Code", "by": "Anthropic" },
+      { "name": "Codex", "by": "OpenAI" },
+      { "name": "Gemini CLI", "by": "Google" },
+      { "name": "OpenCode", "by": "Community" },
+      { "name": "Kiro CLI", "by": "AWS" }
+    ]
   },
   "faq": {
-    "title": "FAQ",
-    "q1": "Is it free?",
-    "a1": "Yes. Open source, MIT license.",
-    "q2": "Which backends are supported?",
-    "a2": "Claude Code, OpenAI Codex, Gemini CLI, and OpenCode. Add your own via the CliBackend interface.",
-    "q3": "Which messaging channels?",
-    "a3": "Telegram and Discord. Both support topic/channel-based fleet routing.",
-    "q4": "Does it need a server?",
-    "a4": "No. Runs on any machine with tmux."
+    "sectionLabel": "FAQ",
+    "title": "Frequently asked questions",
+    "items": [
+      { "q": "Is it free?", "a": "Yes. Open source, MIT license. You only pay for the AI API usage." },
+      { "q": "Which backends are supported?", "a": "Claude Code, OpenAI Codex, Gemini CLI, OpenCode, and Kiro CLI. Add your own via the CliBackend interface." },
+      { "q": "Which messaging channels?", "a": "Telegram and Discord. Both support topic/channel-based fleet routing." },
+      { "q": "Does it need a server?", "a": "No. Runs on any macOS or Linux machine with tmux. Install as a system service for auto-start on boot." },
+      { "q": "How do agents collaborate?", "a": "Via MCP tools: send_to_instance, delegate_task, report_result. Agents discover each other, delegate work, and report results — all peer-to-peer." },
+      { "q": "What is the General Topic?", "a": "A natural language dispatcher. Send any task to the General topic — it figures out which agent should handle it and delegates automatically." },
+      { "q": "How much does it cost to run?", "a": "AgEnD itself is free. Costs come from AI API usage. Use cost guards to set daily per-instance spending limits." },
+      { "q": "Can I connect my local Claude Code?", "a": "Yes. External sessions connect via IPC socket and appear as fleet members. See the docs for setup." }
+    ]
   },
   "footer": {
-    "license": "MIT License"
+    "license": "MIT License",
+    "tagline": "The operations layer for AI coding agents."
   }
 }

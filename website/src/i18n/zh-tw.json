@@ -2,74 +2,113 @@
   "nav": {
     "features": "功能",
     "quickstart": "快速開始",
+    "workflow": "運作原理",
     "faq": "常見問題",
     "langSwitch": "EN"
   },
   "hero": {
-    "headline": "你的 always-on AI 工程團隊",
-    "subheadline": "從 Telegram 和 Discord 管理多個 AI coding agent。4 種 backend、Fleet mode、排程、花費控制，永不中斷。",
+    "tagline": "別再盯著 tmux。",
+    "taglineAccent": "從 Telegram 開始交付。",
+    "subtitle": "Agent Engineering Daemon — 用手機管理一整個 AI coding agent 團隊。5 種 backend、fleet mode、agent 協作，不用顧。",
     "cta": "快速開始",
-    "github": "GitHub →"
+    "github": "GitHub",
+    "badges": "macOS · Linux · MIT 授權"
   },
   "terminal": {
     "cmd": "$ agend fleet start",
-    "line1": "✓ web-app — Claude Code via Telegram",
-    "line2": "✓ api-server — Codex via Discord",
-    "line3": "✓ ml-pipeline — Gemini via Telegram",
-    "status": "Fleet 運行中 — 3 個實例、2 個頻道"
+    "line1": "✓ web-app     — Claude Code  (Telegram)",
+    "line2": "✓ api-server  — Codex        (Discord)",
+    "line3": "✓ ml-pipeline — Gemini CLI   (Telegram)",
+    "line4": "✓ infra       — Kiro CLI     (Telegram)",
+    "status": "Fleet 就緒 — 4 個 instance、2 個 channel"
   },
   "problem": {
-    "without": "沒有 AgEnD",
-    "withTitle": "有了 AgEnD",
-    "pain1": "一個 terminal = 一個 session",
-    "pain2": "關掉 terminal = session 消失",
-    "pain3": "沒有排程功能",
-    "pain4": "無法控制花費",
-    "pain5": "Agent 之間無法溝通",
-    "gain1": "N 個專案同時運行",
-    "gain2": "Daemon 常駐、永不中斷",
-    "gain3": "內建 Cron 排程",
-    "gain4": "每日花費上限",
-    "gain5": "P2P agent 協作"
+    "sectionLabel": "問題",
+    "title": "為什麼用 AgEnD？",
+    "pairs": [
+      {
+        "problem": "關掉終端機，agent 就斷線",
+        "problemIcon": "terminal",
+        "solution": "系統服務常駐，重開機也不怕，不用顧",
+        "solutionIcon": "server"
+      },
+      {
+        "problem": "一個終端機 = 一個專案，無法多工",
+        "problemIcon": "layout",
+        "solution": "一個 bot，無限專案同時跑",
+        "solutionIcon": "layers"
+      },
+      {
+        "problem": "Agent 各做各的，無法協作",
+        "problemIcon": "user",
+        "solution": "MCP 點對點協作，自動委派任務",
+        "solutionIcon": "users"
+      }
+    ]
   },
   "features": {
-    "title": "功能特色",
-    "fleet": { "name": "Fleet Mode", "desc": "N 個 agent 同時運行" },
-    "schedule": { "name": "排程系統", "desc": "Cron 定時任務" },
-    "cost": { "name": "花費守衛", "desc": "每日花費上限" },
-    "p2p": { "name": "P2P 協作", "desc": "Agent 互相溝通" },
-    "rotation": { "name": "Context 輪替", "desc": "自動刷新過期 session" },
-    "backend": { "name": "多 Backend", "desc": "Claude Code、Codex、Gemini CLI、OpenCode" },
-    "diagnostics": { "name": "Fleet 診斷", "desc": "/status 和 /sysinfo 健康監控" }
+    "sectionLabel": "功能特色",
+    "title": "管理 fleet 所需的一切",
+    "items": [
+      { "icon": "rocket", "name": "Fleet Mode", "desc": "N 個專案，每個都是獨立的 Telegram Forum Topic。獨立 session，crash 自動恢復。" },
+      { "icon": "shuffle", "name": "多 Backend", "desc": "Claude Code、Codex、Gemini CLI、OpenCode、Kiro CLI，自由切換或混用。" },
+      { "icon": "users", "name": "Agent 協作", "desc": "MCP tools 互相發現、委派任務、回報結果。" },
+      { "icon": "smartphone", "name": "手機操控", "desc": "從 Telegram inline 按鈕核准工具、重啟 session、管理 fleet。" },
+      { "icon": "shield", "name": "花費守衛", "desc": "每個 instance 每日限額，超過自動暫停並通知。" },
+      { "icon": "clock", "name": "持久化排程", "desc": "Cron 排程任務，SQLite 儲存，重啟不遺失。" },
+      { "icon": "monitor", "name": "Web Dashboard", "desc": "瀏覽器即時 fleet 監控，SSE 更新 + 整合聊天介面。" },
+      { "icon": "zap", "name": "Model Failover", "desc": "被限速時自動切換備用 model，5 分鐘冷卻期。" },
+      { "icon": "mic", "name": "語音訊息", "desc": "Groq Whisper 轉文字，用說的跟 agent 溝通。" },
+      { "icon": "file-text", "name": "HTML 匯出", "desc": "把 session 匯出成獨立 HTML 檔，方便分享或存檔。" }
+    ]
   },
   "quickstart": {
-    "title": "快速開始",
-    "step1": { "label": "安裝", "cmd": "npm i -g agend" },
-    "step2": { "label": "設定", "cmd": "agend init" },
-    "step3": { "label": "啟動", "cmd": "agend fleet start" }
+    "sectionLabel": "開始使用",
+    "title": "幾分鐘就能上線",
+    "step1": { "label": "安裝", "cmd": "npm install -g @suzuke/agend" },
+    "step2": { "label": "設定", "cmd": "agend quickstart" },
+    "step3": { "label": "啟動", "cmd": "agend fleet start" },
+    "footer": "打開 Telegram，傳訊息，開始用手機寫 code。"
   },
-  "architecture": {
-    "title": "架構",
-    "channel1": "Telegram",
-    "channel2": "Discord",
-    "core": "AgEnD",
-    "backend1": "Claude Code",
-    "backend2": "Codex",
-    "backend3": "Gemini CLI",
-    "backend4": "OpenCode"
+  "howitworks": {
+    "sectionLabel": "運作原理",
+    "title": "從你的手機到 agent 團隊",
+    "steps": [
+      { "icon": "send", "label": "你", "desc": "傳訊息給你的 Telegram 或 Discord bot" },
+      { "icon": "bot", "label": "General Topic", "desc": "解讀自然語言，路由到對的 agent" },
+      { "icon": "cpu", "label": "Agent Fleet", "desc": "獨立 tmux session，各有自己的專案和 backend" },
+      { "icon": "git-merge", "label": "協作", "desc": "Agent 之間透過 MCP tools 委派任務、分享 context" },
+      { "icon": "check-circle", "label": "結果", "desc": "回傳到你的聊天室。權限請求以 inline 按鈕呈現。" }
+    ]
+  },
+  "backends": {
+    "sectionLabel": "後端支援",
+    "title": "支援的 Backend",
+    "subtitle": "任何讀 stdin/stdout 的 CLI 都能接。可透過 CliBackend interface 自行擴充。",
+    "items": [
+      { "name": "Claude Code", "by": "Anthropic" },
+      { "name": "Codex", "by": "OpenAI" },
+      { "name": "Gemini CLI", "by": "Google" },
+      { "name": "OpenCode", "by": "Community" },
+      { "name": "Kiro CLI", "by": "AWS" }
+    ]
   },
   "faq": {
-    "title": "常見問題",
-    "q1": "免費嗎？",
-    "a1": "是的，開源專案，MIT 授權。",
-    "q2": "支援哪些 backend？",
-    "a2": "Claude Code、OpenAI Codex、Gemini CLI、OpenCode。也可以透過 CliBackend interface 自行擴充。",
-    "q3": "支援哪些通訊管道？",
-    "a3": "Telegram 和 Discord 都已支援，兩者皆支援 topic/channel 模式的 fleet 路由。",
-    "q4": "需要伺服器嗎？",
-    "a4": "不需要，任何有 tmux 的機器都能跑。"
+    "sectionLabel": "常見問題",
+    "title": "FAQ",
+    "items": [
+      { "q": "免費嗎？", "a": "是的，開源專案，MIT 授權。你只需要付 AI API 的使用費用。" },
+      { "q": "支援哪些 backend？", "a": "Claude Code、OpenAI Codex、Gemini CLI、OpenCode、Kiro CLI。也可以透過 CliBackend interface 自行擴充。" },
+      { "q": "支援哪些通訊管道？", "a": "Telegram 和 Discord，兩者皆支援 topic/channel 模式的 fleet 路由。" },
+      { "q": "需要伺服器嗎？", "a": "不需要，任何有 tmux 的 macOS 或 Linux 機器都能跑。可裝成系統服務開機自動啟動。" },
+      { "q": "Agent 怎麼協作？", "a": "透過 MCP tools：send_to_instance、delegate_task、report_result。Agent 互相發現、委派工作、回報結果，全部點對點。" },
+      { "q": "General Topic 是什麼？", "a": "自然語言調度器。把任何任務傳到 General topic，它會判斷哪個 agent 該處理，自動委派。" },
+      { "q": "跑起來要花多少錢？", "a": "AgEnD 本身免費。費用來自 AI API 使用量。用花費守衛設定每個 instance 的每日限額。" },
+      { "q": "可以連接本地的 Claude Code 嗎？", "a": "可以。外部 session 透過 IPC socket 連入，出現在 fleet 成員列表中。詳見文件。" }
+    ]
   },
   "footer": {
-    "license": "MIT 授權"
+    "license": "MIT 授權",
+    "tagline": "AI coding agent 的運維層。"
   }
 }

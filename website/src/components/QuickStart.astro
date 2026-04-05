@@ -1,26 +1,35 @@
 ---
 import type { Locale } from '../i18n/utils';
-import { t } from '../i18n/utils';
+import en from '../i18n/en.json';
+import zhTw from '../i18n/zh-tw.json';
 
 interface Props { locale: Locale }
 const { locale } = Astro.props;
+const data = locale === 'en' ? en : zhTw;
 
-const steps = ['step1', 'step2', 'step3'];
+const steps = [data.quickstart.step1, data.quickstart.step2, data.quickstart.step3];
 ---
 
-<section id="quickstart" class="py-20">
-  <h2 class="text-2xl font-bold mb-10 text-center">{t(locale, 'quickstart.title')}</h2>
-  <div class="grid md:grid-cols-3 gap-8 text-center">
-    {steps.map((s, i) => (
-      <div>
-        <div class="bg-accent text-bg w-8 h-8 rounded-full inline-flex items-center justify-center font-bold text-sm mb-3">
-          {i + 1}
+<section id="quickstart" class="py-28 relative noise">
+  <div class="absolute inset-0 bg-surface/50"></div>
+  <div class="relative mx-auto max-w-5xl px-6">
+    <div class="text-center mb-16">
+      <p class="section-label mb-3">{data.quickstart.sectionLabel}</p>
+      <h2 class="font-display font-bold text-3xl sm:text-4xl tracking-tight">{data.quickstart.title}</h2>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 stagger">
+      {steps.map((step, i) => (
+        <div class="reveal text-center">
+          <div class="text-4xl font-bold text-accent/30 font-display mb-3">{i + 1}</div>
+          <h3 class="font-display font-bold text-base mb-4">{step.label}</h3>
+          <div class="bg-bg border border-border rounded-xl p-4 font-mono text-sm text-text-secondary">
+            {step.cmd}
+          </div>
         </div>
-        <h3 class="font-semibold mb-2">{t(locale, `quickstart.${s}.label`)}</h3>
-        <code class="text-text-secondary text-sm bg-surface border border-border rounded px-3 py-1.5 inline-block font-mono">
-          {t(locale, `quickstart.${s}.cmd`)}
-        </code>
-      </div>
-    ))}
+      ))}
+    </div>
+
+    <p class="text-center text-text-secondary mt-10">{data.quickstart.footer}</p>
   </div>
 </section>
