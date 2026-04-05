@@ -157,6 +157,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   }
 
   async startInstance(name: string, config: InstanceConfig, topicMode: boolean): Promise<void> {
+    if (config.general_topic) {
+      this.ensureGeneralInstructions(config.working_directory, config.backend);
+    }
     return this.lifecycle.start(name, config, topicMode);
   }
 
@@ -272,43 +275,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       this.logger.info("Auto-creating general instance for General Topic");
       const generalDir = join(homedir(), ".agend", "general");
       mkdirSync(generalDir, { recursive: true });
-      const INSTRUCTIONS_FILENAME: Record<string, string> = {
-        "claude-code": "CLAUDE.md",
-        "codex": "AGENTS.md",
-        "gemini-cli": "GEMINI.md",
-        "opencode": "AGENTS.md",
-        "kiro-cli": ".kiro/steering/project.md",
-        "mock": "CLAUDE.md",
-      };
       const backendName = (fleet.defaults as Record<string, unknown>)?.backend as string ?? "claude-code";
-      const instructionsFile = INSTRUCTIONS_FILENAME[backendName] ?? "CLAUDE.md";
-      const instructionsPath = join(generalDir, instructionsFile);
-      mkdirSync(dirname(instructionsPath), { recursive: true });
-      if (!existsSync(instructionsPath)) {
-        writeFileSync(instructionsPath, `# General Assistant
-
-You are the general entry point for this AgEnD fleet.
-
-## Guidelines
-
-- Simple tasks (search, translate, Q&A): handle yourself.
-- Project-specific tasks: use list_instances() to find the right agent, start_instance() if needed, then delegate via send_to_instance().
-- Multi-agent tasks: coordinate agents in parallel or series, collect and summarize results.
-- User wants a new project agent: use create_instance().
-- Instance no longer needed: use delete_instance().
-- When delegated a task, always report results back via send_to_instance().
-
-## Delegation Principles
-
-Only delegate when there is a concrete reason:
-- Task needs access to a specific project's files
-- Task benefits from multi-agent parallel execution
-- Preserving your own context is more important — offload unrelated work
-- Never re-delegate back to the instance that delegated to you
-
-If you can do it yourself, do it yourself.
-`, "utf-8");
-      }
+      this.ensureGeneralInstructions(generalDir, backendName);
       const generalConfig: InstanceConfig = {
         ...DEFAULT_INSTANCE_CONFIG,
         working_directory: generalDir,
@@ -1221,6 +1189,51 @@ If you can do it yourself, do it yourself.
   }
 
   // ── Topic icon + auto-archive ─────────────────────────────────────────────
+
+  private static INSTRUCTIONS_FILENAME: Record<string, string> = {
+    "claude-code": "CLAUDE.md",
+    "codex": "AGENTS.md",
+    "gemini-cli": "GEMINI.md",
+    "opencode": "AGENTS.md",
+    "kiro-cli": ".kiro/steering/project.md",
+    "mock": "CLAUDE.md",
+  };
+
+  private static GENERAL_INSTRUCTIONS = `# General Assistant
+
+You are the general entry point for this AgEnD fleet.
+
+## Guidelines
+
+- Simple tasks (search, translate, Q&A): handle yourself.
+- Project-specific tasks: use list_instances() to find the right agent, start_instance() if needed, then delegate via send_to_instance().
+- Multi-agent tasks: coordinate agents in parallel or series, collect and summarize results.
+- User wants a new project agent: use create_instance().
+- Instance no longer needed: use delete_instance().
+- When delegated a task, always report results back via send_to_instance().
+
+## Delegation Principles
+
+Only delegate when there is a concrete reason:
+- Task needs access to a specific project's files
+- Task benefits from multi-agent parallel execution
+- Preserving your own context is more important — offload unrelated work
+- Never re-delegate back to the instance that delegated to you
+
+If you can do it yourself, do it yourself.
+`;
+
+  /** Ensure the general instance has its project instructions file */
+  private ensureGeneralInstructions(workDir: string, backendName?: string): void {
+    const backend = backendName ?? "claude-code";
+    const filename = FleetManager.INSTRUCTIONS_FILENAME[backend] ?? "CLAUDE.md";
+    const filePath = join(workDir, filename);
+    mkdirSync(dirname(filePath), { recursive: true });
+    if (!existsSync(filePath)) {
+      writeFileSync(filePath, FleetManager.GENERAL_INSTRUCTIONS, "utf-8");
+      this.logger.info({ filePath }, "Created general instance instructions file");
+    }
+  }
 
   /** Fetch forum topic icon stickers and pick emoji IDs for each state */
   private async resolveTopicIcons(): Promise<void> {
