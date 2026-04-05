@@ -89,6 +89,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   private healthServer: Server | null = null;
   private startedAt = 0;
 
+  // Mirror topic: buffer cross-instance messages, flush every 3s
+  private mirrorBuffer: string[] = [];
+  private mirrorTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(public dataDir: string) {
     this.lifecycle = new InstanceLifecycle(this);
     this.topicCommands = new TopicCommands(this);
@@ -1180,6 +1184,26 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.adapter.sendText(String(groupId), text, {
       threadId: threadId != null ? String(threadId) : undefined,
     }).catch(e => this.logger.debug({ err: e }, "Failed to send notification"));
+  }
+
+  queueMirrorMessage(text: string): void {
+    const mirrorTopicId = this.fleetConfig?.channel?.mirror_topic_id;
+    if (mirrorTopicId == null || !this.adapter) return;
+    const ts = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" });
+    this.mirrorBuffer.push(`[${ts}] ${text}`);
+    if (!this.mirrorTimer) {
+      this.mirrorTimer = setTimeout(() => {
+        const batch = this.mirrorBuffer.join("\n");
+        this.mirrorBuffer = [];
+        this.mirrorTimer = null;
+        const groupId = this.fleetConfig?.channel?.group_id;
+        if (groupId && this.adapter) {
+          this.adapter.sendText(String(groupId), batch, {
+            threadId: String(mirrorTopicId),
+          }).catch(e => this.logger.debug({ err: e }, "Mirror topic send failed"));
+        }
+      }, 3000);
+    }
   }
 
   async sendHangNotification(instanceName: string): Promise<void> {

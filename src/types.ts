@@ -58,6 +58,8 @@ export interface ChannelConfig {
   options?: Record<string, unknown>;
   /** Override the Telegram Bot API root URL (e.g. for testing with a mock server). */
   telegram_api_root?: string;
+  /** Topic ID for mirroring all cross-instance messages (read-only observation). */
+  mirror_topic_id?: number | string;
 }
 
 export interface InstanceConfig {

@@ -1168,6 +1168,33 @@ schedule
     console.log("Manual trigger requires fleet manager running. Use the Telegram interface instead.");
   });
 
+// === Chat Export ===
+program
+  .command("export-chat")
+  .description("Export fleet activity as a shareable HTML chat log")
+  .option("--from <time>", "Start time (ISO or HH:MM for today)")
+  .option("--to <time>", "End time (ISO or HH:MM for today)")
+  .option("-o, --output <path>", "Output file path")
+  .action(async (opts: { from?: string; to?: string; output?: string }) => {
+    const { exportChat } = await import("./chat-export.js");
+
+    // Resolve HH:MM shorthand to full ISO date (today)
+    const resolveTime = (t?: string) => {
+      if (!t) return undefined;
+      if (/^\d{2}:\d{2}$/.test(t)) {
+        return new Date().toISOString().slice(0, 11) + t + ":00";
+      }
+      return t;
+    };
+
+    const dbPath = join(DATA_DIR, "events.db");
+    const html = exportChat(dbPath, { from: resolveTime(opts.from), to: resolveTime(opts.to) });
+    const outPath = opts.output ?? `chat-export-${Date.now()}.html`;
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(outPath, html, "utf-8");
+    console.log(`Chat exported to ${outPath}`);
+  });
+
 // === Export / Import ===
 program
   .command("export")

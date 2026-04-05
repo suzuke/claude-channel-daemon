@@ -20,6 +20,7 @@ export interface OutboundContext {
   startInstance(name: string, config: InstanceConfig, topicMode: boolean): Promise<void>;
   connectIpcToInstance(name: string): Promise<void>;
   saveFleetConfig(): void;
+  queueMirrorMessage?(text: string): void;
 }
 
 /** Metadata extracted from the raw outbound message. */
@@ -124,6 +125,7 @@ const sendToInstance: Handler = (ctx, args, respond, meta) => {
   ctx.logger.info(`✉ ${senderLabel} → ${targetName}: ${(message ?? "").slice(0, 100)}`);
   const taskSummary = ipcMeta.task_summary || (message ?? "").slice(0, 200);
   ctx.eventLog?.logActivity("message", senderLabel, taskSummary, targetName, ipcMeta.request_kind);
+  ctx.queueMirrorMessage?.(`${senderLabel} → ${targetName}: ${(message ?? "").slice(0, 500)}${(message ?? "").length > 500 ? " […]" : ""}`);
   respond({ sent: true, target: targetName, correlation_id: correlationId });
 };
 
@@ -312,6 +314,7 @@ const broadcast: Handler = (ctx, args, respond, meta) => {
   for (const target of sentTo) {
     ctx.eventLog?.logActivity("message", senderLabel, summary, target);
   }
+  ctx.queueMirrorMessage?.(`📢 ${senderLabel} → [${sentTo.join(", ")}]: ${message.slice(0, 500)}${message.length > 500 ? " […]" : ""}`);
   respond({ sent_to: sentTo, failed, count: sentTo.length });
 };
 
