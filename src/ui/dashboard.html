@@ -168,11 +168,10 @@ function sel(name) { cur = name; curTab = "chat"; renderMain(); renderList(); }
 function renderMain() {
   if (!cur) return;
   const main = document.getElementById("mainArea");
+  const tabs = ["chat","detail","tasks","schedules","teams","config"];
   main.innerHTML = `
     <div class="tabs">
-      <div class="tab${curTab==="chat"?" active":""}" data-t="chat">Chat</div>
-      <div class="tab${curTab==="detail"?" active":""}" data-t="detail">Detail</div>
-      <div class="tab${curTab==="tasks"?" active":""}" data-t="tasks">Tasks</div>
+      ${tabs.map(t => `<div class="tab${curTab===t?" active":""}" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</div>`).join("")}
     </div>
     <div class="actions" id="actions"></div>
     <div class="chat-view" id="chatView" style="display:${curTab==="chat"?"flex":"none"}">
@@ -180,12 +179,18 @@ function renderMain() {
       <div class="input-bar"><input id="msgIn" placeholder="Send a message..." autocomplete="off"><button class="btn btn-accent" onclick="sendMsg()">Send</button></div>
     </div>
     <div class="detail-view" id="detailView" style="display:${curTab==="detail"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
-    <div class="task-view" id="taskView" style="display:${curTab==="tasks"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>`;
+    <div class="task-view" id="taskView" style="display:${curTab==="tasks"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="task-view" id="schedView" style="display:${curTab==="schedules"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="task-view" id="teamView" style="display:${curTab==="teams"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="detail-view" id="configView" style="display:${curTab==="config"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>`;
   main.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { curTab = t.dataset.t; renderMain(); }));
   const i = instances.find(x => x.name === cur); renderActions(i);
   if (curTab === "chat") { renderMsgs(); const inp = document.getElementById("msgIn"); inp.addEventListener("keydown", e => { if (e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg();} }); inp.focus(); }
   else if (curTab === "detail") loadDetail();
   else if (curTab === "tasks") loadTasks();
+  else if (curTab === "schedules") loadSchedules();
+  else if (curTab === "teams") loadTeams();
+  else if (curTab === "config") loadConfig();
 }
 
 function renderActions(i) {
@@ -333,6 +338,121 @@ function showCreateTask() {
     if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
     else { toast("Task created"); ov.remove(); loadTasks(); }
   });
+}
+
+// ── Schedules ────────────────────────────────────────────
+async function loadSchedules() {
+  const el = document.getElementById("schedView"); if (!el) return;
+  try {
+    const d = await api("GET", "/ui/schedules");
+    const scheds = d.schedules || [];
+    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-weight:600;font-size:14px">${scheds.length} schedules</span>
+      <button class="btn btn-accent" onclick="showCreateSchedule()">+ New Schedule</button></div>`;
+    if (!scheds.length) h += `<div class="msg-empty">No schedules</div>`;
+    else for (const s of scheds) {
+      h += `<div class="task-item">
+        <span class="task-status ${s.enabled?"open":"done"}">${s.enabled?"on":"off"}</span>
+        <span class="task-title">${esc(s.label||s.cron)}</span>
+        <span class="task-assignee" style="font-family:'JetBrains Mono',monospace">${esc(s.cron)}</span>
+        <span class="task-assignee">${esc(s.target)}</span>
+        <div class="task-actions">
+          <button class="btn btn-ghost btn-red" onclick="delSchedule('${s.id}')">Delete</button>
+        </div></div>`;
+    }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+async function delSchedule(id) {
+  if (!confirm("Delete this schedule?")) return;
+  const r = await api("DELETE", `/ui/schedules/${id}`);
+  if (r.error) toast(r.error, false); else { toast("Schedule deleted"); loadSchedules(); }
+}
+function showCreateSchedule() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  const tgtOpts = instances.map(i => `<option value="${esc(i.name)}">${esc(i.name)}</option>`).join("");
+  ov.innerHTML = `<div class="form-card"><h2>Create Schedule</h2>
+    <div class="form-field"><label>Cron Expression *</label><input id="cs-cron" placeholder="0 9 * * 1-5"></div>
+    <div class="form-field"><label>Message *</label><input id="cs-msg" placeholder="What to send"></div>
+    <div class="form-field"><label>Target Instance *</label><select id="cs-target">${tgtOpts}</select></div>
+    <div class="form-field"><label>Label</label><input id="cs-label" placeholder="Daily standup"></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="cs-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#cs-go").addEventListener("click", async () => {
+    const cron = document.getElementById("cs-cron").value.trim();
+    const msg = document.getElementById("cs-msg").value.trim();
+    const target = document.getElementById("cs-target").value;
+    if (!cron || !msg || !target) { toast("Cron, message, and target required", false); return; }
+    const btn = ov.querySelector("#cs-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = { cron, message: msg, target, source: "web-user", reply_chat_id: "", reply_thread_id: "" };
+    const label = document.getElementById("cs-label").value.trim(); if (label) body.label = label;
+    const r = await api("POST", "/ui/schedules", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Schedule created"); ov.remove(); loadSchedules(); }
+  });
+}
+
+// ── Teams ────────────────────────────────────────────────
+async function loadTeams() {
+  const el = document.getElementById("teamView"); if (!el) return;
+  try {
+    const d = await api("GET", "/ui/teams");
+    const teams = d.teams || {};
+    const entries = Object.entries(teams);
+    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-weight:600;font-size:14px">${entries.length} teams</span>
+      <button class="btn btn-accent" onclick="showCreateTeam()">+ New Team</button></div>`;
+    if (!entries.length) h += `<div class="msg-empty">No teams</div>`;
+    else for (const [name, team] of entries) {
+      h += `<div class="task-item">
+        <span class="task-title" style="font-weight:600">${esc(name)}</span>
+        <span class="task-assignee">${esc((team.members||[]).join(", "))}</span>
+        <div class="task-actions">
+          <button class="btn btn-ghost btn-red" onclick="delTeam('${esc(name)}')">Delete</button>
+        </div></div>`;
+    }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+async function delTeam(name) {
+  if (!confirm(`Delete team "${name}"?`)) return;
+  const r = await api("DELETE", `/ui/teams/${encodeURIComponent(name)}`);
+  if (r.error) toast(r.error, false); else { toast("Team deleted"); loadTeams(); }
+}
+function showCreateTeam() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  const memOpts = instances.map(i => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:2px 0"><input type="checkbox" value="${esc(i.name)}">${esc(i.name)}</label>`).join("");
+  ov.innerHTML = `<div class="form-card"><h2>Create Team</h2>
+    <div class="form-field"><label>Team Name *</label><input id="ct2-name" placeholder="team-name"></div>
+    <div class="form-field"><label>Description</label><input id="ct2-desc" placeholder="What this team does"></div>
+    <div class="form-field"><label>Members *</label><div id="ct2-members" style="max-height:150px;overflow-y:auto">${memOpts}</div></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="ct2-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#ct2-go").addEventListener("click", async () => {
+    const name = document.getElementById("ct2-name").value.trim();
+    const members = [...document.querySelectorAll("#ct2-members input:checked")].map(c => c.value);
+    if (!name || !members.length) { toast("Name and at least one member required", false); return; }
+    const btn = ov.querySelector("#ct2-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = { name, members };
+    const desc = document.getElementById("ct2-desc").value.trim(); if (desc) body.description = desc;
+    const r = await api("POST", "/ui/teams", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Team created"); ov.remove(); loadTeams(); }
+  });
+}
+
+// ── Config ───────────────────────────────────────────────
+async function loadConfig() {
+  const el = document.getElementById("configView"); if (!el) return;
+  try {
+    const d = await api("GET", "/ui/config");
+    el.innerHTML = `<div class="card"><h3>Fleet Configuration</h3>
+      <pre style="font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--text-sec)">${esc(JSON.stringify(d, null, 2))}</pre></div>`;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
 }
 </script>
 </body>

@@ -18,6 +18,7 @@ export interface WebApiContext {
   readonly fleetConfig: {
     channel?: { group_id?: number; mode?: string };
     instances: Record<string, { topic_id?: number | string; working_directory: string; description?: string; display_name?: string }>;
+    teams?: Record<string, { members: string[]; description?: string }>;
   } | null;
   readonly instanceIpcClients: Map<string, { send(msg: unknown): void }>;
   readonly adapter: { sendText(chatId: string, text: string, opts?: { threadId?: string }): Promise<unknown> } | null;
@@ -43,6 +44,9 @@ export interface WebApiContext {
       claimTask(id: string, assignee: string): unknown;
       completeTask(id: string, result?: string): unknown;
     };
+    list(target?: string): unknown[];
+    create(params: unknown): unknown;
+    delete(id: string): void;
   } | null;
 }
 
@@ -347,6 +351,101 @@ export function handleWebRequest(
         json(res, 400, { error: (err as Error).message });
       }
     })();
+    return true;
+  }
+
+  // ── Schedules ───────────────────────────────────────────
+
+  if (method === "GET" && path === "/ui/schedules") {
+    if (!ctx.scheduler) { json(res, 200, { schedules: [] }); return true; }
+    json(res, 200, { schedules: ctx.scheduler.list() });
+    return true;
+  }
+
+  if (method === "POST" && path === "/ui/schedules") {
+    if (!ctx.scheduler) { json(res, 500, { error: "Scheduler not initialized" }); return true; }
+    (async () => {
+      try {
+        const body = await parseBody(req);
+        const schedule = ctx.scheduler!.create(body);
+        json(res, 200, schedule);
+      } catch (err) { json(res, 400, { error: (err as Error).message }); }
+    })();
+    return true;
+  }
+
+  const schedDelMatch = path.match(/^\/ui\/schedules\/(.+)$/);
+  if (method === "DELETE" && schedDelMatch) {
+    if (!ctx.scheduler) { json(res, 500, { error: "Scheduler not initialized" }); return true; }
+    try {
+      ctx.scheduler.delete(decodeURIComponent(schedDelMatch[1]));
+      json(res, 200, { deleted: true });
+    } catch (err) { json(res, 400, { error: (err as Error).message }); }
+    return true;
+  }
+
+  // ── Teams ──────────────────────────────────────────────
+
+  if (method === "GET" && path === "/ui/teams") {
+    const teams = ctx.fleetConfig?.teams ?? {};
+    json(res, 200, { teams });
+    return true;
+  }
+
+  if (method === "POST" && path === "/ui/teams") {
+    (async () => {
+      try {
+        const body = await parseBody(req);
+        const name = body.name as string;
+        const members = body.members as string[];
+        const description = body.description as string | undefined;
+        if (!name || !members?.length) { json(res, 400, { error: "name and members required" }); return; }
+        if (!ctx.fleetConfig) { json(res, 500, { error: "No fleet config" }); return; }
+        if (!ctx.fleetConfig.teams) (ctx.fleetConfig as { teams: Record<string, unknown> }).teams = {};
+        (ctx.fleetConfig.teams as Record<string, unknown>)[name] = { members, description };
+        ctx.saveFleetConfig();
+        json(res, 200, { created: name });
+      } catch (err) { json(res, 400, { error: (err as Error).message }); }
+    })();
+    return true;
+  }
+
+  const teamDelMatch = path.match(/^\/ui\/teams\/(.+)$/);
+  if (method === "DELETE" && teamDelMatch) {
+    const name = decodeURIComponent(teamDelMatch[1]);
+    if (!ctx.fleetConfig?.teams?.[name]) { json(res, 404, { error: `Team not found: ${name}` }); return true; }
+    delete (ctx.fleetConfig.teams as Record<string, unknown>)[name];
+    ctx.saveFleetConfig();
+    json(res, 200, { deleted: name });
+    return true;
+  }
+
+  // ── Fleet config (read-only, sanitized) ────────────────
+
+  if (method === "GET" && path === "/ui/config") {
+    const config = ctx.fleetConfig;
+    if (!config) { json(res, 200, {}); return true; }
+    // Sanitize: remove token references
+    const sanitized = {
+      channel: config.channel ? {
+        type: (config.channel as Record<string, unknown>).type,
+        mode: config.channel.mode,
+        group_id: config.channel.group_id,
+        access: (config.channel as Record<string, unknown>).access,
+      } : undefined,
+      instances: Object.fromEntries(
+        Object.entries(config.instances).map(([name, inst]) => [name, {
+          working_directory: inst.working_directory,
+          description: inst.description,
+          display_name: inst.display_name,
+          topic_id: inst.topic_id,
+        }]),
+      ),
+      teams: config.teams,
+      project_roots: (config as Record<string, unknown>).project_roots,
+      health_port: (config as Record<string, unknown>).health_port,
+    };
+    json(res, 200, sanitized);
     return true;
   }
 
