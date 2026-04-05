@@ -47,6 +47,10 @@ AgEnD（**Agent Engineering Daemon**）把你的 Telegram 或 Discord 變成 AI 
 
 🎤 **語音訊息** — 用 Groq Whisper 轉文字，用說的跟 agent 溝通。
 
+📄 **HTML 對話匯出** — 把任何 agent session 匯出成獨立 HTML 檔，方便分享或存檔。
+
+🪞 **Mirror Topic** — 跨 instance 可見性。從另一個 topic 即時觀看其他 agent 的工作。
+
 🔌 **可擴充** — Discord adapter、webhook 通知、health endpoint、外部 session 透過 IPC 連入。
 
 ## 開始用
@@ -93,7 +97,7 @@ agend fleet start               # fleet 上線了 🎉
 ```
 
 1. **你傳訊息**給 Telegram/Discord bot
-2. **General Topic** 解讀自然語言，路由到對的 agent instance
+2. 傳到 **General Topic** 的訊息會被解讀並路由到對的 agent。傳到特定 topic 的訊息則直接送到該 instance。
 3. **Agent instance** 在獨立的 tmux session 跑，各有自己的專案和 CLI 後端
 4. **Agent 之間協作** — 透過 MCP tools 委派任務、分享 context、回報結果
 5. **結果回傳**到你的聊天室。權限請求以 inline 按鈕呈現。

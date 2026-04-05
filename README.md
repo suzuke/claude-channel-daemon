@@ -47,6 +47,10 @@ AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a comma
 
 🎤 **Voice Messages** — Talk to your agents with Groq Whisper transcription.
 
+📄 **HTML Chat Export** — Export any agent session as a self-contained HTML file for sharing or archiving.
+
+🪞 **Mirror Topic** — Cross-instance visibility. Watch another agent's work in real time from a separate topic.
+
 🔌 **Extensible** — Discord adapter, webhook notifications, health endpoint, external session support via IPC.
 
 ## Quick Start
@@ -93,7 +97,7 @@ That's it. Open Telegram, send a message to your bot, and start coding from your
 ```
 
 1. **You send a message** to your Telegram/Discord bot
-2. **General Topic** interprets natural language and routes to the right agent instance
+2. Messages sent to the **General Topic** are interpreted and routed to the right agent. Messages to a specific topic go directly to that instance.
 3. **Agent instances** run in isolated tmux sessions, each with its own project and CLI backend
 4. **Agents collaborate** peer-to-peer via MCP tools — delegating tasks, sharing context, reporting results
 5. **Results flow back** to your chat. Permission requests arrive as inline buttons.
