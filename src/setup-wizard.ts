@@ -190,7 +190,7 @@ export function buildFleetConfig(answers: WizardAnswers): Record<string, unknown
 
 // ── Prerequisite checks ──────────────────────────────────
 
-const BACKENDS = [
+export const BACKENDS = [
   { id: "claude-code", binary: "claude", label: "Claude Code",
     installUrl: "https://code.claude.com/docs/en/quickstart",
     install: "curl -fsSL https://claude.ai/install.sh | bash",

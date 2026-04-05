@@ -996,8 +996,16 @@ program
   });
 
 program
+  .command("quickstart")
+  .description("Quick 3-step setup: detect backend, create bot, connect group")
+  .action(async () => {
+    const { runQuickstart } = await import("./quickstart.js");
+    await runQuickstart();
+  });
+
+program
   .command("init")
-  .description("Interactive setup wizard")
+  .description("Interactive setup wizard (advanced)")
   .action(async () => {
     const { runSetupWizard } = await import("./setup-wizard.js");
     await runSetupWizard();
