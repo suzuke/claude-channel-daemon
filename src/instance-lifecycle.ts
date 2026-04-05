@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { join, basename, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { access } from "node:fs/promises";
 import type { InstanceConfig, FleetConfig } from "./types.js";
@@ -244,6 +244,22 @@ export class InstanceLifecycle {
         await access(directory);
       } catch {
         respond(null, `Directory does not exist: ${directory}`);
+        return;
+      }
+    }
+
+    // Enforce project_roots boundary when configured.
+    // Note: uses path.resolve() (string normalization), not fs.realpathSync(),
+    // so symlinks are not resolved — known limitation.
+    const roots = this.ctx.fleetConfig?.project_roots;
+    if (directory && roots?.length) {
+      const resolved = resolve(directory);
+      const allowed = roots.some(r => {
+        const root = resolve(r.replace(/^~/, process.env.HOME || "~"));
+        return resolved === root || resolved.startsWith(root + "/");
+      });
+      if (!allowed) {
+        respond(null, `Directory "${directory}" is not under project_roots. Allowed: ${roots.join(", ")}`);
         return;
       }
     }
