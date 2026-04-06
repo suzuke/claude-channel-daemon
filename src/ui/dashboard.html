@@ -316,6 +316,8 @@ function showCreateInstance() {
     <div class="form-field"><label>Directory</label><input id="ci-dir" placeholder="Optional — auto-creates workspace if empty"></div>
     <div class="form-field"><label id="ci-topic-label">Topic Name</label><input id="ci-topic" placeholder="Auto from directory name"></div>
     <div class="form-field"><label>Description</label><input id="ci-desc" placeholder="What this instance does"></div>
+    <div class="form-field"><label>Backend</label>
+      <select id="ci-backend"><option value="">Use fleet default</option>${["claude-code","codex","gemini-cli","opencode","kiro-cli"].map(b=>`<option value="${b}">${b}</option>`).join("")}</select></div>
     <div class="form-field"><label>Branch (git worktree)</label><input id="ci-branch" placeholder="e.g. feature-x"></div>
     <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
     <button class="btn btn-accent" id="ci-go">Create</button></div></div>`;
@@ -336,6 +338,7 @@ function showCreateInstance() {
     const v = id => document.getElementById(id).value.trim();
     if (v("ci-topic")) body.topic_name = v("ci-topic");
     if (v("ci-desc")) body.description = v("ci-desc");
+    const backend = document.getElementById("ci-backend").value; if (backend) body.backend = backend;
     if (v("ci-branch")) body.branch = v("ci-branch");
     const r = await api("POST", "/ui/instances", body);
     if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
