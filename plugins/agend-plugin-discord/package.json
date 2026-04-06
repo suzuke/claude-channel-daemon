@@ -1,0 +1,19 @@
+{
+  "name": "agend-plugin-discord",
+  "version": "1.0.0",
+  "description": "Discord channel adapter plugin for AgEnD",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "@suzuke/agend": ">=1.13.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1"
+  },
+  "keywords": ["agend", "plugin", "discord", "adapter"],
+  "license": "MIT"
+}

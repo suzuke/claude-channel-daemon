@@ -6,6 +6,13 @@
   "bin": {
     "agend": "./dist/cli.js"
   },
+  "exports": {
+    ".": "./dist/cli.js",
+    "./channel": "./dist/channel/types.js",
+    "./channel/access-manager": "./dist/channel/access-manager.js",
+    "./channel/message-queue": "./dist/channel/message-queue.js",
+    "./types": "./dist/types.js"
+  },
   "scripts": {
     "build": "tsc",
     "postbuild": "cp -r src/plugin dist/ && cp -r src/workflow-templates dist/ && cp -r src/ui dist/ && cd dist/plugin/agend && ln -sf ../../channel/mcp-server.js server.js",
@@ -46,7 +53,6 @@
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
     "croner": "^10.0.1",
-    "discord.js": "^14.25.1",
     "ejs": "^5.0.1",
     "grammy": "^1.41.1",
     "js-yaml": "^4.1.1",

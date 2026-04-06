@@ -25,9 +25,9 @@ import type {
   PermissionPrompt,
   Choice,
   AlertData,
-} from "../types.js";
-import type { AccessManager } from "../access-manager.js";
-import { MessageQueue } from "../message-queue.js";
+} from "@suzuke/agend/channel";
+import type { AccessManager } from "@suzuke/agend/channel/access-manager";
+import { MessageQueue } from "@suzuke/agend/channel/message-queue";
 
 const DISCORD_MAX_LENGTH = 2000;
 

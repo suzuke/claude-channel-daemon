@@ -13,43 +13,33 @@ export interface AdapterOpts {
 export type AdapterFactory = (config: ChannelConfig, opts: AdapterOpts) => ChannelAdapter;
 
 export async function createAdapter(config: ChannelConfig, opts: AdapterOpts): Promise<ChannelAdapter> {
-  switch (config.type) {
-    case "telegram": {
-      const { TelegramAdapter } = await import("./adapters/telegram.js");
-      return new TelegramAdapter({ ...opts, apiRoot: config.telegram_api_root });
-    }
-    case "discord": {
-      const { DiscordAdapter } = await import("./adapters/discord.js");
-      return new DiscordAdapter({
-        ...opts,
-        guildId: config.group_id != null ? String(config.group_id) : "",
-        categoryName: (config.options?.category_name as string) ?? undefined,
-        generalChannelId: (config.options?.general_channel_id as string) ?? undefined,
-      });
-    }
-    default: {
-      // External adapter — try canonical name, then bare name
-      const candidates = [`agend-adapter-${config.type}`, config.type];
-      let factory: AdapterFactory | undefined;
+  // Built-in adapters
+  if (config.type === "telegram") {
+    const { TelegramAdapter } = await import("./adapters/telegram.js");
+    return new TelegramAdapter({ ...opts, apiRoot: config.telegram_api_root });
+  }
 
-      for (const pkg of candidates) {
-        try {
-          const mod = await import(pkg);
-          factory = mod.default;
-          break;
-        } catch {
-          continue;
-        }
-      }
+  // Plugin adapters — try multiple package name conventions
+  const candidates = [
+    `agend-plugin-${config.type}`,   // new convention: agend-plugin-discord
+    `agend-adapter-${config.type}`,  // legacy convention: agend-adapter-discord
+    config.type,                      // bare name: discord (if someone names their package that)
+  ];
 
-      if (!factory) {
-        throw new Error(
-          `Channel adapter "${config.type}" not found. ` +
-          `Install it: npm install agend-adapter-${config.type}`
-        );
-      }
-
-      return factory(config, opts);
+  for (const pkg of candidates) {
+    try {
+      const mod = await import(pkg);
+      const factory = mod.default;
+      // Support both: factory function and object with createAdapter method
+      if (typeof factory === "function") return factory(config, opts);
+      if (factory?.createAdapter) return factory.createAdapter(config, opts);
+    } catch {
+      continue;
     }
   }
+
+  throw new Error(
+    `Channel adapter "${config.type}" not found. ` +
+    `Install the plugin: npm install agend-plugin-${config.type}`
+  );
 }
