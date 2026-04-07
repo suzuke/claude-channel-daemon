@@ -6,105 +6,245 @@
 <meta name="referrer" content="no-referrer">
 <title>AgEnD Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d1117; --surface: #161b22; --raised: #1c2129; --border: #30363d;
+    --bg: #080b12; --surface: rgba(22,27,34,0.7); --raised: rgba(28,33,41,0.8);
+    --border: rgba(48,54,61,0.6); --border-bright: rgba(48,54,61,0.9);
     --text: #f0f6fc; --text-sec: #8b949e; --text-muted: #484f58;
-    --accent: #2AABEE; --accent-dim: rgba(42,171,238,0.1); --success: #7ee787; --error: #f85149; --warn: #d29922;
+    --accent: #2AABEE; --accent-dim: rgba(42,171,238,0.08); --accent-glow: rgba(42,171,238,0.2);
+    --success: #56d364; --error: #f85149; --warn: #d29922;
+    --glass: rgba(22,27,34,0.55); --glass-border: rgba(255,255,255,0.06);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; display: flex; height: 100vh; }
+  html { font-size: 14px; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'DM Sans', system-ui, sans-serif;
+    display: flex; height: 100vh;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 10% 20%, rgba(42,171,238,0.04), transparent 50%),
+      radial-gradient(ellipse 80% 60% at 90% 80%, rgba(86,211,100,0.03), transparent 50%);
+  }
 
-  /* Sidebar */
-  .sidebar { width: 260px; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; background: var(--surface); }
-  .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
-  .sidebar-header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
-  .sidebar-header .uptime { font-size: 11px; color: var(--text-sec); margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
-  .instance-list { flex: 1; overflow-y: auto; }
-  .instance-item { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--bg); display: flex; align-items: center; gap: 10px; transition: background 0.15s; }
+  /* ── Sidebar ─────────────────────────────────────────── */
+  .sidebar {
+    width: 280px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid var(--glass-border);
+  }
+  .sidebar-header {
+    padding: 24px 20px 20px;
+    background: linear-gradient(135deg, rgba(42,171,238,0.08) 0%, transparent 60%);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .sidebar-header h1 {
+    font-family: 'Outfit', sans-serif; font-size: 22px; font-weight: 800;
+    letter-spacing: -0.03em; color: var(--text);
+    background: linear-gradient(135deg, var(--text) 60%, var(--accent));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sidebar-header .uptime {
+    font-size: 11px; color: var(--text-muted); margin-top: 6px;
+    font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.02em;
+  }
+  .nav-section {
+    font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted);
+    padding: 16px 20px 8px;
+  }
+  .fleet-entry {
+    margin: 0 12px; padding: 10px 12px; cursor: pointer;
+    border-radius: 10px; display: flex; align-items: center; gap: 10px;
+    font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 13px;
+    color: var(--accent); transition: all 0.15s;
+    border: 1px solid transparent;
+  }
+  .fleet-entry:hover { background: var(--accent-dim); }
+  .fleet-entry.active { background: var(--accent-dim); border-color: rgba(42,171,238,0.2); box-shadow: 0 0 20px rgba(42,171,238,0.06); }
+  .instance-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .instance-item {
+    margin: 2px 12px; padding: 10px 12px; cursor: pointer;
+    border-radius: 10px; display: flex; align-items: center; gap: 10px;
+    transition: all 0.15s; border: 1px solid transparent;
+  }
   .instance-item:hover { background: var(--raised); }
-  .instance-item.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
-  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .fleet-entry { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 13px; color: var(--accent); transition: background 0.15s; }
-  .fleet-entry:hover { background: var(--raised); }
-  .fleet-entry.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
-  .sensitive { font-family: 'JetBrains Mono', monospace; letter-spacing: 2px; }
-  .eye-btn { background: none; border: none; cursor: pointer; color: var(--text-sec); font-size: 14px; padding: 0 4px; }
-  .dot.running { background: var(--success); } .dot.stopped { background: var(--error); } .dot.crashed { background: var(--warn); }
+  .instance-item.active { background: var(--accent-dim); border-color: rgba(42,171,238,0.15); }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    transition: box-shadow 0.3s;
+  }
+  .dot.running { background: var(--success); box-shadow: 0 0 8px rgba(86,211,100,0.5); }
+  .dot.stopped { background: var(--error); opacity: 0.7; }
+  .dot.crashed { background: var(--warn); }
   .inst-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .inst-meta { font-size: 11px; color: var(--text-sec); font-family: 'JetBrains Mono', monospace; }
+  .inst-meta { font-size: 11px; color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; }
+  .sidebar-footer { padding: 16px; border-top: 1px solid var(--glass-border); }
 
-  /* Main */
-  .main { flex: 1; display: flex; flex-direction: column; background: var(--bg); }
-  .no-sel { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 14px; }
+  /* ── Main ────────────────────────────────────────────── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .no-sel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: var(--text-muted); }
+  .no-sel svg { opacity: 0.15; }
+  .no-sel span { font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
 
-  /* Tabs */
-  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
-  .tab { padding: 10px 20px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-sec); border-bottom: 2px solid transparent; transition: all 0.15s; }
-  .tab:hover { color: var(--text); } .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  /* ── Tabs ─────────────────────────────────────────────── */
+  .tabs {
+    display: flex; gap: 2px; padding: 8px 16px;
+    background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .tab {
+    padding: 8px 16px; cursor: pointer; border-radius: 8px;
+    font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 500;
+    color: var(--text-muted); transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text-sec); background: rgba(255,255,255,0.03); }
+  .tab.active { color: var(--accent); background: var(--accent-dim); }
 
-  /* Actions */
-  .actions { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
-  .btn { padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); font-family: inherit; transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px; }
-  .btn:disabled { opacity: 0.4; cursor: default; }
-  .btn-accent { background: var(--accent); color: #fff; border-color: var(--accent); } .btn-accent:hover:not(:disabled) { filter: brightness(1.1); }
-  .btn-green { background: #238636; color: #fff; border-color: #238636; } .btn-green:hover:not(:disabled) { background: #2ea043; }
-  .btn-warn { background: #9e6a03; color: #fff; border-color: #9e6a03; } .btn-warn:hover:not(:disabled) { background: #bb8009; }
-  .btn-red { background: #da3633; color: #fff; border-color: #da3633; } .btn-red:hover:not(:disabled) { background: var(--error); }
-  .btn-ghost { background: transparent; color: var(--text-sec); } .btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--raised); }
+  /* ── Action buttons ──────────────────────────────────── */
+  .actions { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--glass-border); }
+  .btn {
+    padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border); font-family: 'DM Sans', sans-serif;
+    transition: all 0.15s; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .btn:active:not(:disabled) { transform: scale(0.96); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn-accent { background: var(--accent); color: #fff; border-color: transparent; }
+  .btn-accent:hover:not(:disabled) { box-shadow: 0 4px 20px rgba(42,171,238,0.3); }
+  .btn-green { background: rgba(35,134,54,0.9); color: #fff; border-color: transparent; }
+  .btn-green:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(35,134,54,0.3); }
+  .btn-warn { background: rgba(158,106,3,0.9); color: #fff; border-color: transparent; }
+  .btn-warn:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(158,106,3,0.3); }
+  .btn-red { background: rgba(218,54,51,0.9); color: #fff; border-color: transparent; }
+  .btn-red:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(218,54,51,0.3); }
+  .btn-ghost { background: transparent; color: var(--text-sec); }
+  .btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--raised); }
 
-  /* Toast */
-  .toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 100; animation: slideIn 0.3s ease; }
-  .toast.ok { background: #238636; color: #fff; } .toast.err { background: #da3633; color: #fff; }
-  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  /* ── Toast ───────────────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
+    border-radius: 12px; font-size: 13px; font-weight: 500; z-index: 100;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    animation: toastIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    border: 1px solid var(--glass-border);
+  }
+  .toast.ok { background: rgba(35,134,54,0.85); color: #fff; }
+  .toast.err { background: rgba(218,54,51,0.85); color: #fff; }
+  @keyframes toastIn { from { transform: translateY(16px) scale(0.95); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
 
-  /* Chat */
+  /* ── Chat ─────────────────────────────────────────────── */
   .chat-view { flex: 1; display: flex; flex-direction: column; }
-  .messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-  .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-  .msg.inbound { background: var(--accent-dim); align-self: flex-end; border-bottom-right-radius: 2px; }
-  .msg.outbound { background: var(--surface); align-self: flex-start; border-bottom-left-radius: 2px; border-left: 3px solid var(--success); }
-  .msg .sender { font-size: 11px; font-weight: 600; margin-bottom: 2px; }
-  .msg .sender.user { color: var(--accent); } .msg .sender.agent { color: var(--success); }
-  .msg .time { font-size: 10px; color: var(--text-muted); float: right; margin-left: 12px; }
-  .msg-empty { color: var(--text-muted); text-align: center; margin-top: 40px; font-size: 13px; }
-  .input-bar { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
-  .input-bar input { flex: 1; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-family: inherit; outline: none; }
-  .input-bar input:focus { border-color: var(--accent); }
+  .messages { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .msg {
+    max-width: 78%; padding: 12px 16px; border-radius: 16px;
+    font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.inbound {
+    align-self: flex-end; border-bottom-right-radius: 4px;
+    background: linear-gradient(135deg, rgba(42,171,238,0.12), rgba(42,171,238,0.06));
+    border: 1px solid rgba(42,171,238,0.1);
+  }
+  .msg.outbound {
+    align-self: flex-start; border-bottom-left-radius: 4px;
+    background: var(--surface); border: 1px solid var(--glass-border);
+    border-left: 2px solid var(--success);
+  }
+  .msg .sender { font-size: 11px; font-weight: 600; margin-bottom: 4px; font-family: 'Outfit', sans-serif; }
+  .msg .sender.user { color: var(--accent); }
+  .msg .sender.agent { color: var(--success); }
+  .msg .time { font-size: 10px; color: var(--text-muted); float: right; margin-left: 12px; font-family: 'IBM Plex Mono', monospace; }
+  .msg-empty { color: var(--text-muted); text-align: center; margin-top: 80px; font-size: 13px; line-height: 2; }
+  .msg-empty svg { display: block; margin: 0 auto 12px; opacity: 0.15; }
+  .input-bar { padding: 16px 20px; border-top: 1px solid var(--glass-border); display: flex; gap: 8px; }
+  .input-bar input {
+    flex: 1; background: rgba(255,255,255,0.04); color: var(--text);
+    border: 1px solid var(--border); border-radius: 12px; padding: 11px 16px;
+    font-size: 13px; font-family: 'DM Sans', sans-serif; outline: none; transition: all 0.15s;
+  }
+  .input-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 
-  /* Detail */
-  .detail-view { flex: 1; overflow-y: auto; padding: 16px; display: none; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-  .card h3 { font-size: 13px; color: var(--accent); margin-bottom: 10px; font-weight: 600; }
-  .detail-row { display: flex; gap: 8px; font-size: 13px; padding: 4px 0; }
-  .detail-label { color: var(--text-sec); min-width: 120px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-  .activity-item { font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--bg); font-family: 'JetBrains Mono', monospace; }
-  .act-time { color: var(--text-muted); margin-right: 8px; } .act-event { color: var(--warn); margin-right: 4px; }
+  /* ── Detail cards ────────────────────────────────────── */
+  .detail-view { flex: 1; overflow-y: auto; padding: 24px; display: none; }
+  .card {
+    background: var(--surface); border: 1px solid var(--glass-border);
+    border-radius: 16px; padding: 20px 24px; margin-bottom: 16px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: rgba(255,255,255,0.1); }
+  .card h3 {
+    font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .detail-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 0; }
+  .detail-label { color: var(--text-muted); min-width: 100px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+  .progress-bar { display: inline-block; width: 80px; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; vertical-align: middle; margin-left: 8px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 2px; transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
+  .activity-item { font-size: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.03); font-family: 'IBM Plex Mono', monospace; }
+  .act-time { color: var(--text-muted); margin-right: 8px; }
+  .act-event { color: var(--warn); margin-right: 4px; }
 
-  /* Task board */
-  .task-view { flex: 1; overflow-y: auto; padding: 16px; display: none; }
-  .task-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
-  .task-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  /* ── List items (tasks, schedules, teams) ─────────────── */
+  .task-view { flex: 1; overflow-y: auto; padding: 24px; display: none; }
+  .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .list-header span { font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 15px; }
+  .task-item {
+    background: var(--surface); border: 1px solid var(--glass-border);
+    border-radius: 12px; padding: 14px 18px; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: all 0.15s;
+  }
+  .task-item:hover { border-color: rgba(255,255,255,0.08); transform: translateY(-1px); }
+  .task-status {
+    font-size: 10px; padding: 3px 10px; border-radius: 999px; font-weight: 600;
+    font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: 0.06em;
+  }
   .task-status.open { background: var(--accent-dim); color: var(--accent); }
-  .task-status.claimed { background: rgba(210,153,34,0.15); color: var(--warn); }
-  .task-status.done { background: rgba(126,231,135,0.15); color: var(--success); }
+  .task-status.claimed { background: rgba(210,153,34,0.12); color: var(--warn); }
+  .task-status.done { background: rgba(86,211,100,0.1); color: var(--success); }
   .task-title { flex: 1; font-size: 13px; font-weight: 500; }
   .task-assignee { font-size: 11px; color: var(--text-sec); }
   .task-actions { display: flex; gap: 4px; }
 
-  /* Form overlay */
-  .form-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
-  .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; width: 440px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
-  .form-card h2 { font-size: 16px; margin-bottom: 16px; color: var(--accent); }
-  .form-field { margin-bottom: 12px; }
-  .form-field label { display: block; font-size: 12px; color: var(--text-sec); margin-bottom: 4px; font-weight: 500; }
-  .form-field input, .form-field select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-family: inherit; outline: none; }
-  .form-field input:focus, .form-field select:focus { border-color: var(--accent); }
-  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
-  .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
+  /* ── Form overlay ────────────────────────────────────── */
+  .form-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+    animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .form-card {
+    background: var(--glass); border: 1px solid var(--glass-border);
+    border-radius: 20px; padding: 32px; width: 480px; max-width: 92vw; max-height: 82vh;
+    overflow-y: auto; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.4);
+  }
+  .form-card h2 {
+    font-family: 'Outfit', sans-serif; font-size: 20px; font-weight: 700;
+    margin-bottom: 24px; letter-spacing: -0.02em;
+  }
+  .form-field { margin-bottom: 16px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: var(--text-muted);
+    margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-family: 'Outfit', sans-serif;
+  }
+  .form-field input, .form-field select {
+    width: 100%; background: rgba(255,255,255,0.04); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+    font-size: 13px; font-family: 'DM Sans', sans-serif; outline: none;
+    transition: all 0.15s;
+  }
+  .form-field input:focus, .form-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px; }
+  .eye-btn { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px; padding: 4px 6px; border-radius: 6px; transition: all 0.15s; }
+  .eye-btn:hover { color: var(--accent); }
 
-  @media (max-width: 700px) { .sidebar { width: 200px; } }
+  @media (max-width: 700px) { .sidebar { width: 240px; } }
 </style>
 </head>
 <body>
@@ -114,15 +254,24 @@
     <h1>AgEnD</h1>
     <div class="uptime" id="uptime">--</div>
   </div>
-  <div class="fleet-entry" id="fleetEntry" onclick="selFleet()">&#9733; Fleet</div>
+  <div style="padding:8px 12px 0">
+    <div class="fleet-entry" id="fleetEntry" onclick="selFleet()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      Fleet
+    </div>
+  </div>
+  <div class="nav-section">Instances</div>
   <div class="instance-list" id="instanceList"></div>
   <div class="sidebar-footer">
-    <button class="btn btn-accent" style="width:100%" onclick="showCreateInstance()">+ New Instance</button>
+    <button class="btn btn-accent" style="width:100%;justify-content:center" onclick="showCreateInstance()">+ New Instance</button>
   </div>
 </div>
 
 <div class="main" id="mainArea">
-  <div class="no-sel">Select an instance</div>
+  <div class="no-sel">
+    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+    <span>Select Fleet or an instance to begin</span>
+  </div>
 </div>
 
 <script>
@@ -164,7 +313,7 @@ function renderList() {
   document.getElementById("fleetEntry").className = `fleet-entry${mode==="fleet"?" active":""}`;
   const el = document.getElementById("instanceList");
   el.innerHTML = instances.map(i => `<div class="instance-item${i.name===cur&&mode==="instance"?" active":""}" data-n="${esc(i.name)}">
-    <div class="dot ${i.status}"></div><div style="flex:1;min-width:0">
+    <div class="dot ${i.status}" title="${i.status}"></div><div style="flex:1;min-width:0">
     <div class="inst-name">${esc(i.name)}</div>
     <div class="inst-meta">${i.cost>0?`$${i.cost.toFixed(2)}`:""}${i.context_pct>0?` ctx:${Math.round(i.context_pct)}%`:""}</div>
     </div></div>`).join("");
@@ -178,7 +327,7 @@ function renderMain() {
   const main = document.getElementById("mainArea");
   if (mode === "fleet") return renderFleetMain(main);
   if (mode === "instance" && cur) return renderInstanceMain(main);
-  main.innerHTML = '<div class="no-sel">Select Fleet or an instance</div>';
+  main.innerHTML = '<div class="no-sel"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>Select Fleet or an instance to begin</span></div>';
 }
 
 function renderFleetMain(main) {
@@ -218,9 +367,9 @@ function renderActions(i) {
   const el = document.getElementById("actions"); if (!el || !i) return;
   const r = i.status === "running";
   el.innerHTML = `${r
-    ?`<button class="btn btn-warn" onclick="doAction('stop')">Stop</button><button class="btn btn-warn" onclick="doAction('restart')">Restart</button>`
-    :`<button class="btn btn-green" onclick="doAction('start')">Start</button>`}
-    <button class="btn btn-red" onclick="doAction('delete')">Delete</button>`;
+    ?`<button class="btn btn-warn" onclick="doAction('stop')"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg> Stop</button><button class="btn btn-warn" onclick="doAction('restart')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Restart</button>`
+    :`<button class="btn btn-green" onclick="doAction('start')"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start</button>`}
+    <button class="btn btn-red" onclick="doAction('delete')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</button>`;
 }
 async function doAction(a) {
   if (!cur) return;
@@ -230,7 +379,7 @@ async function doAction(a) {
     const r = await api("POST", `/ui/instances/${encodeURIComponent(cur)}/delete`, { confirm: c });
     if (r.error) { toast(r.error, false); return; }
     toast(`${cur} deleted`); cur = null;
-    document.getElementById("mainArea").innerHTML = '<div class="no-sel">Instance deleted</div>';
+    document.getElementById("mainArea").innerHTML = '<div class="no-sel"><span>Instance deleted</span></div>';
     return;
   }
   const ep = `/ui/${a}/${encodeURIComponent(cur)}`;
@@ -242,7 +391,7 @@ async function doAction(a) {
 function renderMsgs() {
   const el = document.getElementById("messages"); if (!el) return;
   const m = msgs[cur] || [];
-  if (!m.length) { el.innerHTML = '<div class="msg-empty">No messages yet</div>'; return; }
+  if (!m.length) { el.innerHTML = '<div class="msg-empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>No messages yet<br><span style="font-size:12px;color:var(--text-muted)">Send a message to start the conversation</span></div>'; return; }
   el.innerHTML = m.map(x => {
     const u = x.sender==="web-user"||(!x.sender.startsWith("agend")&&x.sender!==cur&&x.sender!=="general");
     const t = x.ts ? new Date(x.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) : "";
@@ -267,13 +416,13 @@ async function loadDetail() {
       <div class="detail-row"><span class="detail-label">Status</span><span>${esc(d.status)}</span></div>
       <div class="detail-row"><span class="detail-label">Display</span><span>${esc(d.display_name||"--")}</span></div>
       <div class="detail-row"><span class="detail-label">Description</span><span>${esc(d.description||"--")}</span></div>
-      <div class="detail-row"><span class="detail-label">Directory</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${esc(d.working_directory)}</span></div></div>
+      <div class="detail-row"><span class="detail-label">Directory</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">${esc(d.working_directory)}</span></div></div>
       <div class="card"><h3>Runtime</h3>
       <div class="detail-row"><span class="detail-label">Model</span><span>${esc(model)}</span></div>
       <div class="detail-row"><span class="detail-label">Cost</span><span>$${cost.toFixed(2)} <span style="color:var(--text-muted);font-size:11px">(session accumulated)</span></span></div>
-      <div class="detail-row"><span class="detail-label">Context</span><span>${Math.round(ctx)}%</span></div>
-      <div class="detail-row"><span class="detail-label">Rate 5h</span><span>${Math.round(rl5)}%</span></div>
-      <div class="detail-row"><span class="detail-label">Rate 7d</span><span>${Math.round(rl7)}%</span></div></div>`;
+      <div class="detail-row"><span class="detail-label">Context</span><span>${Math.round(ctx)}% <span class="progress-bar"><span class="progress-fill" style="width:${Math.min(ctx,100)}%;background:${ctx>80?'var(--warn)':'var(--accent)'}"></span></span></span></div>
+      <div class="detail-row"><span class="detail-label">Rate 5h</span><span>${Math.round(rl5)}% <span class="progress-bar"><span class="progress-fill" style="width:${Math.min(rl5,100)}%;background:${rl5>90?'var(--error)':rl5>70?'var(--warn)':'var(--accent)'}"></span></span></span></div>
+      <div class="detail-row"><span class="detail-label">Rate 7d</span><span>${Math.round(rl7)}% <span class="progress-bar"><span class="progress-fill" style="width:${Math.min(rl7,100)}%;background:${rl7>90?'var(--error)':rl7>70?'var(--warn)':'var(--accent)'}"></span></span></span></div></div>`;
     if (d.recent_activity?.length) {
       h += `<div class="card"><h3>Recent Activity</h3>`;
       for (const a of d.recent_activity) { const t=a.timestamp?a.timestamp.slice(11,16):""; h+=`<div class="activity-item"><span class="act-time">${t}</span><span class="act-event">${esc(a.event)}</span>${esc(a.summary||"")}</div>`; }
@@ -288,10 +437,9 @@ async function loadTasks() {
   try {
     const d = await api("GET", "/ui/tasks");
     const tasks = d.tasks || [];
-    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <span style="font-weight:600;font-size:14px">${tasks.length} tasks</span>
+    let h = `<div class="list-header"><span>${tasks.length} tasks</span>
       <button class="btn btn-accent" onclick="showCreateTask()">+ New Task</button></div>`;
-    if (!tasks.length) h += `<div class="msg-empty">&#128203; No tasks yet — create one to get started</div>`;
+    if (!tasks.length) h += `<div class="msg-empty"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>No tasks yet<br><span style="font-size:12px">Create one to coordinate fleet work</span></div>`;
     else for (const t of tasks) {
       h += `<div class="task-item">
         <span class="task-status ${t.status}">${t.status}</span>
@@ -312,7 +460,6 @@ async function taskAct(id, action) {
 
 async function showCreateInstance() {
   const ov = document.createElement("div"); ov.className = "form-overlay";
-  // Fetch available backends
   let backendOpts = '<option value="">Use fleet default</option>';
   try {
     const bd = await api("GET", "/ui/backends");
@@ -332,7 +479,6 @@ async function showCreateInstance() {
     <button class="btn btn-accent" id="ci-go">Create</button></div></div>`;
   document.body.appendChild(ov);
   ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
-  // Dynamic required: topic_name required when directory is empty
   ov.querySelector("#ci-dir").addEventListener("input", () => {
     const hasDir = ov.querySelector("#ci-dir").value.trim();
     ov.querySelector("#ci-topic-label").textContent = hasDir ? "Topic Name" : "Topic Name *";
@@ -386,15 +532,14 @@ async function loadSchedules() {
   try {
     const d = await api("GET", "/ui/schedules");
     const scheds = d.schedules || [];
-    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <span style="font-weight:600;font-size:14px">${scheds.length} schedules</span>
+    let h = `<div class="list-header"><span>${scheds.length} schedules</span>
       <button class="btn btn-accent" onclick="showCreateSchedule()">+ New Schedule</button></div>`;
-    if (!scheds.length) h += `<div class="msg-empty">&#128197; No schedules yet</div>`;
+    if (!scheds.length) h += `<div class="msg-empty"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>No schedules yet<br><span style="font-size:12px">Automate recurring tasks with cron</span></div>`;
     else for (const s of scheds) {
       h += `<div class="task-item">
         <span class="task-status ${s.enabled?"open":"done"}">${s.enabled?"on":"off"}</span>
         <span class="task-title">${esc(s.label||cronDesc(s.cron))}</span>
-        <span class="task-assignee" style="font-family:'JetBrains Mono',monospace" title="${esc(cronDesc(s.cron))}">${esc(s.cron)}</span>
+        <span class="task-assignee" style="font-family:'IBM Plex Mono',monospace" title="${esc(cronDesc(s.cron))}">${esc(s.cron)}</span>
         <span class="task-assignee" style="cursor:pointer;color:var(--accent)" onclick="sel('${esc(s.target)}')">${esc(s.target)}</span>
         <div class="task-actions">
           <button class="btn btn-ghost btn-red" onclick="delSchedule('${s.id}')">Delete</button>
@@ -441,10 +586,9 @@ async function loadTeams() {
     const d = await api("GET", "/ui/teams");
     const teams = d.teams || {};
     const entries = Object.entries(teams);
-    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <span style="font-weight:600;font-size:14px">${entries.length} teams</span>
+    let h = `<div class="list-header"><span>${entries.length} teams</span>
       <button class="btn btn-accent" onclick="showCreateTeam()">+ New Team</button></div>`;
-    if (!entries.length) h += `<div class="msg-empty">&#128101; No teams yet — group instances for coordinated work</div>`;
+    if (!entries.length) h += `<div class="msg-empty"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>No teams yet<br><span style="font-size:12px">Group instances for coordinated work</span></div>`;
     else for (const [name, team] of entries) {
       h += `<div class="task-item">
         <span class="task-title" style="font-weight:600">${esc(name)}</span>
@@ -463,7 +607,7 @@ async function delTeam(name) {
 }
 function showCreateTeam() {
   const ov = document.createElement("div"); ov.className = "form-overlay";
-  const memOpts = instances.map(i => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:2px 0"><input type="checkbox" value="${esc(i.name)}">${esc(i.name)}</label>`).join("");
+  const memOpts = instances.map(i => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:3px 0"><input type="checkbox" value="${esc(i.name)}">${esc(i.name)}</label>`).join("");
   ov.innerHTML = `<div class="form-card"><h2>Create Team</h2>
     <div class="form-field"><label>Team Name *</label><input id="ct2-name" placeholder="team-name"></div>
     <div class="form-field"><label>Description</label><input id="ct2-desc" placeholder="What this team does"></div>
@@ -516,11 +660,10 @@ async function loadConfig() {
     const acc = ch.access || {};
     const defs = cfgData.defaults || {};
     const roots = cfgData.project_roots || [];
-    const mask = s => s ? "••••••••" : "";
     el.innerHTML = `
       <div class="card"><h3>Channel</h3>
-        <div class="form-field"><label>Type</label><input id="cfg-type" value="${esc(ch.type||"")}" disabled style="opacity:0.6"></div>
-        <div class="form-field"><label>Bot Token Env</label><input id="cfg-token-env" value="${esc(ch.bot_token_env||"AGEND_BOT_TOKEN")}" disabled style="opacity:0.6"></div>
+        <div class="form-field"><label>Type</label><input id="cfg-type" value="${esc(ch.type||"")}" disabled style="opacity:0.5"></div>
+        <div class="form-field"><label>Bot Token Env</label><input id="cfg-token-env" value="${esc(ch.bot_token_env||"AGEND_BOT_TOKEN")}" disabled style="opacity:0.5"></div>
         <div class="form-field"><label>Group ID</label>
           <div style="display:flex;gap:4px;align-items:center">
             <input id="cfg-gid" type="password" value="${ch.group_id||""}" style="flex:1">
@@ -535,7 +678,7 @@ async function loadConfig() {
             <input id="cfg-users" type="password" value="${(acc.allowed_users||[]).join(", ")}" style="flex:1">
             <button class="eye-btn" onclick="togglePw('cfg-users')">&#128065;</button>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Comma-separated user IDs</div></div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Comma-separated user IDs</div></div>
       </div>
       <div class="card"><h3>Defaults</h3>
         <div class="form-field"><label>Backend</label>
@@ -544,17 +687,17 @@ async function loadConfig() {
           </select></div>
       </div>
       <div class="card"><h3>Project Roots</h3>
-        <div id="cfg-roots">${roots.map((r,i) => `<div style="display:flex;gap:4px;margin-bottom:4px"><input class="cfg-root" value="${esc(r)}" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`).join("")}</div>
+        <div id="cfg-roots">${roots.map((r,i) => `<div style="display:flex;gap:4px;margin-bottom:6px"><input class="cfg-root" value="${esc(r)}" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`).join("")}</div>
         <button class="btn btn-ghost" onclick="addRoot()">+ Add Root</button>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+      <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
         <button class="btn btn-accent" onclick="saveConfig()">Save Changes</button>
         <span style="font-size:11px;color:var(--text-muted)">Saving will reformat fleet.yaml (comments will be lost)</span>
       </div>`;
   } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load config</div>`; }
 }
 function togglePw(id) { const el = document.getElementById(id); el.type = el.type === "password" ? "text" : "password"; }
-function addRoot() { const el = document.getElementById("cfg-roots"); el.insertAdjacentHTML("beforeend", `<div style="display:flex;gap:4px;margin-bottom:4px"><input class="cfg-root" value="" placeholder="/path/to/projects" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`); }
+function addRoot() { const el = document.getElementById("cfg-roots"); el.insertAdjacentHTML("beforeend", `<div style="display:flex;gap:4px;margin-bottom:6px"><input class="cfg-root" value="" placeholder="/path/to/projects" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`); }
 async function saveConfig() {
   const body = {
     channel: { group_id: document.getElementById("cfg-gid").value.trim(), access: { mode: document.getElementById("cfg-acc-mode").value, allowed_users: document.getElementById("cfg-users").value.split(",").map(s => s.trim()).filter(Boolean) } },
