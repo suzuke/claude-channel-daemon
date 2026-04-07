@@ -34,34 +34,19 @@ describe("KiroBackend", () => {
   });
 
   describe("buildCommand", () => {
-    it("generates chat command with --trust-all-tools", () => {
+    it("generates chat command with --trust-all-tools and --resume", () => {
       const backend = new KiroBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig());
       expect(cmd).toContain("chat");
       expect(cmd).toContain("--trust-all-tools");
+      expect(cmd).toContain("--resume");
       expect(cmd).toContain("--require-mcp-startup");
-      expect(cmd).not.toContain("--resume");
     });
 
-    it("includes --resume with valid UUID session-id", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "f142766b-7371-496d-a463-8d03562cce65");
+    it("always includes --resume (boolean flag, resumes latest session for CWD)", () => {
       const backend = new KiroBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).toContain("--resume f142766b-7371-496d-a463-8d03562cce65");
-    });
-
-    it("skips resume for invalid session-id (not UUID)", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "not-a-valid-uuid");
-      const backend = new KiroBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).not.toContain("--resume");
-    });
-
-    it("skips resume for empty session-id", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "  \n");
-      const backend = new KiroBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).not.toContain("--resume");
+      expect(cmd).toContain("--resume");
     });
 
     it("includes --model when model is set", () => {
@@ -120,13 +105,7 @@ describe("KiroBackend", () => {
   });
 
   describe("getSessionId", () => {
-    it("returns session-id from file", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "test-session-123");
-      const backend = new KiroBackend(TEST_DIR);
-      expect(backend.getSessionId()).toBe("test-session-123");
-    });
-
-    it("returns null when file missing", () => {
+    it("returns null (Kiro manages sessions internally)", () => {
       const backend = new KiroBackend(TEST_DIR);
       expect(backend.getSessionId()).toBeNull();
     });

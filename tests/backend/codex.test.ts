@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, rmSync } from "node:fs";
 import { CodexBackend } from "../../src/backend/codex.js";
 import type { CliBackendConfig } from "../../src/backend/types.js";
 
@@ -34,48 +33,17 @@ describe("CodexBackend", () => {
   });
 
   describe("buildCommand", () => {
-    it("generates fresh session command when no session-id exists", () => {
+    it("always uses resume --last (resumes latest session for CWD)", () => {
       const backend = new CodexBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).toContain("codex");
-      expect(cmd).toContain("--dangerously-bypass-approvals-and-sandbox");
-      expect(cmd).not.toContain("resume");
-    });
-
-    it("generates resume command when session-id file exists", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "sess-abc-123");
-      const backend = new CodexBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).toContain("resume sess-abc-123");
+      expect(cmd).toContain("resume --last");
       expect(cmd).toContain("--dangerously-bypass-approvals-and-sandbox");
     });
 
-    it("falls back to fresh session when session-id is invalid", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "invalid id with spaces!");
-      const backend = new CodexBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).not.toContain("resume");
-      expect(cmd).toContain("--dangerously-bypass-approvals-and-sandbox");
-    });
-
-    it("falls back to fresh session when session-id file is empty", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "  \n");
-      const backend = new CodexBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).not.toContain("resume");
-    });
-
-    it("includes model config when model is set", () => {
+    it("includes model config", () => {
       const backend = new CodexBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig({ model: "o3" }));
-      expect(cmd).toContain('-c model="o3"');
-    });
-
-    it("includes model config in resume command", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "sess-xyz");
-      const backend = new CodexBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig({ model: "o3" }));
-      expect(cmd).toContain("resume sess-xyz");
+      expect(cmd).toContain("resume --last");
       expect(cmd).toContain('-c model="o3"');
     });
 
@@ -85,25 +53,10 @@ describe("CodexBackend", () => {
       expect(cmd).toContain("--full-auto");
       expect(cmd).not.toContain("--dangerously-bypass-approvals-and-sandbox");
     });
-
-    it("uses --full-auto in resume mode when skipPermissions is false", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "sess-abc");
-      const backend = new CodexBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig({ skipPermissions: false }));
-      expect(cmd).toContain("resume sess-abc");
-      expect(cmd).toContain("--full-auto");
-      expect(cmd).not.toContain("--dangerously-bypass-approvals-and-sandbox");
-    });
   });
 
   describe("getSessionId", () => {
-    it("returns session-id from file", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "sess-123");
-      const backend = new CodexBackend(TEST_DIR);
-      expect(backend.getSessionId()).toBe("sess-123");
-    });
-
-    it("returns null when file missing", () => {
+    it("returns null (Codex manages sessions internally)", () => {
       const backend = new CodexBackend(TEST_DIR);
       expect(backend.getSessionId()).toBeNull();
     });
