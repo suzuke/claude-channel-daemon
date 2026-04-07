@@ -22,6 +22,7 @@ export interface LifecycleContext {
   readonly dataDir: string;
   readonly routing: RoutingEngine;
   readonly instanceIpcClients: Map<string, IpcClient>;
+  readonly sessionRegistry: Map<string, string>;
   readonly eventLog: EventLog | null;
   readonly controlClient: TmuxControlClient | null;
 
@@ -153,6 +154,17 @@ export class InstanceLifecycle {
         const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
         try { process.kill(pid, "SIGTERM"); } catch (e) { this.ctx.logger.debug({ err: e, pid }, "SIGTERM failed for stale process"); }
       }
+    }
+
+    // Clean up IPC client (prevents stale routing after stop)
+    const ipc = this.ctx.instanceIpcClients.get(name);
+    if (ipc) {
+      try { ipc.close(); } catch { /* already closed */ }
+      this.ctx.instanceIpcClients.delete(name);
+    }
+    // Clean up session registry entries pointing to this instance
+    for (const [session, instance] of this.ctx.sessionRegistry) {
+      if (instance === name) this.ctx.sessionRegistry.delete(session);
     }
   }
 
