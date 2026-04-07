@@ -170,7 +170,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     if (config.general_topic) {
       this.ensureGeneralInstructions(config.working_directory, config.backend);
     }
-    return this.lifecycle.start(name, config, topicMode);
+    await this.lifecycle.start(name, config, topicMode);
+    // Auto-connect IPC — daemon.start() ensures socket is ready before resolving
+    await this.connectIpcToInstance(name);
   }
 
   async stopInstance(name: string): Promise<void> {
@@ -523,6 +525,13 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   /** Connect IPC to a single instance with all handlers */
   async connectIpcToInstance(name: string): Promise<void> {
+    // Close existing client to prevent socket leak on reconnect
+    const existing = this.instanceIpcClients.get(name);
+    if (existing) {
+      try { existing.close(); } catch { /* already closed */ }
+      this.instanceIpcClients.delete(name);
+    }
+
     const sockPath = join(this.getInstanceDir(name), "channel.sock");
     if (!existsSync(sockPath)) return;
 
