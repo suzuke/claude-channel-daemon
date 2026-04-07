@@ -1,23 +1,37 @@
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { execSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import Database from "better-sqlite3";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, resolveBinary } from "./types.js";
 
 export class CodexBackend implements CliBackend {
   readonly binaryName = "codex";
   private binaryPath: string;
+  private workingDirectory: string | null = null;
 
   constructor(private instanceDir: string) {
     this.binaryPath = resolveBinary("codex");
   }
 
   buildCommand(config: CliBackendConfig): string {
+    this.workingDirectory = config.workingDirectory;
     const approvalFlag = config.skipPermissions !== false
       ? "--dangerously-bypass-approvals-and-sandbox"
       : "--full-auto";
-    // Always fresh session — context rotation is intentional, and AgEnD's
-    // snapshot injection handles context continuity. Codex has no supported
-    // interface for session ID retrieval.
+
+    // Resume specific session if session-id file exists (written by daemon's saveSessionId)
+    const sessionIdFile = join(this.instanceDir, "session-id");
+    if (existsSync(sessionIdFile)) {
+      const sid = readFileSync(sessionIdFile, "utf-8").trim();
+      if (sid) {
+        let cmd = `${this.binaryPath} resume ${sid} ${approvalFlag}`;
+        if (config.model) cmd += ` -c model="${config.model}"`;
+        return cmd;
+      }
+    }
+
+    // Fresh session (first launch for this instance)
     let cmd = `${this.binaryPath} ${approvalFlag}`;
     if (config.model) cmd += ` -c model="${config.model}"`;
     return cmd;
@@ -72,10 +86,23 @@ export class CodexBackend implements CliBackend {
   }
 
   getSessionId(): string | null {
-    // Codex manages sessions internally. No supported interface to retrieve
-    // session/thread ID externally. Return null — daemon's saveSessionId
-    // will no-op.
-    return null;
+    // Read latest thread ID from Codex's own SQLite DB (readonly).
+    // Source: Codex DB → daemon's saveSessionId writes to session-id file →
+    // next buildCommand reads it for resume. No circular reference.
+    if (!this.workingDirectory) return null;
+    try {
+      const dbPath = join(homedir(), ".codex", "state_5.sqlite");
+      if (!existsSync(dbPath)) return null;
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const row = db.prepare(
+          "SELECT id FROM threads WHERE cwd = ? ORDER BY updated_at DESC LIMIT 1",
+        ).get(this.workingDirectory) as { id: string } | undefined;
+        return row?.id ?? null;
+      } finally {
+        db.close();
+      }
+    } catch { return null; }
   }
 
   cleanup(config: CliBackendConfig): void {
