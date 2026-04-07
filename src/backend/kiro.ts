@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
 
 export class KiroBackend implements CliBackend {
@@ -12,24 +12,11 @@ export class KiroBackend implements CliBackend {
 
   buildCommand(config: CliBackendConfig): string {
     let cmd = `${this.binaryPath} chat`;
-
     if (config.skipPermissions !== false) cmd += " --trust-all-tools";
-
-    // Resume specific session if session-id file exists
-    // --resume accepts session ID as positional arg (verified kiro-cli v1.29.2, undocumented)
-    const sessionIdFile = join(this.instanceDir, "session-id");
-    if (existsSync(sessionIdFile)) {
-      const sid = readFileSync(sessionIdFile, "utf-8").trim();
-      if (sid && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sid)) {
-        cmd += ` --resume ${sid}`;
-      }
-    }
-
+    // --resume is boolean: Kiro auto-resumes latest conversation for this working directory
+    cmd += " --resume";
     if (config.model) cmd += ` --model ${config.model}`;
-
-    // Fail fast if agend MCP server can't start
     cmd += " --require-mcp-startup";
-
     return cmd;
   }
 
@@ -77,9 +64,9 @@ export class KiroBackend implements CliBackend {
   }
 
   getSessionId(): string | null {
-    try {
-      return readFileSync(join(this.instanceDir, "session-id"), "utf-8").trim() || null;
-    } catch { return null; }
+    // Kiro manages sessions internally via SQLite keyed by working directory.
+    // No external session ID needed — --resume handles it automatically.
+    return null;
   }
 
   cleanup(config: CliBackendConfig): void {
