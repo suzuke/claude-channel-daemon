@@ -67,22 +67,19 @@ agend fleet start               # 3. 啟動 fleet 🎉
 
 ## 運作原理
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────────────────────┐
-│  你          │────▶│  Telegram /  │────▶│  AgEnD Daemon                   │
-│  (手機/電腦) │◀────│  Discord     │◀────│                                 │
-└─────────────┘     └──────────────┘     │  ┌───────────┐ ┌───────────┐   │
-                                          │  │ Instance A │ │ Instance B │   │
-                                          │  │ Claude Code│ │ Gemini CLI │   │
-                                          │  │ 專案 X     │ │ 專案 Y     │   │
-                                          │  └─────┬─────┘ └─────┬─────┘   │
-                                          │        │   MCP Tools  │         │
-                                          │        └──────────────┘         │
-                                          │  ┌───────────┐                  │
-                                          │  │ General    │ ← 路由任務      │
-                                          │  │ Dispatcher │   到各 instance  │
-                                          │  └───────────┘                  │
-                                          └─────────────────────────────────┘
+```mermaid
+graph LR
+  You["你<br/>(手機 / 電腦)"] <-->|訊息| Channel["Telegram / Discord<br/>/ Web UI"]
+  Channel <-->|路由| Daemon["AgEnD Daemon"]
+
+  subgraph Fleet
+    Daemon --> General["General<br/>Dispatcher"]
+    Daemon --> A["Instance A<br/>Claude Code<br/>專案 X"]
+    Daemon --> B["Instance B<br/>Gemini CLI<br/>專案 Y"]
+    A <-.->|MCP Tools| B
+    General -.->|路由任務| A
+    General -.->|路由任務| B
+  end
 ```
 
 1. **你傳訊息**給 Telegram/Discord bot

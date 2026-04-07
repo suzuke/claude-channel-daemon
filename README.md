@@ -67,22 +67,19 @@ Open Telegram, send a message to your bot, and start coding from your phone.
 
 ## How It Works
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────────────────────┐
-│  You         │────▶│  Telegram /  │────▶│  AgEnD Daemon                   │
-│  (Phone/PC)  │◀────│  Discord     │◀────│                                 │
-└─────────────┘     └──────────────┘     │  ┌───────────┐ ┌───────────┐   │
-                                          │  │ Instance A │ │ Instance B │   │
-                                          │  │ Claude Code│ │ Gemini CLI │   │
-                                          │  │ Project X  │ │ Project Y  │   │
-                                          │  └─────┬─────┘ └─────┬─────┘   │
-                                          │        │   MCP Tools  │         │
-                                          │        └──────────────┘         │
-                                          │  ┌───────────┐                  │
-                                          │  │ General    │ ← routes tasks  │
-                                          │  │ Dispatcher │   to instances   │
-                                          │  └───────────┘                  │
-                                          └─────────────────────────────────┘
+```mermaid
+graph LR
+  You["You<br/>(Phone / PC)"] <-->|messages| Channel["Telegram / Discord<br/>/ Web UI"]
+  Channel <-->|routing| Daemon["AgEnD Daemon"]
+
+  subgraph Fleet
+    Daemon --> General["General<br/>Dispatcher"]
+    Daemon --> A["Instance A<br/>Claude Code<br/>Project X"]
+    Daemon --> B["Instance B<br/>Gemini CLI<br/>Project Y"]
+    A <-.->|MCP Tools| B
+    General -.->|routes tasks| A
+    General -.->|routes tasks| B
+  end
 ```
 
 1. **You send a message** to your Telegram/Discord bot
