@@ -1,7 +1,8 @@
 import { join, dirname } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
+import { appendWithMarker, removeMarker } from "./marker-utils.js";
 
 export class GeminiCliBackend implements CliBackend {
   readonly binaryName = "gemini";
@@ -56,6 +57,13 @@ export class GeminiCliBackend implements CliBackend {
     }
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
+    // Write fleet instructions into GEMINI.md (additive via marker block)
+    if (config.instructions) {
+      try {
+        const geminiMd = join(config.workingDirectory, "GEMINI.md");
+        appendWithMarker(geminiMd, config.instanceName, config.instructions);
+      } catch { /* best effort */ }
+    }
   }
 
   preTrust(workDir: string): void {
@@ -121,6 +129,13 @@ export class GeminiCliBackend implements CliBackend {
           writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
         }
       }
+    } catch { /* best effort */ }
+
+    // Remove fleet instructions marker block from GEMINI.md
+    try {
+      const geminiMd = join(config.workingDirectory, "GEMINI.md");
+      const isEmpty = removeMarker(geminiMd, config.instanceName);
+      if (isEmpty && existsSync(geminiMd)) unlinkSync(geminiMd);
     } catch { /* best effort */ }
 
     // Remove trust entries added by preTrust()

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { CodexBackend } from "../../src/backend/codex.js";
+import { appendWithMarker } from "../../src/backend/marker-utils.js";
 import type { CliBackendConfig } from "../../src/backend/types.js";
 
 const TEST_DIR = "/tmp/ccd-test-codex-backend";
@@ -59,6 +61,28 @@ describe("CodexBackend", () => {
     it("returns null (Codex manages sessions internally)", () => {
       const backend = new CodexBackend(TEST_DIR);
       expect(backend.getSessionId()).toBeNull();
+    });
+  });
+
+  describe("cleanup — AGENTS.md", () => {
+    it("removes marker block from AGENTS.md", () => {
+      const agentsMd = join(WORK_DIR, "AGENTS.md");
+      writeFileSync(agentsMd, "# User rules\n");
+      appendWithMarker(agentsMd, "test-codex", "Fleet context");
+      expect(readFileSync(agentsMd, "utf-8")).toContain("Fleet context");
+      const backend = new CodexBackend(TEST_DIR);
+      backend.cleanup(makeConfig());
+      const content = readFileSync(agentsMd, "utf-8");
+      expect(content).toContain("# User rules");
+      expect(content).not.toContain("Fleet context");
+    });
+
+    it("deletes AGENTS.md if empty after marker removal", () => {
+      const agentsMd = join(WORK_DIR, "AGENTS.md");
+      appendWithMarker(agentsMd, "test-codex", "Fleet context");
+      const backend = new CodexBackend(TEST_DIR);
+      backend.cleanup(makeConfig());
+      expect(existsSync(agentsMd)).toBe(false);
     });
   });
 });

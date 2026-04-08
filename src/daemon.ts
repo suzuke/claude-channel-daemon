@@ -17,6 +17,7 @@ import { getTmuxSession } from "./config.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { HangDetector } from "./hang-detector.js";
 import type { TmuxControlClient } from "./tmux-control.js";
+import { buildFleetInstructions } from "./instructions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -998,9 +999,37 @@ export class Daemon extends EventEmitter {
     if (!existsSync(serverJs)) {
       serverJs = join(__dirname, "..", "dist", "channel", "mcp-server.js");
     }
-    // Build MCP server env — fleet context is injected via MCP instructions,
-    // NOT via CLI --system-prompt flags.  This keeps all backends uniform and
-    // avoids overriding each CLI's built-in system prompt.
+
+    // ── Resolve workflow and systemPrompt once, share between MCP env and instructions ──
+    let resolvedWorkflow: string | false | undefined;
+    if (this.config.workflow === false) {
+      resolvedWorkflow = false;
+    } else {
+      const wf = this.config.workflow ?? "builtin";
+      if (wf !== "builtin") {
+        let content = wf;
+        if (content.startsWith("file:")) {
+          try { content = readFileSync(content.slice(5), "utf-8"); } catch { content = ""; }
+        }
+        resolvedWorkflow = content || undefined;
+      }
+    }
+
+    let resolvedCustomPrompt: string | undefined;
+    if (this.config.systemPrompt) {
+      let p = this.config.systemPrompt;
+      if (p.startsWith("file:")) {
+        try { p = readFileSync(p.slice(5), "utf-8"); } catch { p = ""; }
+      }
+      if (p) resolvedCustomPrompt = p;
+    }
+
+    let decisions: { title: string; content: string }[] | undefined;
+    if (process.env.AGEND_DECISIONS) {
+      try { decisions = JSON.parse(process.env.AGEND_DECISIONS); } catch { /* invalid JSON */ }
+    }
+
+    // ── MCP server env (dual-track: still passes env vars for MCP instructions fallback) ──
     const mcpEnv: Record<string, string> = {
       AGEND_SOCKET_PATH: sockPath,
       AGEND_INSTANCE_NAME: this.name,
@@ -1009,30 +1038,21 @@ export class Daemon extends EventEmitter {
     if (this.config.tool_set) mcpEnv.AGEND_TOOL_SET = this.config.tool_set;
     if (this.config.display_name) mcpEnv.AGEND_DISPLAY_NAME = this.config.display_name;
     if (this.config.description) mcpEnv.AGEND_DESCRIPTION = this.config.description;
-    // Workflow template: pass resolved content or "false" to disable
-    if (this.config.workflow === false) {
-      mcpEnv.AGEND_WORKFLOW = "false";
-    } else {
-      const wf = this.config.workflow ?? "builtin";
-      if (wf !== "builtin") {
-        let content = wf;
-        if (wf.startsWith("file:")) {
-          try { content = readFileSync(wf.slice(5), "utf-8"); } catch { content = ""; }
-        }
-        if (content) mcpEnv.AGEND_WORKFLOW = content;
-      }
-      // "builtin" → no env var, mcp-server.ts reads the bundled template
-    }
-    // Custom systemPrompt: resolve file: prefix before passing
-    if (this.config.systemPrompt) {
-      let userPrompt = this.config.systemPrompt;
-      if (userPrompt.startsWith("file:")) {
-        try { userPrompt = readFileSync(userPrompt.slice(5), "utf-8"); } catch { userPrompt = ""; }
-      }
-      if (userPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = userPrompt;
-    }
-    // Pass through active decisions from fleet manager
+    if (resolvedWorkflow === false) mcpEnv.AGEND_WORKFLOW = "false";
+    else if (resolvedWorkflow) mcpEnv.AGEND_WORKFLOW = resolvedWorkflow;
+    if (resolvedCustomPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = resolvedCustomPrompt;
     if (process.env.AGEND_DECISIONS) mcpEnv.AGEND_DECISIONS = process.env.AGEND_DECISIONS;
+
+    // ── Fleet instructions for additive system prompt injection ──
+    const instructions = buildFleetInstructions({
+      instanceName: this.name,
+      workingDirectory: this.config.working_directory,
+      displayName: this.config.display_name,
+      description: this.config.description,
+      customPrompt: resolvedCustomPrompt,
+      workflow: resolvedWorkflow,
+      decisions,
+    });
 
     return {
       workingDirectory: this.config.working_directory,
@@ -1048,6 +1068,7 @@ export class Daemon extends EventEmitter {
       skipPermissions: this.config.skipPermissions,
       model: this.modelOverride ?? this.config.model,
       skipResume: this.skipResume,
+      instructions,
     };
   }
 

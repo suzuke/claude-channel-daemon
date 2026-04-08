@@ -14,11 +14,10 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync } from "node:fs";
-import { basename, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename } from "node:path";
 import { IpcClient } from "./ipc-bridge.js";
 import { TOOLS } from "./mcp-tools.js";
+import { buildFleetInstructions } from "../instructions.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -170,97 +169,32 @@ function ipcRequest(
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Dynamic MCP instructions — carries fleet context + user custom prompt
-// so we never need to touch the CLI's own system prompt.
+// MCP instructions — thin wrapper around shared buildFleetInstructions().
+// Phase 1 (dual track): MCP instructions kept as fallback for backends that
+// read the MCP instructions field. Content delegates to the shared module
+// to avoid drift between MCP and additive system prompt paths.
 // ---------------------------------------------------------------------------
 
 function buildMcpInstructions(): string {
-  const name = process.env.AGEND_INSTANCE_NAME ?? "unknown";
-  const workDir = process.env.AGEND_WORKING_DIR ?? process.cwd();
-  const displayName = process.env.AGEND_DISPLAY_NAME;
-  const description = process.env.AGEND_DESCRIPTION;
-  const customPrompt = process.env.AGEND_CUSTOM_PROMPT;
   const workflowEnv = process.env.AGEND_WORKFLOW;
+  let workflow: string | false | undefined;
+  if (workflowEnv === "false") workflow = false;
+  else if (workflowEnv) workflow = workflowEnv;
 
-  const sections: string[] = [];
-
-  // ── Identity ──
-  sections.push(`# AgEnD Fleet Context\nYou are **${name}**, an instance in an AgEnD fleet.\nYour working directory is \`${workDir}\`.`);
-  if (displayName) {
-    sections.push(`Your display name is "${displayName}". Use this when introducing yourself.`);
-  } else {
-    sections.push("You don't have a display name yet. Use set_display_name to choose one that reflects your personality.");
-  }
-  if (description) {
-    sections.push(`## Role\n${description}`);
+  let decisions: { title: string; content: string }[] | undefined;
+  if (process.env.AGEND_DECISIONS) {
+    try { decisions = JSON.parse(process.env.AGEND_DECISIONS); } catch { /* skip */ }
   }
 
-  // ── Message format & tool usage ──
-  sections.push([
-    "## Message Format",
-    "- `[user:name]` — from a Telegram/Discord user → reply with the `reply` tool.",
-    "- `[from:instance-name]` — from another fleet instance → reply with `send_to_instance`, NOT the reply tool.",
-    "",
-    "**Always use the `reply` tool for ALL responses to users.** Do not respond directly in the terminal.",
-    "",
-    "## Tool Usage",
-    "- reply: respond to users. react: emoji reactions. edit_message: update a sent message. download_attachment: fetch files.",
-    "- If the inbound message has image_path, Read that file — it is a photo.",
-    "- If the inbound message has attachment_file_id, call download_attachment then Read the returned path.",
-    "- If the inbound message has reply_to_text, the user is quoting a previous message.",
-    "- Use list_instances to discover fleet members. Use describe_instance for details.",
-    "- High-level collaboration: request_information (ask), delegate_task (assign), report_result (return results with correlation_id).",
-    "",
-    "## Collaboration Rules",
-    "1. Use fleet tools for cross-instance communication. Never assume direct file access to another instance's repo.",
-    "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
-    "3. Use list_instances to discover available instances before sending messages.",
-    "4. You only have direct access to files under your own working directory.",
-  ].join("\n"));
-
-  // ── Workflow template ──
-  if (workflowEnv !== "false") {
-    let workflowContent: string | null = null;
-    if (workflowEnv) {
-      // Custom workflow passed from daemon (inline or file: already resolved)
-      workflowContent = workflowEnv;
-    } else {
-      // Default: load built-in template
-      try {
-        const here = dirname(fileURLToPath(import.meta.url));
-        workflowContent = readFileSync(join(here, "../workflow-templates/default.md"), "utf-8");
-      } catch { /* template not found — skip */ }
-    }
-    if (workflowContent) {
-      sections.push(`## Development Workflow\n\n${workflowContent}`);
-    }
-  }
-
-  // ── Active decisions (injected via env var from fleet manager) ──
-  const decisionsJson = process.env.AGEND_DECISIONS;
-  if (decisionsJson) {
-    try {
-      const decisions = JSON.parse(decisionsJson) as { title: string; content: string }[];
-      if (decisions.length > 0) {
-        const MAX = 15;
-        const lines = decisions.slice(0, MAX).map(d => {
-          const firstLine = (d.content ?? "").split(/[.\n]/)[0].trim().slice(0, 120);
-          return `- **${d.title}**: ${firstLine}`;
-        });
-        if (decisions.length > MAX) {
-          lines.push(`- *(${decisions.length - MAX} more — use \`list_decisions\` to see all)*`);
-        }
-        sections.push(`## Active Decisions\n\n${lines.join("\n")}`);
-      }
-    } catch { /* invalid JSON — skip */ }
-  }
-
-  // ── Custom user prompt ──
-  if (customPrompt) {
-    sections.push(customPrompt);
-  }
-
-  return sections.join("\n\n");
+  return buildFleetInstructions({
+    instanceName: process.env.AGEND_INSTANCE_NAME ?? "unknown",
+    workingDirectory: process.env.AGEND_WORKING_DIR ?? process.cwd(),
+    displayName: process.env.AGEND_DISPLAY_NAME,
+    description: process.env.AGEND_DESCRIPTION,
+    customPrompt: process.env.AGEND_CUSTOM_PROMPT,
+    workflow,
+    decisions,
+  });
 }
 
 const mcp = new Server(
