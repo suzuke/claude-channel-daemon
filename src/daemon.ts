@@ -1310,8 +1310,9 @@ export class Daemon extends EventEmitter {
       const snapshot: RotationSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
 
       // Mark consumed in-memory to prevent re-injection on crash respawn.
-      // File stays on disk so daemon restart can re-read it.
+      // Delete file so subsequent daemon restarts don't re-inject stale snapshot.
       this.snapshotConsumed = true;
+      try { unlinkSync(snapshotPath); } catch { /* best effort */ }
 
       const lines: string[] = ["## Previous Session Snapshot", ""];
       lines.push(`Restart reason: ${snapshot.reason}`);

@@ -1,6 +1,4 @@
-import { join } from "node:path";
-import { execSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
 
 export class CodexBackend implements CliBackend {
@@ -31,22 +29,24 @@ export class CodexBackend implements CliBackend {
   }
 
   writeConfig(config: CliBackendConfig): void {
-    // Codex uses codex mcp add (global config), write a setup script
-    // that registers MCP servers on first launch
-    const setupScript = Object.entries(config.mcpServers).map(([name, entry]) => {
-      const args = entry.args.map(a => `"${a}"`).join(" ");
-      // Include AGEND_INSTANCE_NAME so MCP server identifies as this instance
-      // (Codex spawns MCP servers as separate processes that don't inherit tmux shell env)
+    // Codex stores MCP config globally in ~/.codex/config.toml.
+    // Use execFileSync (no shell) to avoid escaping issues with env values
+    // containing JSON (e.g. AGEND_DECISIONS). Use namespaced key to avoid
+    // conflicts when multiple Codex instances run simultaneously.
+    for (const [name, entry] of Object.entries(config.mcpServers)) {
+      const mcpName = `${name}-${config.instanceName}`;
       const allEnv = { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName };
-      const envFlags = Object.entries(allEnv).map(([k, v]) => `--env ${k}="${v}"`).join(" ");
-      return `codex mcp add ${name} ${envFlags} -- ${entry.command} ${args} 2>/dev/null || true`;
-    }).join("\n");
-    writeFileSync(join(this.instanceDir, "setup-mcp.sh"), setupScript, { mode: 0o755 });
-
-    // Run setup immediately
-    try {
-      execSync(`bash ${join(this.instanceDir, "setup-mcp.sh")}`, { stdio: "ignore" });
-    } catch { /* best effort */ }
+      const args = ["mcp", "add", mcpName];
+      for (const [k, v] of Object.entries(allEnv)) {
+        args.push("--env", `${k}=${v}`);
+      }
+      args.push("--", entry.command, ...entry.args);
+      // Remove existing entry first (codex mcp add fails if name exists)
+      try { execFileSync(this.binaryPath, ["mcp", "remove", mcpName], { stdio: "ignore" }); } catch { /* may not exist */ }
+      try { execFileSync(this.binaryPath, args, { stdio: "ignore" }); } catch { /* best effort */ }
+    }
+    // Clean up old non-namespaced key if present (one-time migration)
+    try { execFileSync(this.binaryPath, ["mcp", "remove", "agend"], { stdio: "ignore" }); } catch { /* may not exist */ }
   }
 
   getReadyPattern(): RegExp {
@@ -92,7 +92,8 @@ export class CodexBackend implements CliBackend {
 
   cleanup(config: CliBackendConfig): void {
     for (const name of Object.keys(config.mcpServers)) {
-      try { execSync(`codex mcp remove ${name}`, { stdio: "ignore" }); } catch { /* best effort */ }
+      const mcpName = `${name}-${config.instanceName}`;
+      try { execFileSync(this.binaryPath, ["mcp", "remove", mcpName], { stdio: "ignore" }); } catch { /* best effort */ }
     }
   }
 }
