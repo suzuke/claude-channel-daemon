@@ -63,6 +63,16 @@ export class TmuxManager {
     } catch { return []; }
   }
 
+  static async getPanePid(sessionName: string, windowId: string): Promise<number | null> {
+    try {
+      const { stdout } = await exec("tmux", TmuxManager.tmuxArgs([
+        "list-panes", "-t", `${sessionName}:${windowId}`, "-F", "#{pane_pid}",
+      ]));
+      const pid = parseInt(stdout.trim(), 10);
+      return isNaN(pid) ? null : pid;
+    } catch { return null; }
+  }
+
   // === Instance window methods ===
 
   async createWindow(command: string, cwd: string, windowName?: string): Promise<string> {

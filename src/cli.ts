@@ -1296,6 +1296,24 @@ async function resolveInstance(query: string, config: import("./types.js").Fleet
   return match;
 }
 
+/** Get total RSS (KB) for a process and all its descendants. */
+function getTreeRssKb(pid: number, depth = 0): number {
+  if (depth > 10) return 0;
+  let total = 0;
+  try {
+    const rss = parseInt(execSync(`ps -o rss= -p ${pid}`, { stdio: "pipe" }).toString().trim(), 10);
+    if (!isNaN(rss)) total += rss;
+  } catch { return 0; }
+  try {
+    const children = execSync(`pgrep -P ${pid}`, { stdio: "pipe" }).toString().trim();
+    for (const line of children.split("\n")) {
+      const childPid = parseInt(line, 10);
+      if (!isNaN(childPid)) total += getTreeRssKb(childPid, depth + 1);
+    }
+  } catch { /* no children */ }
+  return total;
+}
+
 function getInstanceStatusStandalone(name: string): "running" | "stopped" | "crashed" {
   const pidPath = join(DATA_DIR, "instances", name, "daemon.pid");
   if (!existsSync(pidPath)) return "stopped";
@@ -1349,6 +1367,19 @@ program
       return;
     }
 
+    // Resolve tmux pane PIDs for memory measurement
+    const { TmuxManager } = await import("./tmux-manager.js");
+    const { getTmuxSession } = await import("./config.js");
+    const sessionName = getTmuxSession();
+    const pidByName = new Map<string, number>();
+    try {
+      const windows = await TmuxManager.listWindows(sessionName);
+      for (const w of windows) {
+        const pid = await TmuxManager.getPanePid(sessionName, w.id);
+        if (pid) pidByName.set(w.name, pid);
+      }
+    } catch { /* tmux not running */ }
+
     const rows = names.map(name => {
       const status = getInstanceStatusStandalone(name);
       const teams = getTeamsForInstance(config, name);
@@ -1365,6 +1396,16 @@ program
         }
       } catch { /* ignore */ }
 
+      // Memory: sum RSS of pane process tree
+      let memMb: number | null = null;
+      const panePid = pidByName.get(name);
+      if (panePid) {
+        try {
+          const rssKb = getTreeRssKb(panePid);
+          if (rssKb > 0) memMb = Math.round(rssKb / 1024);
+        } catch { /* ignore */ }
+      }
+
       // Last activity: prefer statusline.json mtime (updated on real agent activity)
       let lastActivity: string | null = null;
       for (const probe of ["statusline.json", "daemon.log", "output.log"]) {
@@ -1377,7 +1418,7 @@ program
         } catch { /* ignore */ }
       }
 
-      return { name, status, teams, context, cost, lastActivity };
+      return { name, status, teams, context, cost, memMb, lastActivity };
     });
 
     if (opts.json) {
@@ -1394,6 +1435,7 @@ program
     const teamW = 20;
     const ctxW = 8;
     const costW = 8;
+    const memW = 8;
 
     console.log(
       "Name".padEnd(nameW) +
@@ -1401,14 +1443,16 @@ program
       "Team".padEnd(teamW) +
       "Ctx".padEnd(ctxW) +
       "Cost".padEnd(costW) +
+      "Mem".padEnd(memW) +
       "Activity"
     );
-    console.log("\u2500".repeat(nameW + statusW + teamW + ctxW + costW + 10));
+    console.log("\u2500".repeat(nameW + statusW + teamW + ctxW + costW + memW + 10));
 
     for (const r of rows) {
       const teamStr = r.teams.length > 0 ? r.teams.join(",") : "-";
       const ctxStr = r.context != null ? `${Math.round(r.context)}%` : "-";
       const costStr = r.cost != null ? `$${r.cost.toFixed(2)}` : "-";
+      const memStr = r.memMb != null ? `${r.memMb}MB` : "-";
       const actStr = r.lastActivity ?? "-";
 
       // padEnd based on visible text length, then prepend the icon
@@ -1418,6 +1462,7 @@ program
         teamStr.padEnd(teamW) +
         ctxStr.padEnd(ctxW) +
         costStr.padEnd(costW) +
+        memStr.padEnd(memW) +
         actStr
       );
     }
