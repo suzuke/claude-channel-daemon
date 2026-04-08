@@ -637,7 +637,9 @@ export class Daemon extends EventEmitter {
 
     // Serialize deliveries: each message waits for the previous to complete,
     // and each waits for the CLI to be idle before pasting.
-    this.pasteLock = this.pasteLock.then(() => this.deliverMessage(formatted));
+    this.pasteLock = this.pasteLock.then(() => this.deliverMessage(formatted)).catch(err => {
+      this.logger.warn({ err: (err as Error).message }, "pasteLock delivery error — chain continues");
+    });
     this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Queued channel message for delivery");
   }
 

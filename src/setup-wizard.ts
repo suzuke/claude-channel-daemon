@@ -450,7 +450,7 @@ export async function runSetupWizard(): Promise<void> {
         validate: (v) => {
           if (v.length === 0) return "Name required";
           if (!/^[a-zA-Z0-9._-]+$/.test(v) && !/^[\u4e00-\u9fff\u3400-\u4dbf]+$/.test(v)) {
-            // Allow alphanumeric, dots, hyphens, underscores, or CJK chars
+            return "Name must be alphanumeric (a-z, 0-9, ., -, _) or CJK characters";
           }
           if (instances.some((i) => i.name === v)) return "Name already used";
           return null;

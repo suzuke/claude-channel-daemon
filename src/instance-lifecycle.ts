@@ -416,6 +416,7 @@ export class InstanceLifecycle {
           const { promisify } = await import("node:util");
           const execFileAsync = promisify(execFileCb);
           await execFileAsync("git", ["worktree", "remove", "--force", worktreePath], { cwd: directory });
+          await execFileAsync("git", ["worktree", "prune"], { cwd: directory });
         } catch { /* best-effort worktree cleanup */ }
       } else if (!directory && workDir) {
         // Remove auto-created workspace directory
