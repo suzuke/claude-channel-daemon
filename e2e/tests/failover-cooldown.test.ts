@@ -48,6 +48,7 @@ describe("Failover Cooldown E2E", () => {
     await telegramMock.start();
 
     testDir = `/tmp/ae2e-failover-${Date.now().toString(36)}`;
+    process.env.AGEND_HOME = testDir;
     mkdirSync(testDir, { recursive: true });
     mkdirSync(join(testDir, "instances"), { recursive: true });
     mkdirSync(join(testDir, "access"), { recursive: true });
@@ -127,6 +128,7 @@ describe("Failover Cooldown E2E", () => {
     await sleep(500);
     rmSync(testDir, { recursive: true, force: true });
     delete process.env.AGEND_TMUX_SESSION;
+    delete process.env.AGEND_HOME;
     delete process.env.AGEND_BOT_TOKEN;
   }, 30_000);
 

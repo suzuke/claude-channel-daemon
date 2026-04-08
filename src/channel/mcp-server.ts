@@ -34,13 +34,10 @@ const SLOW_TOOLS = new Set(["start_instance", "create_instance", "delete_instanc
 // Safety nets
 // ---------------------------------------------------------------------------
 
-// When the parent Claude process dies, stdin closes. Exit immediately to avoid
-// becoming an orphaned process that spins CPU forever on reconnect loops.
-process.stdin.on("end", () => {
-  process.stderr.write("agend: stdin closed (parent died) — exiting\n");
-  process.exit(0);
-});
-process.stdin.resume(); // ensure 'end' fires even if nothing reads stdin
+// Parent death detection moved to main() via mcp.onclose — see below.
+// DO NOT call process.stdin.resume() here. It switches stdin to flowing mode
+// before StdioServerTransport starts reading, causing data loss (the CLI's
+// initialize request gets discarded, breaking the MCP handshake).
 
 process.on("unhandledRejection", (err) => {
   process.stderr.write(`agend: unhandled rejection: ${err}\n`);
@@ -66,6 +63,12 @@ const pendingRequests = new Map<
 
 function setupIpcListeners(client: IpcClient): void {
   client.on("message", (msg: Record<string, unknown>) => {
+    // Graceful shutdown: daemon tells us it's shutting down — skip reconnect
+    if (msg.type === "shutdown") {
+      process.stderr.write("agend: daemon shutting down — exiting gracefully\n");
+      process.exit(0);
+    }
+
     if (typeof msg.requestId === "number" && pendingRequests.has(msg.requestId)) {
       const pending = pendingRequests.get(msg.requestId)!;
       pendingRequests.delete(msg.requestId);
@@ -138,7 +141,7 @@ function ipcRequest(
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!ipcConnected || !ipc) {
-      reject(new Error("Not connected to daemon IPC"));
+      reject(new Error("Not connected to daemon IPC (retrying connection in background)"));
       return;
     }
 
@@ -316,12 +319,21 @@ async function main(): Promise<void> {
     process.stderr.write("agend: AGEND_SOCKET_PATH environment variable is required\n");
     process.exit(1);
   }
-  // Connect to daemon IPC first (will auto-reconnect on disconnect)
-  await connectIpc();
 
-  // Start MCP stdio transport (Claude <-> this process)
+  // Start MCP stdio transport FIRST — must be ready before the CLI sends
+  // the initialize request. IPC connection can happen in parallel.
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
+
+  // Detect parent death: when the CLI exits, stdin closes, transport shuts down.
+  // StdioServerTransport handles stdin lifecycle internally — no manual resume() needed.
+  mcp.onclose = () => {
+    process.stderr.write("agend: MCP transport closed (parent exited) — exiting\n");
+    process.exit(0);
+  };
+
+  // Connect to daemon IPC (will auto-reconnect on disconnect)
+  await connectIpc();
 
   process.stderr.write("agend: MCP server running\n");
 }

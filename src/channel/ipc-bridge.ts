@@ -198,6 +198,10 @@ export class IpcClient extends EventEmitter {
 
       const parse = makeLineParser((msg) => {
         this.emit("message", msg);
+      }, () => {
+        this.emit("overflow");
+        socket.destroy();
+        this.emit("disconnect", new Error("IPC buffer overflow"));
       });
 
       socket.on("data", parse);

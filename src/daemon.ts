@@ -609,13 +609,14 @@ export class Daemon extends EventEmitter {
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.adapter) await this.adapter.stop();
-    await this.ipcServer?.close();
-    // Strategy A: kill window on stop, resume via --resume on next start
-    // MCP server has no reconnection → keeping window alive would leave
-    // Claude without channel/approval connectivity
+
+    // Notify MCP servers of graceful shutdown (prevents reconnect attempts)
+    this.ipcServer?.broadcast({ type: "shutdown" });
+
+    // Quit CLI FIRST — this kills MCP server child processes cleanly.
+    // IPC must stay open during quit so MCP servers receive the shutdown message.
     if (this.tmux) {
       this.saveSessionId();
-      // Pause health check to prevent crash detection during graceful shutdown
       this.healthCheckPaused = true;
       let killed = false;
       const quitCmd = this.backend?.getQuitCommand();
@@ -633,6 +634,10 @@ export class Daemon extends EventEmitter {
       const windowIdFile = join(this.instanceDir, "window-id");
       try { unlinkSync(windowIdFile); } catch (e) { this.logger.debug({ err: e }, "Failed to remove window-id file"); }
     }
+
+    // Close IPC AFTER CLI has exited — MCP servers are already dead at this point
+    await this.ipcServer?.close();
+
     // Clean up backend config files
     if (this.backend?.cleanup) {
       this.backend.cleanup(this.buildBackendConfig());
