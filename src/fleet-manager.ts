@@ -1989,6 +1989,30 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         return;
       }
 
+      // Instance start via API
+      if (req.method === "POST" && req.url?.startsWith("/api/instance/") && req.url.endsWith("/start")) {
+        const name = decodeURIComponent(req.url.slice("/api/instance/".length, -"/start".length));
+        const config = this.fleetConfig?.instances[name];
+        if (!config) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Instance not found: ${name}` }));
+          return;
+        }
+        (async () => {
+          try {
+            const topicMode = this.fleetConfig?.channel?.mode === "topic";
+            await this.startInstance(name, config, topicMode ?? false);
+            this.emitSseEvent("status", this.getUiStatus());
+            res.writeHead(200);
+            res.end(JSON.stringify({ ok: true }));
+          } catch (err) {
+            res.writeHead(500);
+            res.end(JSON.stringify({ error: `Start failed: ${(err as Error).message}` }));
+          }
+        })();
+        return;
+      }
+
       // Instance restart (immediate, no idle wait)
       if (req.method === "POST" && req.url?.startsWith("/restart/")) {
         const name = decodeURIComponent(req.url.slice("/restart/".length));

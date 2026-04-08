@@ -66,6 +66,27 @@ fleet
   .description("Start fleet or specific instance")
   .argument("[instance]", "Specific instance to start")
   .action(async (instance?: string) => {
+    if (instance) {
+      // If fleet daemon is already running, delegate via HTTP API
+      const { loadFleetConfig } = await import("./config.js");
+      const fleet = loadFleetConfig(FLEET_CONFIG_PATH);
+      const port = fleet.health_port ?? 19280;
+      try {
+        const healthResp = await fetch(`http://127.0.0.1:${port}/health`);
+        if (healthResp.ok) {
+          const resp = await fetch(`http://127.0.0.1:${port}/api/instance/${encodeURIComponent(instance)}/start`, { method: "POST" });
+          const body = await resp.json() as Record<string, unknown>;
+          if (resp.ok) {
+            console.log(`Instance "${instance}" started via running fleet daemon`);
+          } else {
+            console.error(`Start failed: ${body.error ?? resp.statusText}`);
+            process.exit(1);
+          }
+          return;
+        }
+      } catch { /* fleet not running, fall through */ }
+    }
+
     const { FleetManager } = await import("./fleet-manager.js");
     const fm = new FleetManager(DATA_DIR);
     if (instance) {
