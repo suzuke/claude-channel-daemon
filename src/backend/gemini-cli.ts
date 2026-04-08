@@ -105,6 +105,8 @@ export class GeminiCliBackend implements CliBackend {
     } catch { return null; }
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   cleanup(config: CliBackendConfig): void {
     // Only remove namespaced keys — non-namespaced keys may belong to
     // another instance sharing this working directory.

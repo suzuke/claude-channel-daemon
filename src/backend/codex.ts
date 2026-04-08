@@ -106,6 +106,8 @@ export class CodexBackend implements CliBackend {
     return null;
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   cleanup(config: CliBackendConfig): void {
     for (const name of Object.keys(config.mcpServers)) {
       const mcpName = `${name}-${config.instanceName}`;

@@ -103,6 +103,8 @@ export class ClaudeCodeBackend implements CliBackend {
     ];
   }
 
+  getQuitCommand(): string { return "/exit"; }
+
   cleanup(_config: CliBackendConfig): void {
     // mcp-config.json is in instance dir, cleaned up when instance is deleted
   }

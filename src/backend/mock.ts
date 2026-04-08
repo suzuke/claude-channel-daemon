@@ -77,6 +77,8 @@ export class MockBackend implements CliBackend {
     }
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   getReadyPattern(): RegExp {
     return /MOCK_READY|mock-claude ready/;
   }

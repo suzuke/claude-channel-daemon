@@ -81,6 +81,8 @@ export class OpenCodeBackend implements CliBackend {
     } catch { return null; }
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   cleanup(config: CliBackendConfig): void {
     // Clean up instance-specific MCP entries from opencode.json.
     // Only remove namespaced keys — non-namespaced "agend" key may belong to

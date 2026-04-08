@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join, basename, dirname, resolve } from "node:path";
-import { access } from "node:fs/promises";
+import { access, unlink } from "node:fs/promises";
 import { getAgendHome } from "./paths.js";
 import type { InstanceConfig, FleetConfig } from "./types.js";
 import { DEFAULT_INSTANCE_CONFIG } from "./config.js";
@@ -63,6 +63,9 @@ export class InstanceLifecycle {
 
     const instanceDir = this.ctx.getInstanceDir(name);
     mkdirSync(instanceDir, { recursive: true });
+
+    // Defense-in-depth: clear crash state before daemon start
+    try { await unlink(join(instanceDir, "crash-state.json")); } catch {}
 
     const { Daemon } = await import("./daemon.js");
     const { createBackend } = await import("./backend/factory.js");
