@@ -241,36 +241,38 @@ describe("Fleet Respawn E2E", () => {
   }, 15_000);
 
   // --- Phase 2b: Crash-aware snapshot (T10) ---
+  // After respawn, the daemon reads rotation-state.json, injects it as a
+  // session-snapshot message, then deletes the file. We verify injection
+  // via the output.log content rather than file existence.
 
-  it("T10: rotation-state.json written on crash with valid data", () => {
+  it("T10: crash snapshot injected into respawned session", async () => {
+    const outputPath = join(testDir, "instances", "crasher", "output.log");
+    await waitFor(
+      () => {
+        try {
+          const output = readFileSync(outputPath, "utf-8");
+          return output.includes("[system:session-snapshot]") && output.includes("crash");
+        } catch { return false; }
+      },
+      { timeout: 15_000, label: "snapshot injection in output.log" },
+    );
+    const output = readFileSync(outputPath, "utf-8");
+    expect(output).toContain("Previous Session Snapshot");
+    expect(output).toContain("Restart reason: crash");
+  }, 20_000);
+
+  it("T10: rotation-state.json deleted after injection", () => {
+    // buildSnapshotPrompt deletes the file to prevent stale re-injection
     const snapshotPath = join(testDir, "instances", "crasher", "rotation-state.json");
-    expect(existsSync(snapshotPath)).toBe(true);
-
-    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    expect(snapshot.instance).toBe("crasher");
-    expect(snapshot.reason).toBe("crash");
-    expect(snapshot.created_at).toBeTruthy();
-    expect(new Date(snapshot.created_at).getTime()).toBeGreaterThan(0);
-    expect(snapshot.working_directory).toContain("work/crasher");
+    expect(existsSync(snapshotPath)).toBe(false);
   });
 
-  it("T10: snapshot persists on disk after injection (not deleted)", () => {
-    // After respawn, injectSnapshotMessage reads the file but does NOT unlink it
-    const snapshotPath = join(testDir, "instances", "crasher", "rotation-state.json");
-    expect(existsSync(snapshotPath)).toBe(true);
-
-    // File should still be parseable
-    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    expect(snapshot.reason).toBe("crash");
-  });
-
-  it("T10: second crash updates rotation-state.json with new timestamp", async () => {
+  it("T10: second crash produces new snapshot injection", async () => {
     const instanceDir = join(testDir, "instances", "crasher");
-    const snapshotPath = join(instanceDir, "rotation-state.json");
+    const outputPath = join(instanceDir, "output.log");
 
-    // Record first snapshot timestamp
-    const firstSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    const firstTimestamp = firstSnapshot.created_at;
+    // Record output length before second crash
+    const outputBefore = readFileSync(outputPath, "utf-8");
 
     // Record current session ID
     const statusBefore = JSON.parse(
@@ -306,16 +308,22 @@ describe("Fleet Respawn E2E", () => {
       { timeout: 60_000, interval: 2000, label: "second respawn" },
     );
 
-    // Snapshot should be updated with a newer timestamp
-    const secondSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    expect(secondSnapshot.reason).toBe("crash");
-    expect(secondSnapshot.created_at).not.toBe(firstTimestamp);
-    expect(new Date(secondSnapshot.created_at).getTime()).toBeGreaterThan(
-      new Date(firstTimestamp).getTime(),
+    // Wait for second snapshot injection
+    await waitFor(
+      () => {
+        try {
+          const output = readFileSync(outputPath, "utf-8");
+          // The new injection should appear after the previous output
+          const newOutput = output.slice(outputBefore.length);
+          return newOutput.includes("[system:session-snapshot]");
+        } catch { return false; }
+      },
+      { timeout: 15_000, label: "second snapshot injection" },
     );
 
-    // File still on disk after second injection
-    expect(existsSync(snapshotPath)).toBe(true);
+    // File deleted after second injection too
+    const snapshotPath = join(instanceDir, "rotation-state.json");
+    expect(existsSync(snapshotPath)).toBe(false);
   }, 90_000);
 
   it("T7: respawned instance responds to messages", async () => {

@@ -53,7 +53,7 @@ describe("Daemon snapshot", () => {
     expect(snapshot.instance).toBe("test-snap");
   });
 
-  it("snapshot file persists after prompt read (no longer deleted)", () => {
+  it("buildSnapshotPrompt reads snapshot and deletes file", () => {
     // Write a snapshot file
     const snapshotData = {
       instance: "test-snap",
@@ -72,9 +72,9 @@ describe("Daemon snapshot", () => {
     expect(result).toContain("max_age");
     expect(result).toContain("hello");
 
-    // File stays on disk for daemon restart recovery
-    expect(existsSync(filePath)).toBe(true);
-    // In-memory flag prevents re-injection
+    // File is deleted after consumption to prevent stale re-injection on restart
+    expect(existsSync(filePath)).toBe(false);
+    // In-memory flag prevents re-injection within same daemon lifecycle
     expect((daemon as any).snapshotConsumed).toBe(true);
   });
 
