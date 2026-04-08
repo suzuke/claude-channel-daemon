@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
 
 export class CodexBackend implements CliBackend {
@@ -49,6 +52,18 @@ export class CodexBackend implements CliBackend {
     try { execFileSync(this.binaryPath, ["mcp", "remove", "agend"], { stdio: "ignore" }); } catch { /* may not exist */ }
   }
 
+  preTrust(workDir: string): void {
+    const configPath = join(homedir(), ".codex", "config.toml");
+    let content = "";
+    try { content = readFileSync(configPath, "utf-8"); } catch {}
+
+    const section = `[projects."${workDir}"]`;
+    if (content.includes(section)) return;
+
+    mkdirSync(dirname(configPath), { recursive: true });
+    appendFileSync(configPath, `\n${section}\ntrust_level = "trusted"\n`);
+  }
+
   getReadyPattern(): RegExp {
     return /% left|OpenAI Codex/m;
   }
@@ -64,6 +79,7 @@ export class CodexBackend implements CliBackend {
 
   getStartupDialogs(): StartupDialog[] {
     return [
+      { pattern: /Do you trust the files in this folder/i, keys: ["Enter"], description: "Codex trust dialog" },
       { pattern: /Yes, continue/i, keys: ["Enter"], description: "Codex 'Yes, continue' confirmation" },
     ];
   }
