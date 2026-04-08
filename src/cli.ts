@@ -1469,6 +1469,162 @@ program
   });
 
 program
+  .command("health")
+  .description("Fleet health check — shows problems and diagnostics")
+  .option("--json", "Output as JSON")
+  .option("-q, --quiet", "One-line summary only")
+  .action(async (opts: { json?: boolean; quiet?: boolean }) => {
+    const { loadFleetConfig } = await import("./config.js");
+    const { TmuxManager } = await import("./tmux-manager.js");
+    const { getTmuxSession } = await import("./config.js");
+
+    if (!existsSync(FLEET_CONFIG_PATH)) {
+      console.error("No fleet config found. Run: agend quickstart");
+      process.exit(2);
+    }
+    const config = loadFleetConfig(FLEET_CONFIG_PATH);
+    const port = config.health_port ?? 19280;
+    const sessionName = getTmuxSession();
+    const names = Object.keys(config.instances);
+
+    // Try HTTP first for rich data, fallback to local files
+    let fleetUp = false;
+    let fleetPid: number | null = null;
+    let uptime = 0;
+    let fleetApiData: Record<string, { ipc: boolean; rateLimits: { five_hour_pct: number; seven_day_pct: number } | null; lastActivity: number | null }> = {};
+
+    const pidPath = join(DATA_DIR, "fleet.pid");
+    try {
+      const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+      process.kill(pid, 0);
+      fleetPid = pid;
+      fleetUp = true;
+    } catch { /* fleet not running */ }
+
+    if (fleetUp) {
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/api/fleet`, { signal: AbortSignal.timeout(3000) });
+        const data = await resp.json() as { uptime_seconds?: number; instances?: Array<{ name: string; ipc: boolean; rateLimits: { five_hour_pct: number; seven_day_pct: number } | null; lastActivity: number | null }> };
+        uptime = data.uptime_seconds ?? 0;
+        for (const inst of data.instances ?? []) {
+          fleetApiData[inst.name] = { ipc: inst.ipc, rateLimits: inst.rateLimits, lastActivity: inst.lastActivity };
+        }
+      } catch { /* API not reachable, use local data */ }
+    }
+
+    // Tmux windows
+    const tmuxWindows = new Set<string>();
+    try {
+      const windows = await TmuxManager.listWindows(sessionName);
+      for (const w of windows) tmuxWindows.add(w.name);
+    } catch { /* tmux not running */ }
+
+    // Per-instance health
+    type HealthStatus = "ok" | "idle" | "degraded" | "no-ipc" | "crash" | "stopped";
+    interface InstanceHealth {
+      name: string;
+      status: HealthStatus;
+      issues: string[];
+      general: boolean;
+    }
+
+    const results: InstanceHealth[] = names.map(name => {
+      const instConfig = config.instances[name];
+      const isGeneral = instConfig.general_topic === true;
+      const issues: string[] = [];
+
+      // Process alive?
+      const procStatus = getInstanceStatusStandalone(name);
+      if (procStatus === "crashed") {
+        issues.push("Process dead (daemon.pid stale)");
+        // Check crash-state.json
+        const crashState = join(DATA_DIR, "instances", name, "crash-state.json");
+        if (existsSync(crashState)) issues.push("Crash loop detected (crash-state.json present)");
+        return { name, status: "crash" as HealthStatus, issues, general: isGeneral };
+      }
+      if (procStatus === "stopped") {
+        return { name, status: "stopped" as HealthStatus, issues: ["Not running"], general: isGeneral };
+      }
+
+      // Tmux window alive?
+      if (!tmuxWindows.has(name)) issues.push("Tmux window missing");
+
+      // IPC connected? (from API data)
+      const api = fleetApiData[name];
+      if (api && !api.ipc) issues.push("IPC disconnected");
+
+      // Rate limits
+      const rl = api?.rateLimits;
+      if (rl && rl.five_hour_pct >= 90) issues.push(`Rate limited (5h: ${Math.round(rl.five_hour_pct)}%)`);
+      if (rl && rl.seven_day_pct >= 95) issues.push(`Weekly limit critical (7d: ${Math.round(rl.seven_day_pct)}%)`);
+
+      // Idle check
+      const lastAct = api?.lastActivity;
+      const idleMs = lastAct ? Date.now() - lastAct : null;
+      const idleHours = idleMs ? idleMs / 3600000 : null;
+      if (idleHours && idleHours > 1) issues.push(`Idle ${Math.round(idleHours)}h`);
+
+      // Determine status
+      let status: HealthStatus = "ok";
+      if (issues.some(i => i.includes("Tmux") || i.includes("IPC"))) status = "no-ipc";
+      if (issues.some(i => i.includes("Rate") || i.includes("Weekly"))) status = "degraded";
+      if (issues.some(i => i.includes("Idle")) && status === "ok") status = "idle";
+
+      return { name, status, issues, general: isGeneral };
+    });
+
+    // Fleet classification
+    const crashed = results.filter(r => r.status === "crash");
+    const problems = results.filter(r => r.status !== "ok" && r.status !== "idle" && r.status !== "stopped");
+    const healthy = results.filter(r => r.status === "ok" || r.status === "idle");
+    const stopped = results.filter(r => r.status === "stopped");
+    const generalDown = results.some(r => r.general && r.status !== "ok" && r.status !== "idle");
+
+    let classification: "healthy" | "degraded" | "unhealthy";
+    if (generalDown || crashed.length > 0) classification = "unhealthy";
+    else if (problems.length > 0) classification = "degraded";
+    else classification = "healthy";
+
+    const exitCode = classification === "healthy" ? 0 : fleetUp ? 1 : 2;
+
+    if (opts.json) {
+      console.log(JSON.stringify({ fleet: { running: fleetUp, pid: fleetPid, uptime, classification }, instances: results }, null, 2));
+      process.exit(exitCode);
+    }
+
+    if (opts.quiet) {
+      const icon = classification === "healthy" ? "✓" : classification === "degraded" ? "⚠" : "✗";
+      console.log(`${icon} ${classification}: ${healthy.length}/${names.length} healthy${problems.length > 0 ? `, ${problems.length} issues` : ""}`);
+      process.exit(exitCode);
+    }
+
+    // Full output
+    const fleetIcon = fleetUp ? "\x1b[32m●\x1b[0m" : "\x1b[31m●\x1b[0m";
+    const upH = Math.floor(uptime / 3600);
+    const upM = Math.floor((uptime % 3600) / 60);
+    console.log(`Fleet: ${fleetIcon} ${fleetUp ? `running (uptime ${upH}h ${upM}m, PID ${fleetPid})` : "not running"}`);
+    console.log(`Instances: ${healthy.length} healthy, ${problems.length + crashed.length} issues, ${stopped.length} stopped\n`);
+
+    // Only show instances with problems
+    const unhealthy = results.filter(r => r.issues.length > 0 && r.status !== "stopped");
+    if (unhealthy.length === 0) {
+      console.log("\x1b[32m✓ All instances healthy\x1b[0m");
+    } else {
+      for (const inst of unhealthy) {
+        const icon = inst.status === "crash" ? "\x1b[31m✗\x1b[0m" : "\x1b[33m⚠\x1b[0m";
+        console.log(`${icon} ${inst.name}${inst.general ? " (general)" : ""}`);
+        for (const issue of inst.issues) {
+          console.log(`    ${issue}`);
+        }
+      }
+    }
+
+    const classIcon = classification === "healthy" ? "\x1b[32m✓\x1b[0m" : classification === "degraded" ? "\x1b[33m⚠\x1b[0m" : "\x1b[31m✗\x1b[0m";
+    console.log(`\n${classIcon} Fleet: ${classification}`);
+    process.exit(exitCode);
+  });
+
+program
   .command("attach")
   .description("Attach to an instance's tmux window (fuzzy match)")
   .argument("<name>", "Instance name (supports fuzzy matching)")
