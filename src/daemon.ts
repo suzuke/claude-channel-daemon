@@ -273,9 +273,9 @@ export class Daemon extends EventEmitter {
         // Collect and write daemon-side snapshot
         const snapshot = this.writeRotationSnapshot(reason);
 
-        // Save session id, kill and respawn
+        // Save session id and prepare for respawn
         this.saveSessionId();
-        await this.tmux?.killWindow();
+        const oldWindowId = this.tmux?.getWindowId();
         this.transcriptMonitor?.resetOffset();
 
         // Clear ring buffers for new session
@@ -283,7 +283,17 @@ export class Daemon extends EventEmitter {
         this.recentEvents = [];
         this.recentToolActivity = [];
 
+        // Spawn new window BEFORE killing old one — prevents tmux session
+        // destruction when all windows are killed during concurrent rotation.
         await this.spawnClaudeWindow();
+
+        // Kill old window after new one is ready
+        if (oldWindowId) {
+          try {
+            const old = new TmuxManager(this.tmuxSessionName, oldWindowId);
+            await old.killWindow();
+          } catch { /* old window may already be dead */ }
+        }
 
         // Track restart metrics
         const durationMs = Date.now() - this.rotationStartedAt;
@@ -1007,6 +1017,8 @@ export class Daemon extends EventEmitter {
     this.backend!.preTrust?.(this.config.working_directory);
     const cmd = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name} ` + this.backend!.buildCommand(backendConfig);
 
+    // Ensure tmux session exists (may have been destroyed if all windows died)
+    await TmuxManager.ensureSession(this.tmuxSessionName);
     const windowId = await this.tmux!.createWindow(cmd, this.config.working_directory, this.name);
     writeFileSync(join(this.instanceDir, "window-id"), windowId);
 
