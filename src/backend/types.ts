@@ -39,6 +39,9 @@ export interface RuntimeDialog {
   description: string;
 }
 
+/** A dialog that may appear during CLI startup (trust prompts, session pickers, etc.). */
+export type StartupDialog = RuntimeDialog;
+
 export interface CliBackend {
   /** The CLI binary name (e.g. "claude", "gemini", "codex") */
   readonly binaryName: string;
@@ -66,6 +69,12 @@ export interface CliBackend {
    * The daemon's error monitor auto-dismisses these by sending the specified keys.
    */
   getRuntimeDialogs?(): RuntimeDialog[];
+
+  /**
+   * Dialogs that may appear during CLI startup (trust prompts, confirmation dialogs).
+   * The daemon's dismissDialogsUntilReady auto-dismisses these before the CLI is ready.
+   */
+  getStartupDialogs?(): StartupDialog[];
 
   /** Pre-approve a working directory to skip trust dialogs on startup. */
   preTrust?(workingDirectory: string): void;

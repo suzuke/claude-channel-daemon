@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 
 export class ClaudeCodeBackend implements CliBackend {
@@ -92,6 +92,14 @@ export class ClaudeCodeBackend implements CliBackend {
       { pattern: /API Error: Authentication/i, type: "auth_error", action: "pause", message: "Authentication error" },
       { pattern: /API Error: Overloaded/i, type: "rate_limit", action: "notify", message: "API overloaded" },
       { pattern: /credit balance is too low/i, type: "quota", action: "pause", message: "Insufficient API credits" },
+    ];
+  }
+
+  getStartupDialogs(): StartupDialog[] {
+    return [
+      { pattern: /[❯›]\s*\d+\.\s*No/m, keys: ["Down", "Enter"], description: "Claude 'No, exit' confirmation — navigate to Yes" },
+      { pattern: /I accept|I trust/i, keys: ["Enter"], description: "Claude 'Yes, I accept' trust dialog" },
+      { pattern: /Resume Session/i, keys: ["Escape"], description: "Claude resume session picker — start fresh" },
     ];
   }
 

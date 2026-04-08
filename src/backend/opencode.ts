@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 export class OpenCodeBackend implements CliBackend {
   readonly binaryName = "opencode";
@@ -82,7 +82,9 @@ export class OpenCodeBackend implements CliBackend {
   }
 
   cleanup(config: CliBackendConfig): void {
-    // Clean up instance-specific MCP entries from opencode.json
+    // Clean up instance-specific MCP entries from opencode.json.
+    // Only remove namespaced keys — non-namespaced "agend" key may belong to
+    // another instance sharing this working directory.
     try {
       const configPath = join(config.workingDirectory, "opencode.json");
       if (existsSync(configPath)) {
@@ -90,7 +92,6 @@ export class OpenCodeBackend implements CliBackend {
         if (oc.mcp) {
           for (const name of Object.keys(config.mcpServers)) {
             delete oc.mcp[`${name}-${config.instanceName}`];
-            delete oc.mcp[name]; // also clean old non-namespaced key
           }
           writeFileSync(configPath, JSON.stringify(oc, null, 2));
         }

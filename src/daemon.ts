@@ -11,7 +11,7 @@ import { ContextGuardian } from "./context-guardian.js";
 import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
-import type { CliBackend, CliBackendConfig, ErrorPattern } from "./backend/types.js";
+import type { CliBackend, CliBackendConfig, ErrorPattern, StartupDialog } from "./backend/types.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { getTmuxSession } from "./config.js";
 import { routeToolCall } from "./channel/tool-router.js";
@@ -20,6 +20,12 @@ import type { TmuxControlClient } from "./tmux-control.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Tool routing sets — module-level to avoid re-creation on every handleToolCall
+const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
+const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
+const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
+const TASK_TOOL = "task";
 
 export class Daemon extends EventEmitter {
   private logger: Logger;
@@ -705,12 +711,6 @@ export class Daemon extends EventEmitter {
       this.ipcServer?.send(socket, { requestId, result, error });
     };
 
-    // Schedule tools → route to fleet manager
-    const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
-    const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
-    const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
-    const TASK_TOOL = "task";
-
     // Repo checkout — handled locally in daemon (no fleet-manager)
     if (tool === "checkout_repo") {
       this.handleCheckoutRepo(args, respond);
@@ -1030,48 +1030,47 @@ export class Daemon extends EventEmitter {
    * and return true once CLI reaches a ready prompt.
    */
   private async dismissDialogsUntilReady(maxAttempts: number): Promise<boolean> {
+    // Backend-specific startup dialogs, with hardcoded fallback for backward compat
+    const startupDialogs: StartupDialog[] = this.backend?.getStartupDialogs?.() ?? [
+      { pattern: /[❯›]\s*\d+\.\s*No/m, keys: ["Down", "Enter"], description: "Confirmation dialog — navigate past No" },
+      { pattern: /[❯›]\s*Don't trust/m, keys: ["Up", "Up", "Enter"], description: "Trust dialog — navigate to trust option" },
+      { pattern: /No, exit|No, quit|Don't trust|I accept|I trust|Yes, continue|Trust folder/i, keys: ["Enter"], description: "Generic confirmation dialog" },
+      { pattern: /Resume Session/i, keys: ["Escape"], description: "Resume session picker — start fresh" },
+    ];
+
     for (let i = 0; i < maxAttempts; i++) {
       try {
         const pane = await this.tmux!.capturePane();
 
-        // Confirmation dialog: check BEFORE ready pattern so dialogs aren't mistaken as ready
-        // Claude "Yes, I accept" / Codex "Yes, continue" / Gemini "Trust folder"
-        if (/No, exit|No, quit|Don't trust|I accept|I trust|Yes, continue|Trust folder/i.test(pane)) {
-          this.logger.debug("Dismissing confirmation dialog");
-          // If "No"/"Don't trust" is selected, navigate to the accept option
-          if (/[❯›]\s*\d+\.\s*No/m.test(pane)) {
-            await this.tmux!.sendSpecialKey("Down");
-            await new Promise(r => setTimeout(r, 200));
-          } else if (/[❯›]\s*Don't trust/m.test(pane)) {
-            // Gemini: "Don't trust" is last of 3 options, go up twice to "Trust folder"
-            await this.tmux!.sendSpecialKey("Up");
-            await new Promise(r => setTimeout(r, 200));
-            await this.tmux!.sendSpecialKey("Up");
-            await new Promise(r => setTimeout(r, 200));
+        // Try each startup dialog pattern before checking ready state
+        let matched = false;
+        for (const dialog of startupDialogs) {
+          if (dialog.pattern.test(pane)) {
+            this.logger.debug(`Dismissing startup dialog: ${dialog.description}`);
+            for (const key of dialog.keys) {
+              if (key === "Up" || key === "Down" || key === "Enter" || key === "Escape") {
+                await this.tmux!.sendSpecialKey(key);
+              } else {
+                await this.tmux!.sendKeys(key);
+              }
+              await new Promise(r => setTimeout(r, 200));
+            }
+            // Wait for next screen to render
+            if (this.controlClient) {
+              const wid = readFileSync(join(this.instanceDir, "window-id"), "utf-8").trim();
+              await this.controlClient.waitForIdle(wid, 10_000);
+            } else {
+              await new Promise(r => setTimeout(r, 3_000));
+            }
+            if (!await this.tmux!.isWindowAlive()) return false;
+            matched = true;
+            break;
           }
-          await this.tmux!.sendSpecialKey("Enter");
-          // Wait for next screen to render
-          if (this.controlClient) {
-            const wid = readFileSync(join(this.instanceDir, "window-id"), "utf-8").trim();
-            await this.controlClient.waitForIdle(wid, 10_000);
-          } else {
-            await new Promise(r => setTimeout(r, 3_000));
-          }
-          if (!await this.tmux!.isWindowAlive()) return false;
-          continue;
         }
+        if (matched) continue;
 
         // CLI is ready (pattern defined by each backend)
         if (this.backend!.getReadyPattern().test(pane)) return true;
-
-        // Resume Session picker: press Escape to start fresh session
-        if (/Resume Session/i.test(pane)) {
-          this.logger.debug("Dismissing resume session picker");
-          await this.tmux!.sendSpecialKey("Escape");
-          await new Promise(r => setTimeout(r, 2_000));
-          if (!await this.tmux!.isWindowAlive()) return false;
-          continue;
-        }
 
         // Fatal: command not found
         if (/command not found|not found/i.test(pane)) return false;

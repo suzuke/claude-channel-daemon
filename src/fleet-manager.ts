@@ -234,13 +234,12 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     const costGuardConfig: CostGuardConfig = {
       ...DEFAULT_COST_GUARD,
-      ...(fleet.defaults as Record<string, unknown>)?.cost_guard as Partial<CostGuardConfig> ?? {},
+      ...fleet.defaults.cost_guard,
     };
     this.costGuard = new CostGuard(costGuardConfig, this.eventLog);
     this.costGuard.startMidnightReset();
 
-    const webhookConfigs: WebhookConfig[] =
-      (fleet.defaults as Record<string, unknown>)?.webhooks as WebhookConfig[] ?? [];
+    const webhookConfigs: WebhookConfig[] = fleet.defaults.webhooks ?? [];
     if (webhookConfigs.length > 0) {
       this.webhookEmitter = new WebhookEmitter(webhookConfigs, this.logger);
       this.logger.info({ count: webhookConfigs.length }, "Webhook emitter initialized");
@@ -260,7 +259,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     const summaryConfig: DailySummaryConfig = {
       ...DEFAULT_DAILY_SUMMARY,
-      ...(fleet.defaults as Record<string, unknown>)?.daily_summary as Partial<DailySummaryConfig> ?? {},
+      ...fleet.defaults.daily_summary,
     };
     this.dailySummary = new DailySummary(summaryConfig, costGuardConfig.timezone, (text) => {
       if (!this.adapter || !this.fleetConfig?.channel?.group_id) return;
@@ -287,7 +286,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       this.logger.info("Auto-creating general instance for General Topic");
       const generalDir = join(homedir(), ".agend", "general");
       mkdirSync(generalDir, { recursive: true });
-      const backendName = (fleet.defaults as Record<string, unknown>)?.backend as string ?? "claude-code";
+      const backendName = fleet.defaults.backend ?? "claude-code";
       this.ensureGeneralInstructions(generalDir, backendName);
       const generalConfig: InstanceConfig = {
         ...DEFAULT_INSTANCE_CONFIG,
@@ -301,7 +300,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     if (topicMode && fleet.channel) {
       const schedulerConfig: SchedulerConfig = {
         ...DEFAULT_SCHEDULER_CONFIG,
-        ...(this.fleetConfig?.defaults as Record<string, unknown>)?.scheduler as Partial<SchedulerConfig> ?? {},
+        ...this.fleetConfig?.defaults.scheduler,
       };
 
       this.scheduler = new Scheduler(
@@ -809,11 +808,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       return;
     }
 
-    const defaults = this.fleetConfig?.defaults as Record<string, unknown> | undefined;
-    const schedulerDefaults = defaults?.scheduler as Record<string, unknown> | undefined;
+    const schedulerDefaults = this.fleetConfig?.defaults.scheduler;
 
-    const retryCount = (schedulerDefaults?.retry_count as number) ?? 3;
-    const retryInterval = (schedulerDefaults?.retry_interval_ms as number) ?? 30_000;
+    const retryCount = schedulerDefaults?.retry_count ?? 3;
+    const retryInterval = schedulerDefaults?.retry_interval_ms ?? 30_000;
 
     const deliver = (): boolean => {
       const ipc = this.instanceIpcClients.get(target);

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
 
 export class CodexBackend implements CliBackend {
   readonly binaryName = "codex";
@@ -54,6 +54,12 @@ export class CodexBackend implements CliBackend {
       { pattern: /authentication|401 Unauthorized/i, type: "auth_error", action: "pause", message: "OpenAI authentication error" },
       { pattern: /insufficient_quota|billing/i, type: "quota", action: "pause", message: "OpenAI quota exceeded" },
       { pattern: /you've hit your usage limit/i, type: "quota", action: "pause", message: "Codex usage limit reached — upgrade plan required" },
+    ];
+  }
+
+  getStartupDialogs(): StartupDialog[] {
+    return [
+      { pattern: /Yes, continue/i, keys: ["Enter"], description: "Codex 'Yes, continue' confirmation" },
     ];
   }
 

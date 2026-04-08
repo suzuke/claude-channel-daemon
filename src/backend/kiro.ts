@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 export class KiroBackend implements CliBackend {
   readonly binaryName = "kiro-cli";
@@ -70,6 +70,8 @@ export class KiroBackend implements CliBackend {
   }
 
   cleanup(config: CliBackendConfig): void {
+    // Only remove namespaced keys — non-namespaced "agend" key may belong to
+    // another instance sharing this working directory.
     try {
       const mcpConfigPath = join(config.workingDirectory, ".kiro", "settings", "mcp.json");
       if (existsSync(mcpConfigPath)) {
@@ -77,7 +79,6 @@ export class KiroBackend implements CliBackend {
         if (mcpConfig.mcpServers) {
           for (const name of Object.keys(config.mcpServers)) {
             delete mcpConfig.mcpServers[`${name}-${config.instanceName}`];
-            delete mcpConfig.mcpServers[name]; // also clean old non-namespaced key
           }
           writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
         }
