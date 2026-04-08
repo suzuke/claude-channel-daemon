@@ -69,6 +69,8 @@ export class KiroBackend implements CliBackend {
     return null;
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   cleanup(config: CliBackendConfig): void {
     // Only remove namespaced keys — non-namespaced "agend" key may belong to
     // another instance sharing this working directory.

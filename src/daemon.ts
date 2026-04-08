@@ -615,7 +615,21 @@ export class Daemon extends EventEmitter {
     // Claude without channel/approval connectivity
     if (this.tmux) {
       this.saveSessionId();
-      await this.tmux.killWindow();
+      // Pause health check to prevent crash detection during graceful shutdown
+      this.healthCheckPaused = true;
+      let killed = false;
+      const quitCmd = this.backend?.getQuitCommand?.();
+      if (quitCmd) {
+        await this.tmux.sendKeys(quitCmd);
+        await this.tmux.sendSpecialKey("Enter");
+        // Wait up to 10s for graceful exit
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          const status = await this.tmux.getPaneStatus();
+          if (!status || !status.alive) { killed = true; break; }
+        }
+      }
+      if (!killed) await this.tmux.killWindow();
       const windowIdFile = join(this.instanceDir, "window-id");
       try { unlinkSync(windowIdFile); } catch (e) { this.logger.debug({ err: e }, "Failed to remove window-id file"); }
     }

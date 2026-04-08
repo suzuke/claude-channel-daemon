@@ -81,6 +81,9 @@ export interface CliBackend {
   /** Pre-approve a working directory to skip trust dialogs on startup. */
   preTrust?(workingDirectory: string): void;
 
+  /** Command to gracefully quit the CLI (e.g. "/exit", "/quit"). */
+  getQuitCommand?(): string;
+
   /** Clean up config files on shutdown. */
   cleanup?(config: CliBackendConfig): void;
 }
