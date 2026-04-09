@@ -326,19 +326,9 @@ fleet
 
 fleet
   .command("logs")
-  .description("Show instance logs")
-  .argument("<instance>", "Instance name")
-  .option("-n, --lines <count>", "Number of lines to show", "50")
-  .action((instance: string, opts: { lines: string }) => {
-    const logPath = join(DATA_DIR, "instances", instance, "daemon.log");
-    if (!existsSync(logPath)) {
-      console.error(`No logs found for instance "${instance}"`);
-      process.exit(1);
-    }
-    const content = readFileSync(logPath, "utf-8");
-    const lines = content.trim().split("\n");
-    const n = parseInt(opts.lines, 10);
-    console.log(lines.slice(-n).join("\n"));
+  .description("Alias for `agend logs`")
+  .action(() => {
+    console.log("Use `agend logs` instead. Run `agend logs --help` for options.");
   });
 
 fleet
@@ -1533,31 +1523,36 @@ program
 
 program
   .command("logs")
-  .description("Show instance output (stripped of ANSI codes)")
-  .argument("<name>", "Instance name (supports fuzzy matching)")
+  .description("Show fleet log (alias for `agend fleet logs`)")
   .option("-n, --lines <count>", "Number of lines to show", "50")
-  .option("-f, --follow", "Follow output (like tail -f)")
-  .action(async (query: string, opts: { lines: string; follow?: boolean }) => {
-    const yaml = (await import("js-yaml")).default;
-    const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
-    const name = await resolveInstance(query, config);
-
-    const outputPath = join(DATA_DIR, "instances", name, "output.log");
-    if (!existsSync(outputPath)) {
-      console.error(`No output log found for "${name}".`);
+  .option("-f, --follow", "Follow log output (like tail -f)")
+  .option("--instance <name>", "Filter by instance name")
+  .action((opts: { lines: string; follow?: boolean; instance?: string }) => {
+    const logPath = join(DATA_DIR, "fleet.log");
+    if (!existsSync(logPath)) {
+      console.error("No fleet log found. Is the fleet running?");
       process.exit(1);
     }
 
-    const tailArgs = ["-n", opts.lines];
-    if (opts.follow) tailArgs.push("-f");
-    tailArgs.push(outputPath);
+    if (opts.follow) {
+      const tailArgs = ["-n", opts.lines, "-f", logPath];
+      const tail = spawn("tail", tailArgs, { stdio: ["ignore", "pipe", "inherit"] });
+      tail.stdout!.on("data", (chunk: Buffer) => {
+        const lines = stripAnsi(chunk.toString()).split("\n");
+        for (const line of lines) {
+          if (!opts.instance || line.includes(opts.instance)) process.stdout.write(line + "\n");
+        }
+      });
+      tail.on("close", () => process.exit(0));
+      process.on("SIGINT", () => { tail.kill(); process.exit(0); });
+      return;
+    }
 
-    const tail = spawn("tail", tailArgs, { stdio: ["ignore", "pipe", "inherit"] });
-    tail.stdout!.on("data", (chunk: Buffer) => {
-      process.stdout.write(stripAnsi(chunk.toString()));
-    });
-    tail.on("close", () => process.exit(0));
-    process.on("SIGINT", () => { tail.kill(); process.exit(0); });
+    const content = readFileSync(logPath, "utf-8");
+    let lines = content.trim().split("\n");
+    if (opts.instance) lines = lines.filter(l => l.includes(opts.instance!));
+    const n = parseInt(opts.lines, 10);
+    console.log(stripAnsi(lines.slice(-n).join("\n")));
   });
 
 program.parse();
