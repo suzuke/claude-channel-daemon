@@ -156,11 +156,32 @@ export interface TeamConfig {
   description?: string;
 }
 
+export interface TemplateInstanceDef {
+  description?: string;
+  backend?: string;
+  model?: string;
+  model_failover?: string[];
+  tool_set?: string;
+  systemPrompt?: string;
+  skipPermissions?: boolean;
+  lightweight?: boolean;
+  workflow?: string | false;
+  tags?: string[];
+}
+
+export interface FleetTemplate {
+  description?: string;
+  /** Auto-create a team from all deployed instances */
+  team?: boolean;
+  instances: Record<string, TemplateInstanceDef>;
+}
+
 export interface FleetConfig {
   channel?: ChannelConfig;
   project_roots?: string[];
   defaults: FleetDefaults;
   instances: Record<string, InstanceConfig>;
   teams?: Record<string, TeamConfig>;
+  templates?: Record<string, FleetTemplate>;
   health_port?: number;
 }

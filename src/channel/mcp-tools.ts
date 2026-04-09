@@ -522,6 +522,41 @@ export const TOOLS = [
         required: ["path"],
       },
     },
+    // ── Fleet Templates ──────────────────────────────────────────
+    {
+      name: "deploy_template",
+      description: "Deploy a fleet template — creates instances and optionally a team in one operation.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          template: { type: "string", description: "Template name from fleet.yaml templates section." },
+          directory: { type: "string", description: "Working directory (shared by all instances, or base repo for worktrees)." },
+          name: { type: "string", description: "Deployment name (used as team name and instance name prefix). Defaults to template name." },
+          branch: { type: "string", description: "Git branch — each instance gets its own worktree branched from this." },
+        },
+        required: ["template", "directory"],
+      },
+    },
+    {
+      name: "teardown_deployment",
+      description: "Tear down a template deployment — stops and deletes all instances and team.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: { type: "string", description: "Deployment name (as used in deploy_template)." },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "list_deployments",
+      description: "List active template deployments with their instances and status.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+        required: [],
+      },
+    },
 ];
 
 /** Predefined tool profiles to reduce token overhead per instance. */

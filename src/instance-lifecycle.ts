@@ -343,7 +343,10 @@ export class InstanceLifecycle {
         } else if (branchExists) {
           await execFileAsync("git", ["worktree", "add", worktreePath, branch], { cwd: directory });
         } else {
-          await execFileAsync("git", ["worktree", "add", worktreePath, "-b", branch], { cwd: directory });
+          const startPoint = args.start_point as string | undefined;
+          const worktreeArgs = ["worktree", "add", worktreePath, "-b", branch];
+          if (startPoint) worktreeArgs.push(startPoint);
+          await execFileAsync("git", worktreeArgs, { cwd: directory });
         }
         this.ctx.logger.info({ worktreePath, branch, repo: directory }, "Created git worktree for instance");
         workDir = worktreePath;
@@ -378,7 +381,9 @@ export class InstanceLifecycle {
     try {
       createdTopicId = await this.ctx.createForumTopic(topicName!);
 
-      const nameBase = worktreePath ? topicName! : (directory ? basename(workDir) : topicName!);
+      // Use explicit topic_name as name base when provided; fall back to directory basename
+      const explicitTopicName = args.topic_name as string | undefined;
+      const nameBase = explicitTopicName ?? (worktreePath ? topicName! : (directory ? basename(workDir) : topicName!));
       newInstanceName = `${sanitizeInstanceName(nameBase)}-t${createdTopicId}`;
 
       // If no directory was provided, auto-create default workspace
@@ -396,6 +401,12 @@ export class InstanceLifecycle {
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(args.model ? { model: args.model as string } : {}),
         ...(args.backend ? { backend: args.backend as string } : {}),
+        ...(args.model_failover ? { model_failover: args.model_failover as string[] } : {}),
+        ...(args.tool_set ? { tool_set: args.tool_set as string } : {}),
+        ...(args.skipPermissions != null ? { skipPermissions: args.skipPermissions as boolean } : {}),
+        ...(args.lightweight != null ? { lightweight: args.lightweight as boolean } : {}),
+        ...(args.workflow !== undefined ? { workflow: args.workflow as string | false } : {}),
+        ...(args.tags ? { tags: args.tags as string[] } : {}),
         ...(worktreePath ? { worktree_source: directory } : {}),
       } as InstanceConfig;
       this.ctx.fleetConfig!.instances[newInstanceName] = instanceConfig;

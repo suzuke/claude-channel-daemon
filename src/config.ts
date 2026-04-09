@@ -2,7 +2,7 @@ import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import yaml from "js-yaml";
 import { getAgendHome, getTmuxSessionName } from "./paths.js";
-import type { CostGuardConfig, HangDetectorConfig, DailySummaryConfig, FleetConfig, InstanceConfig } from "./types.js";
+import type { CostGuardConfig, HangDetectorConfig, DailySummaryConfig, FleetConfig, FleetTemplate, InstanceConfig } from "./types.js";
 
 function deepMergeGeneric<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target } as Record<string, unknown>;
@@ -89,6 +89,7 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     defaults?: Partial<InstanceConfig>;
     instances?: Record<string, Partial<InstanceConfig>>;
     teams?: FleetConfig["teams"];
+    templates?: Record<string, FleetTemplate>;
     health_port?: number;
   } | null;
 
@@ -115,12 +116,24 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     instances[name] = merged as InstanceConfig;
   }
 
+  // Validate templates: each must have at least one instance definition
+  const templates: Record<string, FleetTemplate> = {};
+  if (parsed.templates) {
+    for (const [name, tpl] of Object.entries(parsed.templates)) {
+      if (!tpl.instances || Object.keys(tpl.instances).length === 0) {
+        throw new Error(`Template "${name}" must define at least one instance`);
+      }
+      templates[name] = tpl;
+    }
+  }
+
   return {
     channel: parsed.channel,
     project_roots: parsed.project_roots,
     defaults: fleetDefaults,
     instances,
     teams: parsed.teams ?? {},
+    templates,
     health_port: parsed.health_port,
   };
 }

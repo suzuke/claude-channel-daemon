@@ -374,6 +374,234 @@ const updateTeam: Handler = (ctx, args, respond) => {
   respond({ name, members: team.members });
 };
 
+// ── Fleet Templates ────────────────────────────────────────────────────
+
+const deployTemplate: Handler = async (ctx, args, respond) => {
+  const templateName = args.template as string;
+  const rawDirectory = args.directory as string | undefined;
+  const directory = rawDirectory?.replace(/^~/, process.env.HOME || "~");
+  const deploymentName = (args.name as string) || templateName;
+  const branch = args.branch as string | undefined;
+
+  if (!templateName) { respond(null, "deploy_template: missing required argument 'template'"); return; }
+  if (!directory) { respond(null, "deploy_template: missing required argument 'directory'"); return; }
+  if (!ctx.fleetConfig) { respond(null, "Fleet config not available"); return; }
+
+  const template = ctx.fleetConfig.templates?.[templateName];
+  if (!template) {
+    respond(null, `Template not found: "${templateName}". Available: ${Object.keys(ctx.fleetConfig.templates ?? {}).join(", ") || "(none)"}`);
+    return;
+  }
+
+  // Check for existing deployment with the same name
+  const existingDeployment = Object.values(ctx.fleetConfig.instances)
+    .some(inst => inst.tags?.includes(`deployment:${deploymentName}`));
+  if (existingDeployment) {
+    respond(null, `Deployment "${deploymentName}" already exists. Use a different name or teardown first.`);
+    return;
+  }
+
+  // Check team name collision early
+  if (template.team) {
+    ctx.fleetConfig.teams ??= {};
+    if (ctx.fleetConfig.teams[deploymentName]) {
+      respond(null, `Team "${deploymentName}" already exists`);
+      return;
+    }
+  }
+
+  const createdInstances: Array<{ name: string; role: string; model?: string; backend?: string }> = [];
+
+  try {
+    for (const [role, instanceDef] of Object.entries(template.instances)) {
+      const topicName = `${deploymentName}-${role}`;
+      const deploymentTags = [
+        `deployment:${deploymentName}`,
+        `template:${templateName}`,
+        `role:${role}`,
+        ...(instanceDef.tags ?? []),
+      ];
+      const createArgs: Record<string, unknown> = {
+        directory,
+        topic_name: topicName,
+        ...(instanceDef.description ? { description: instanceDef.description } : {}),
+        ...(instanceDef.model ? { model: instanceDef.model } : {}),
+        ...(instanceDef.backend ? { backend: instanceDef.backend } : {}),
+        ...(instanceDef.model_failover ? { model_failover: instanceDef.model_failover } : {}),
+        ...(instanceDef.systemPrompt ? { systemPrompt: instanceDef.systemPrompt } : {}),
+        ...(instanceDef.tool_set ? { tool_set: instanceDef.tool_set } : {}),
+        ...(instanceDef.skipPermissions != null ? { skipPermissions: instanceDef.skipPermissions } : {}),
+        ...(instanceDef.lightweight != null ? { lightweight: instanceDef.lightweight } : {}),
+        ...(instanceDef.workflow !== undefined ? { workflow: instanceDef.workflow } : {}),
+        tags: deploymentTags,
+        ...(branch ? { branch: `${deploymentName}-${role}`, start_point: branch } : {}),
+      };
+
+      // Create instance via handleCreate with a promise wrapper
+      const result = await new Promise<{ success: boolean; name?: string; status?: string; error?: string }>((resolve) => {
+        ctx.lifecycle.handleCreate(createArgs, (res, err) => {
+          if (err) resolve({ success: false, error: err });
+          else {
+            const r = res as { name: string; status?: string };
+            resolve({ success: true, name: r.name, status: r.status });
+          }
+        });
+      });
+
+      if (!result.success) {
+        throw new Error(`Failed to create instance for role "${role}": ${result.error}`);
+      }
+
+      // Detect duplicate directory collision (handleCreate returns already_exists)
+      if (result.status === "already_exists") {
+        throw new Error(`Instance for role "${role}" conflicts with existing instance "${result.name}" (same working directory). Use branch parameter for separate worktrees.`);
+      }
+
+      const instanceName = result.name!;
+      const config = ctx.fleetConfig.instances[instanceName];
+
+      createdInstances.push({
+        name: instanceName,
+        role,
+        model: config.model,
+        backend: config.backend,
+      });
+    }
+
+    // Create team if requested
+    let teamName: string | undefined;
+    if (template.team) {
+      teamName = deploymentName;
+      ctx.fleetConfig.teams![teamName] = {
+        members: createdInstances.map(i => i.name),
+        description: template.description,
+      };
+      ctx.saveFleetConfig();
+    }
+
+    respond({
+      success: true,
+      deployment: deploymentName,
+      template: templateName,
+      instances: createdInstances,
+      ...(teamName ? { team: teamName } : {}),
+    });
+  } catch (err) {
+    // Full rollback: delete all created instances (best-effort)
+    const rollbackErrors: string[] = [];
+    for (const inst of createdInstances) {
+      try {
+        await new Promise<void>((resolve) => {
+          ctx.lifecycle.handleDelete(
+            { name: inst.name, delete_topic: true },
+            (_res, delErr) => {
+              if (delErr) rollbackErrors.push(`${inst.name}: ${delErr}`);
+              resolve();
+            },
+          );
+        });
+      } catch (e) {
+        rollbackErrors.push(`${inst.name}: ${(e as Error).message}`);
+      }
+    }
+    const rollbackNote = rollbackErrors.length
+      ? ` Rollback errors (manual cleanup needed): ${rollbackErrors.join("; ")}`
+      : " All created instances rolled back.";
+    respond(null, `${(err as Error).message}${rollbackNote}`);
+  }
+};
+
+const teardownDeployment: Handler = async (ctx, args, respond) => {
+  const name = args.name as string;
+
+  if (!name) { respond(null, "teardown_deployment: missing required argument 'name'"); return; }
+  if (!ctx.fleetConfig) { respond(null, "Fleet config not available"); return; }
+
+  // Find instances by deployment tag
+  const deploymentTag = `deployment:${name}`;
+  const deploymentInstances = Object.entries(ctx.fleetConfig.instances)
+    .filter(([_, config]) => config.tags?.includes(deploymentTag))
+    .map(([instanceName]) => instanceName);
+
+  if (deploymentInstances.length === 0) {
+    respond(null, `No deployment found with name "${name}"`);
+    return;
+  }
+
+  const deleted: string[] = [];
+  const errors: string[] = [];
+
+  for (const instanceName of deploymentInstances) {
+    try {
+      await new Promise<void>((resolve) => {
+        ctx.lifecycle.handleDelete(
+          { name: instanceName, delete_topic: true },
+          (_res, err) => {
+            if (err) errors.push(`${instanceName}: ${err}`);
+            else deleted.push(instanceName);
+            resolve();
+          },
+        );
+      });
+    } catch (e) {
+      errors.push(`${instanceName}: ${(e as Error).message}`);
+    }
+  }
+
+  // Delete team if exists (best-effort)
+  let teamDeleted = false;
+  if (ctx.fleetConfig.teams?.[name]) {
+    delete ctx.fleetConfig.teams[name];
+    ctx.saveFleetConfig();
+    teamDeleted = true;
+  }
+
+  respond({
+    success: errors.length === 0,
+    deployment: name,
+    deleted,
+    team_deleted: teamDeleted,
+    ...(errors.length ? { errors } : {}),
+  });
+};
+
+const listDeployments: Handler = (ctx, _args, respond) => {
+  if (!ctx.fleetConfig) { respond(null, "Fleet config not available"); return; }
+
+  // Aggregate instances by deployment tag
+  const deployments = new Map<string, { template: string | null; instances: Array<{ name: string; role: string | null; running: boolean }> }>();
+
+  for (const [name, config] of Object.entries(ctx.fleetConfig.instances)) {
+    const deployTag = config.tags?.find(t => t.startsWith("deployment:"));
+    if (!deployTag) continue;
+
+    const deploymentName = deployTag.slice("deployment:".length);
+    if (!deployments.has(deploymentName)) {
+      const templateTag = config.tags?.find(t => t.startsWith("template:"));
+      deployments.set(deploymentName, {
+        template: templateTag ? templateTag.slice("template:".length) : null,
+        instances: [],
+      });
+    }
+
+    const roleTag = config.tags?.find(t => t.startsWith("role:"));
+    deployments.get(deploymentName)!.instances.push({
+      name,
+      role: roleTag ? roleTag.slice("role:".length) : null,
+      running: ctx.lifecycle.has(name),
+    });
+  }
+
+  const result = [...deployments.entries()].map(([name, data]) => ({
+    name,
+    template: data.template,
+    instances: data.instances,
+    team: ctx.fleetConfig?.teams?.[name] ? name : null,
+  }));
+
+  respond(result);
+};
+
 // ── Registry ────────────────────────────────────────────────────────────
 
 export const outboundHandlers = new Map<string, Handler>([
@@ -391,4 +619,7 @@ export const outboundHandlers = new Map<string, Handler>([
   ["delete_team", deleteTeam],
   ["list_teams", listTeams],
   ["update_team", updateTeam],
+  ["deploy_template", deployTemplate],
+  ["teardown_deployment", teardownDeployment],
+  ["list_deployments", listDeployments],
 ]);
