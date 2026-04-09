@@ -317,47 +317,11 @@ fleet
 
 fleet
   .command("status")
-  .description("Show fleet status")
-  .action(async () => {
-    const { FleetManager } = await import("./fleet-manager.js");
-    const fm = new FleetManager(DATA_DIR);
-    const config = fm.loadConfig(FLEET_CONFIG_PATH);
-
-    const names = Object.keys(config.instances);
-    const nameWidth = Math.max(20, ...names.map(n => n.length + 2));
-
-    console.log("Instance".padEnd(nameWidth) + "Backend".padEnd(14) + "Status".padEnd(10) + "Context".padEnd(10) + "Cost".padEnd(10) + "Topic");
-    console.log("\u2500".repeat(nameWidth + 54));
-    for (const [name, inst] of Object.entries(config.instances)) {
-      const status = fm.getInstanceStatus(name);
-      const topic = inst.topic_id ? `#${inst.topic_id}` : "(DM)";
-
-      // Read statusline.json for context usage and cost
-      let contextStr = "-";
-      let costStr = "-";
-      const statusFile = join(DATA_DIR, "instances", name, "statusline.json");
-      try {
-        if (existsSync(statusFile)) {
-          const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-          if (data.context_window?.used_percentage != null) {
-            contextStr = `${Math.round(data.context_window.used_percentage)}%`;
-          }
-          if (data.cost?.total_cost_usd != null) {
-            costStr = `$${data.cost.total_cost_usd.toFixed(2)}`;
-          }
-        }
-      } catch { /* ignore read errors */ }
-
-      const backend = inst.backend ?? "claude-code";
-      console.log(
-        name.padEnd(nameWidth) +
-        backend.padEnd(14) +
-        status.padEnd(10) +
-        contextStr.padEnd(10) +
-        costStr.padEnd(10) +
-        topic,
-      );
-    }
+  .description("Show fleet status (alias for `agend ls`)")
+  .option("--json", "Output as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    // Delegate to the `ls` command implementation
+    await lsAction(opts);
   });
 
 fleet
@@ -1381,11 +1345,7 @@ function formatTimeSince(isoStr: string): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-program
-  .command("ls")
-  .description("List all instances with status, team, and last activity")
-  .option("--json", "Output as JSON")
-  .action(async (opts: { json?: boolean }) => {
+async function lsAction(opts: { json?: boolean }): Promise<void> {
     const yaml = (await import("js-yaml")).default;
     const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
     const names = Object.keys(config.instances);
@@ -1412,15 +1372,13 @@ program
       const status = getInstanceStatusStandalone(name);
       const teams = getTeamsForInstance(config, name);
 
-      // Read statusline for context/cost
+      // Read statusline for context
       let context: number | null = null;
-      let cost: number | null = null;
       const statusFile = join(DATA_DIR, "instances", name, "statusline.json");
       try {
         if (existsSync(statusFile)) {
           const data = JSON.parse(readFileSync(statusFile, "utf-8"));
           context = data.context_window?.used_percentage ?? null;
-          cost = data.cost?.total_cost_usd ?? null;
         }
       } catch { /* ignore */ }
 
@@ -1446,7 +1404,10 @@ program
         } catch { /* ignore */ }
       }
 
-      return { name, status, teams, context, cost, memMb, lastActivity };
+      const inst = config.instances[name];
+      const backend = (inst as unknown as Record<string, unknown>)?.backend as string ?? config.defaults?.backend ?? "claude-code";
+
+      return { name, backend, status, teams, context, memMb, lastActivity };
     });
 
     if (opts.json) {
@@ -1459,41 +1420,47 @@ program
       s === "running" ? "\x1b[32m●\x1b[0m" : s === "crashed" ? "\x1b[31m●\x1b[0m" : "\x1b[90m○\x1b[0m";
 
     const nameW = Math.max(20, ...rows.map(r => r.name.length + 2));
+    const backendW = 14;
     const statusW = 12;
     const teamW = 20;
     const ctxW = 8;
-    const costW = 8;
     const memW = 8;
 
     console.log(
       "Name".padEnd(nameW) +
+      "Backend".padEnd(backendW) +
       "Status".padEnd(statusW) +
       "Team".padEnd(teamW) +
       "Ctx".padEnd(ctxW) +
-      "Cost".padEnd(costW) +
       "Mem".padEnd(memW) +
       "Activity"
     );
-    console.log("\u2500".repeat(nameW + statusW + teamW + ctxW + costW + memW + 10));
+    console.log("\u2500".repeat(nameW + backendW + statusW + teamW + ctxW + memW + 10));
 
     for (const r of rows) {
       const teamStr = r.teams.length > 0 ? r.teams.join(",") : "-";
       const ctxStr = r.context != null ? `${Math.round(r.context)}%` : "-";
-      const costStr = r.cost != null ? `$${r.cost.toFixed(2)}` : "-";
       const memStr = r.memMb != null ? `${r.memMb}MB` : "-";
       const actStr = r.lastActivity ?? "-";
 
-      // padEnd based on visible text length, then prepend the icon
       console.log(
         r.name.padEnd(nameW) +
+        r.backend.padEnd(backendW) +
         statusIcon(r.status) + " " + r.status.padEnd(statusW - 2) +
         teamStr.padEnd(teamW) +
         ctxStr.padEnd(ctxW) +
-        costStr.padEnd(costW) +
         memStr.padEnd(memW) +
         actStr
       );
     }
+}
+
+program
+  .command("ls")
+  .description("List all instances with status, backend, team, and last activity")
+  .option("--json", "Output as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    await lsAction(opts);
   });
 
 program
