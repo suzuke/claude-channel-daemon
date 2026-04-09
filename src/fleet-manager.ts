@@ -281,13 +281,21 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       await this.stopInstance(name);
     }
 
-    // Then kill all remaining agend instance windows to prevent orphans
+    // Then kill all remaining agend instance windows to prevent orphans.
+    // Kill both known instance windows (stale from previous run) and orphaned
+    // windows from deleted instances that are no longer in fleet.yaml.
     const agendNames = new Set(Object.keys(fleet.instances));
     agendNames.add("general");
     try {
       const existingWindows = await TmuxManager.listWindows(getTmuxSession());
       for (const w of existingWindows) {
-        if (agendNames.has(w.name)) {
+        // Kill known instance windows (will be recreated)
+        // Also kill orphaned windows: any window with a topic ID suffix (name-tNNNNN)
+        // that isn't in the current config — these are leftovers from deleted instances
+        const isKnownInstance = agendNames.has(w.name);
+        const isOrphanedInstance = !isKnownInstance && /-t\d+$/.test(w.name);
+        if (isKnownInstance || isOrphanedInstance) {
+          if (isOrphanedInstance) this.logger.info({ window: w.name }, "Cleaning up orphaned tmux window");
           const tm = new TmuxManager(getTmuxSession(), w.id);
           await tm.killWindow();
         }
