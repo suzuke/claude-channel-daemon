@@ -626,6 +626,9 @@ export class Daemon extends EventEmitter {
       const quitCmd = this.backend?.getQuitCommand();
       if (quitCmd) {
         await this.tmux.sendKeys(quitCmd);
+        // Delay before Enter to prevent tmux server race when multiple
+        // instances stop in parallel (same pattern as pasteText).
+        await new Promise(r => setTimeout(r, 150));
         await this.tmux.sendSpecialKey("Enter");
         // Wait up to 10s for graceful exit
         for (let i = 0; i < 20; i++) {

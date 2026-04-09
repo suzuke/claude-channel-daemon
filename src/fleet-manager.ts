@@ -1594,16 +1594,17 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
 
     this.scheduler?.shutdown();
 
-    await Promise.allSettled(
-      [...this.daemons.entries()].map(async ([name, daemon]) => {
-        try {
-          await daemon.stop();
-        } catch (err) {
-          this.logger.warn({ name, err }, "Stop failed");
-        }
-        this.daemons.delete(name);
-      })
-    );
+    // Stop instances sequentially to avoid tmux send-keys race conditions.
+    // Each stop sends quit + Enter via separate tmux commands; parallel stops
+    // can cause the Enter to arrive before the quit text is processed.
+    for (const [name, daemon] of this.daemons) {
+      try {
+        await daemon.stop();
+      } catch (err) {
+        this.logger.warn({ name, err }, "Stop failed");
+      }
+      this.daemons.delete(name);
+    }
 
     for (const [, ipc] of this.instanceIpcClients) {
       await ipc.close();
