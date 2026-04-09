@@ -15,6 +15,8 @@ export interface CliBackendConfig {
   model?: string;
   /** When true, backend should not resume a previous session (crash recovery). */
   skipResume?: boolean;
+  /** Fleet instructions content to inject into the CLI's additive system prompt mechanism. */
+  instructions?: string;
 }
 
 /** Action to take when an error pattern is detected in PTY output. */

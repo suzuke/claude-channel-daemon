@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
+import { appendWithMarker, removeMarker } from "./marker-utils.js";
+
+const CODEX_PROJECT_DOC_MAX_BYTES = 32_768;
 
 export class CodexBackend implements CliBackend {
   readonly binaryName = "codex";
@@ -50,6 +53,21 @@ export class CodexBackend implements CliBackend {
     }
     // Clean up old non-namespaced key if present (one-time migration)
     try { execFileSync(this.binaryPath, ["mcp", "remove", "agend"], { stdio: "ignore" }); } catch { /* may not exist */ }
+
+    // Write fleet instructions into AGENTS.md (additive via marker block)
+    if (config.instructions) {
+      try {
+        const agentsMd = join(config.workingDirectory, "AGENTS.md");
+        appendWithMarker(agentsMd, config.instanceName, config.instructions);
+        // Warn if file exceeds Codex's project_doc_max_bytes limit
+        try {
+          const size = statSync(agentsMd).size;
+          if (size > CODEX_PROJECT_DOC_MAX_BYTES) {
+            console.warn(`[agend] AGENTS.md is ${size} bytes, exceeds Codex limit of ${CODEX_PROJECT_DOC_MAX_BYTES} — instructions may be truncated`);
+          }
+        } catch { /* stat failed — skip size check */ }
+      } catch { /* best effort */ }
+    }
   }
 
   preTrust(workDir: string): void {
@@ -113,6 +131,13 @@ export class CodexBackend implements CliBackend {
       const mcpName = `${name}-${config.instanceName}`;
       try { execFileSync(this.binaryPath, ["mcp", "remove", mcpName], { stdio: "ignore" }); } catch { /* best effort */ }
     }
+
+    // Remove fleet instructions marker block from AGENTS.md
+    try {
+      const agentsMd = join(config.workingDirectory, "AGENTS.md");
+      const isEmpty = removeMarker(agentsMd, config.instanceName);
+      if (isEmpty && existsSync(agentsMd)) unlinkSync(agentsMd);
+    } catch { /* best effort */ }
 
     // Remove trust entry from ~/.codex/config.toml
     try {

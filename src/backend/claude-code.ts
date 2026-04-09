@@ -33,6 +33,12 @@ export class ClaudeCodeBackend implements CliBackend {
       cmd += ` --model ${config.model}`;
     }
 
+    // Additive system prompt: append fleet instructions without overriding Claude's built-in prompt
+    const instrFile = join(this.instanceDir, "fleet-instructions.md");
+    if (existsSync(instrFile)) {
+      cmd += ` --append-system-prompt-file ${instrFile}`;
+    }
+
     return cmd;
   }
 
@@ -59,6 +65,11 @@ export class ClaudeCodeBackend implements CliBackend {
 
     // 4. Pre-approve API key to skip interactive prompt on startup
     this.preApproveApiKey(config);
+
+    // 5. Write fleet instructions file (loaded via --append-system-prompt-file)
+    if (config.instructions) {
+      try { writeFileSync(join(this.instanceDir, "fleet-instructions.md"), config.instructions); } catch { /* best effort */ }
+    }
   }
 
   getReadyPattern(): RegExp {

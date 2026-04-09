@@ -62,6 +62,20 @@ describe("ClaudeCodeBackend", () => {
       expect(existsSync(join(TEST_DIR, ".prompt-generated"))).toBe(false);
     });
 
+    it("includes --append-system-prompt-file when fleet-instructions.md exists", () => {
+      writeFileSync(join(TEST_DIR, "fleet-instructions.md"), "# Fleet");
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      const cmd = backend.buildCommand(makeConfig());
+      expect(cmd).toContain("--append-system-prompt-file");
+      expect(cmd).toContain("fleet-instructions.md");
+    });
+
+    it("does not include --append-system-prompt-file when file absent", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      const cmd = backend.buildCommand(makeConfig());
+      expect(cmd).not.toContain("--append-system-prompt-file");
+    });
+
     it("includes --model when model is set", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig({ model: "opus" }));
@@ -96,6 +110,19 @@ describe("ClaudeCodeBackend", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
       expect(existsSync(join(TEST_DIR, "statusline.js"))).toBe(true);
+    });
+
+    it("writes fleet-instructions.md when instructions provided", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      backend.writeConfig(makeConfig({ instructions: "# Fleet Context\nYou are test." }));
+      const content = readFileSync(join(TEST_DIR, "fleet-instructions.md"), "utf-8");
+      expect(content).toContain("# Fleet Context");
+    });
+
+    it("does not write fleet-instructions.md when instructions absent", () => {
+      const backend = new ClaudeCodeBackend(TEST_DIR);
+      backend.writeConfig(makeConfig());
+      expect(existsSync(join(TEST_DIR, "fleet-instructions.md"))).toBe(false);
     });
   });
 

@@ -98,6 +98,20 @@ describe("KiroBackend", () => {
       expect(config.mcpServers["agend"]).toBeUndefined();
       expect(config.mcpServers["agend-test-kiro"]).toBeDefined();
     });
+
+    it("writes steering file when instructions provided", () => {
+      const backend = new KiroBackend(TEST_DIR);
+      backend.writeConfig(makeConfig({ instructions: "# Fleet Context" }));
+      const steeringFile = join(WORK_DIR, ".kiro", "steering", "agend-test-kiro.md");
+      expect(existsSync(steeringFile)).toBe(true);
+      expect(readFileSync(steeringFile, "utf-8")).toContain("# Fleet Context");
+    });
+
+    it("does not write steering file when instructions absent", () => {
+      const backend = new KiroBackend(TEST_DIR);
+      backend.writeConfig(makeConfig());
+      expect(existsSync(join(WORK_DIR, ".kiro", "steering", "agend-test-kiro.md"))).toBe(false);
+    });
   });
 
   describe("cleanup", () => {
@@ -107,6 +121,15 @@ describe("KiroBackend", () => {
       backend.cleanup(makeConfig());
       const config = JSON.parse(readFileSync(join(WORK_DIR, ".kiro", "settings", "mcp.json"), "utf-8"));
       expect(config.mcpServers["agend-test-kiro"]).toBeUndefined();
+    });
+
+    it("removes steering file on cleanup", () => {
+      const backend = new KiroBackend(TEST_DIR);
+      backend.writeConfig(makeConfig({ instructions: "# Fleet" }));
+      const steeringFile = join(WORK_DIR, ".kiro", "steering", "agend-test-kiro.md");
+      expect(existsSync(steeringFile)).toBe(true);
+      backend.cleanup(makeConfig());
+      expect(existsSync(steeringFile)).toBe(false);
     });
   });
 

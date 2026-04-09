@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from "node:fs";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 export class KiroBackend implements CliBackend {
@@ -59,6 +59,15 @@ export class KiroBackend implements CliBackend {
     mcpConfig.mcpServers = servers;
 
     writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
+
+    // Write fleet instructions to .kiro/steering/ (auto-loaded by Kiro CLI)
+    if (config.instructions) {
+      try {
+        const steeringDir = join(config.workingDirectory, ".kiro", "steering");
+        mkdirSync(steeringDir, { recursive: true });
+        writeFileSync(join(steeringDir, `agend-${config.instanceName}.md`), config.instructions);
+      } catch { /* best effort */ }
+    }
   }
 
   getReadyPattern(): RegExp {
@@ -99,6 +108,12 @@ export class KiroBackend implements CliBackend {
           writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
         }
       }
+    } catch { /* best effort */ }
+
+    // Remove fleet instructions steering file
+    try {
+      const steeringFile = join(config.workingDirectory, ".kiro", "steering", `agend-${config.instanceName}.md`);
+      if (existsSync(steeringFile)) unlinkSync(steeringFile);
     } catch { /* best effort */ }
   }
 }
