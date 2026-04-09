@@ -56,14 +56,14 @@ export class OpenCodeBackend implements CliBackend {
     oc.mcp = mcp;
     delete oc.mcpServers;
 
-    // Add fleet instructions file to contextPaths (additive — appends to existing array)
+    // Add fleet instructions file to instructions (additive — appends to existing array)
     if (config.instructions) {
       try {
         const instrFile = join(config.instanceDir, "fleet-instructions.md");
         writeFileSync(instrFile, config.instructions);
-        const paths = (oc.contextPaths ?? []) as string[];
+        const paths = (oc.instructions ?? []) as string[];
         if (!paths.includes(instrFile)) paths.push(instrFile);
-        oc.contextPaths = paths;
+        oc.instructions = paths;
       } catch { /* best effort */ }
     }
 
@@ -107,10 +107,10 @@ export class OpenCodeBackend implements CliBackend {
             delete oc.mcp[`${name}-${config.instanceName}`];
           }
         }
-        // Remove fleet instructions path from contextPaths
+        // Remove fleet instructions path from instructions
         const instrFile = join(config.instanceDir, "fleet-instructions.md");
-        if (Array.isArray(oc.contextPaths)) {
-          oc.contextPaths = oc.contextPaths.filter((p: string) => p !== instrFile);
+        if (Array.isArray(oc.instructions)) {
+          oc.instructions = oc.instructions.filter((p: string) => p !== instrFile);
         }
         writeFileSync(configPath, JSON.stringify(oc, null, 2));
       }

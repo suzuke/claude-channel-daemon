@@ -34,52 +34,52 @@ describe("OpenCodeBackend", () => {
   });
 
   describe("writeConfig", () => {
-    it("writes fleet-instructions.md and adds to contextPaths", () => {
+    it("writes fleet-instructions.md and adds to instructions", () => {
       const backend = new OpenCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig({ instructions: "# Fleet Context" }));
       const instrFile = join(TEST_DIR, "fleet-instructions.md");
       expect(existsSync(instrFile)).toBe(true);
       expect(readFileSync(instrFile, "utf-8")).toContain("# Fleet Context");
       const oc = JSON.parse(readFileSync(join(WORK_DIR, "opencode.json"), "utf-8"));
-      expect(oc.contextPaths).toContain(instrFile);
+      expect(oc.instructions).toContain(instrFile);
     });
 
-    it("does not add contextPaths when instructions absent", () => {
+    it("does not add instructions when instructions absent", () => {
       const backend = new OpenCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
       const oc = JSON.parse(readFileSync(join(WORK_DIR, "opencode.json"), "utf-8"));
-      expect(oc.contextPaths).toBeUndefined();
+      expect(oc.instructions).toBeUndefined();
     });
 
-    it("preserves existing contextPaths", () => {
-      writeFileSync(join(WORK_DIR, "opencode.json"), JSON.stringify({ contextPaths: ["/existing/path.md"] }));
+    it("preserves existing instructions", () => {
+      writeFileSync(join(WORK_DIR, "opencode.json"), JSON.stringify({ instructions: ["/existing/path.md"] }));
       const backend = new OpenCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig({ instructions: "# Fleet" }));
       const oc = JSON.parse(readFileSync(join(WORK_DIR, "opencode.json"), "utf-8"));
-      expect(oc.contextPaths).toContain("/existing/path.md");
-      expect(oc.contextPaths).toContain(join(TEST_DIR, "fleet-instructions.md"));
+      expect(oc.instructions).toContain("/existing/path.md");
+      expect(oc.instructions).toContain(join(TEST_DIR, "fleet-instructions.md"));
     });
   });
 
   describe("cleanup", () => {
-    it("removes contextPaths entry and deletes instructions file", () => {
+    it("removes instructions entry and deletes instructions file", () => {
       const backend = new OpenCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig({ instructions: "# Fleet" }));
       const instrFile = join(TEST_DIR, "fleet-instructions.md");
       expect(existsSync(instrFile)).toBe(true);
       backend.cleanup(makeConfig());
       const oc = JSON.parse(readFileSync(join(WORK_DIR, "opencode.json"), "utf-8"));
-      expect(oc.contextPaths).not.toContain(instrFile);
+      expect(oc.instructions).not.toContain(instrFile);
       expect(existsSync(instrFile)).toBe(false);
     });
 
-    it("preserves other contextPaths entries", () => {
-      writeFileSync(join(WORK_DIR, "opencode.json"), JSON.stringify({ contextPaths: ["/keep/this.md"] }));
+    it("preserves other instructions entries", () => {
+      writeFileSync(join(WORK_DIR, "opencode.json"), JSON.stringify({ instructions: ["/keep/this.md"] }));
       const backend = new OpenCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig({ instructions: "# Fleet" }));
       backend.cleanup(makeConfig());
       const oc = JSON.parse(readFileSync(join(WORK_DIR, "opencode.json"), "utf-8"));
-      expect(oc.contextPaths).toContain("/keep/this.md");
+      expect(oc.instructions).toContain("/keep/this.md");
     });
   });
 });
