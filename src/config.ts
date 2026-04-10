@@ -128,7 +128,9 @@ export function loadFleetConfig(configPath: string): FleetConfig {
   }
 
   return {
-    channel: parsed.channel,
+    channel: parsed.channel
+      ? { ...parsed.channel, mode: parsed.channel.mode ?? "topic" }
+      : parsed.channel,
     project_roots: parsed.project_roots,
     defaults: fleetDefaults,
     instances,

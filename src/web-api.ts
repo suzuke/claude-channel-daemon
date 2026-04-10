@@ -17,7 +17,7 @@ export interface WebApiContext {
   readonly dataDir: string;
   readonly sseClients: Set<ServerResponse>;
   readonly fleetConfig: {
-    channel?: { group_id?: number; mode?: string };
+    channel?: { group_id?: number | string; mode?: string };
     instances: Record<string, { topic_id?: number | string; working_directory: string; description?: string; display_name?: string }>;
     teams?: Record<string, { members: string[]; description?: string }>;
   } | null;
@@ -467,7 +467,7 @@ export function handleWebRequest(
         // Update channel settings
         if (body.channel && ch) {
           const update = body.channel as Record<string, unknown>;
-          if (update.group_id != null) (config.channel as Record<string, unknown>).group_id = Number(update.group_id);
+          if (update.group_id != null) (config.channel as Record<string, unknown>).group_id = update.group_id;
           if (update.access) (config.channel as Record<string, unknown>).access = update.access;
         }
         // Update defaults

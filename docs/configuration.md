@@ -68,7 +68,7 @@ health_port: 19280
 | `type` | `"telegram"` \| `"discord"` | **required** | Messaging platform |
 | `mode` | `"topic"` | `"topic"` | Routing mode (topic = one topic per instance) |
 | `bot_token_env` | string | **required** | Environment variable name holding the bot token |
-| `group_id` | number | — | Telegram group ID (negative) or Discord guild ID |
+| `group_id` | number \| string | — | Telegram group ID (negative) or Discord guild ID. Quote Discord snowflake IDs to prevent precision loss. |
 | `access` | object | **required** | Access control settings |
 | `mirror_topic_id` | number \| string | — | Telegram topic ID for mirroring cross-instance communication. All `send_to_instance` messages appear here |
 | `options` | object | — | Platform-specific options (Discord: `category_name`, `general_channel_id`) |
@@ -95,6 +95,7 @@ All fields from `instances.<name>` can be set here as defaults. Additionally:
 | `daily_summary` | object | enabled, 21:00 | Daily cost summary |
 | `scheduler` | object | — | Scheduler settings |
 | `webhooks` | object[] | `[]` | Webhook notifications |
+| `startup_timeout_ms` | number | `25000` | Total CLI backend startup timeout in ms (split 60/40 between output detection and idle wait) |
 
 ### defaults.cost_guard
 
