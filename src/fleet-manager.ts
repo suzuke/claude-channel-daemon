@@ -340,24 +340,28 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     // Poll classicBot.yaml for external changes every 30s
     this.classicReloadTimer = setInterval(async () => {
-      if (!this.classicChannels) return;
-      // Snapshot current backends before reload
-      const fleetBackend = this.fleetConfig?.defaults?.backend;
-      const oldBackends = new Map<string, string>();
-      for (const ch of this.classicChannels.getAll()) {
-        oldBackends.set(ch.instanceName, this.classicChannels.getBackendByInstance(ch.instanceName, fleetBackend));
-      }
-      if (!this.classicChannels.checkReload()) return;
-      this.reregisterClassicChannels();
-      // Auto-restart instances whose backend changed
-      for (const ch of this.classicChannels.getAll()) {
-        const newBackend = this.classicChannels.getBackendByInstance(ch.instanceName, fleetBackend);
-        if (this.daemons.has(ch.instanceName) && oldBackends.get(ch.instanceName) !== newBackend) {
-          this.logger.info({ instanceName: ch.instanceName, backend: newBackend }, "Backend changed — restarting classic instance");
-          await this.stopInstance(ch.instanceName).catch(() => {});
-          await this.startClassicInstance(ch.instanceName, newBackend).catch(err =>
-            this.logger.warn({ err, instanceName: ch.instanceName }, "Failed to restart classic instance"));
+      try {
+        if (!this.classicChannels) return;
+        const fleetBackend = this.fleetConfig?.defaults?.backend;
+        const oldBackends = new Map<string, string>();
+        for (const ch of this.classicChannels.getAll()) {
+          oldBackends.set(ch.instanceName, this.classicChannels.getBackendByInstance(ch.instanceName, fleetBackend));
         }
+        if (!this.classicChannels.checkReload()) return;
+        this.reregisterClassicChannels();
+        for (const ch of this.classicChannels.getAll()) {
+          const newBackend = this.classicChannels.getBackendByInstance(ch.instanceName, fleetBackend);
+          if (this.daemons.has(ch.instanceName) && oldBackends.get(ch.instanceName) !== newBackend) {
+            this.logger.info({ instanceName: ch.instanceName, from: oldBackends.get(ch.instanceName), to: newBackend }, "Backend changed — restarting");
+            await this.stopInstance(ch.instanceName).catch(() => {});
+            // Small delay to let tmux window clean up
+            await new Promise(r => setTimeout(r, 2000));
+            await this.startClassicInstance(ch.instanceName, newBackend).catch(err =>
+              this.logger.warn({ err, instanceName: ch.instanceName }, "Failed to restart classic instance"));
+          }
+        }
+      } catch (err) {
+        this.logger.warn({ err }, "classicBot.yaml reload error");
       }
     }, 30_000);
 
