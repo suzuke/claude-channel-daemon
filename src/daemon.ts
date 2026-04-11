@@ -231,7 +231,12 @@ export class Daemon extends EventEmitter {
 
     const resumed = await this.spawnClaudeWindow();
     // Only inject snapshot if resume failed — successful resume already has full history
-    if (!resumed) await this.injectSnapshotMessage();
+    if (!resumed) {
+      await this.injectSnapshotMessage();
+    } else {
+      // Clean up stale snapshot file — resume restored full context, snapshot not needed
+      try { unlinkSync(join(this.instanceDir, "rotation-state.json")); } catch { /* may not exist */ }
+    }
 
     if (!this.config.lightweight) {
       // 3. Pipe-pane for prompt detection
@@ -436,6 +441,9 @@ export class Daemon extends EventEmitter {
           if (!resumed) {
             // Resume failed → fresh session → inject snapshot for context
             await this.injectSnapshotMessage();
+          } else {
+            // Clean up stale snapshot — resume restored full context
+            try { unlinkSync(join(this.instanceDir, "rotation-state.json")); } catch { /* may not exist */ }
           }
           this.logger.info({ resumed }, "Respawned Claude window after crash");
           this.emit("crash_respawn", this.name);

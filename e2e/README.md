@@ -102,7 +102,6 @@ e2e/
 │   ├── fleet-respawn.test.ts          # T7/T8/T10: Crash respawn, notifications, snapshots
 │   ├── log-truncate.test.ts           # T9: Log file truncation
 │   ├── cross-instance.test.ts         # T11: Cross-instance communication
-│   ├── context-rotation.test.ts       # T12: Context rotation via max_age
 │   ├── scheduling.test.ts             # T13: Schedule create/trigger/delete
 │   └── workflow-template.test.ts      # T15: Workflow template injection
 └── results/                           # Test output (gitignored)
