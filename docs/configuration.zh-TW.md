@@ -272,6 +272,44 @@ GROQ_API_KEY=gsk_...          # 選用，語音轉文字
 
 `~/.agend/.env` 的值優先於繼承的 shell 環境變數。這確保 `.env` 中設定的密鑰不會被 shell profile 中的變數意外覆蓋。
 
+## classicBot.yaml
+
+ClassicBot 模式使用獨立設定檔 `~/.agend/classicBot.yaml`。首次在 Discord 文字頻道使用 `/start` 時自動建立，也可手動編輯。
+
+```yaml
+# ClassicBot 設定
+# 可用 backends: claude-code, gemini-cli, codex, opencode, kiro-cli
+defaults:
+  backend: claude-code          # 所有 classic channel 的預設 backend
+
+channels:
+  general-chat:                 # Channel key（用於推導 instance 名稱：classic-general-chat）
+    channelId: "1234567890"     # Discord channel ID
+    backend: gemini-cli         # 可選：覆蓋此 channel 的預設 backend
+    createdBy: "368442276000694273"
+    createdAt: "2026-04-12T02:00:00Z"
+  dev-help:
+    channelId: "9876543210"     # 未設定 backend → 使用 defaults.backend
+    createdBy: "368442276000694273"
+    createdAt: "2026-04-12T02:10:00Z"
+```
+
+### 主要行為
+
+- **Backend 優先順序**：channel `backend` → `defaults.backend` → `fleet.yaml` `defaults.backend` → `claude-code`
+- **自動更新**：`/start` 新增 channel，`/stop` 移除 channel
+- **熱載入**：每 30 秒偵測檔案變更 — 修改 backend 後下一次 `/chat` 即生效
+- **Instance 命名**：從 channel key 推導 — `classic-<key>`
+- **`agend ls`**：classic instance 會顯示 `(classic)` 標籤
+
+### 手動管理
+
+可手動編輯 `classicBot.yaml`：
+- 變更所有 classic channel 的預設 backend
+- 覆蓋特定 channel 的 backend
+- 移除 channel（等同 `/stop`）
+- 新增 channel（下次 reload 時載入，但需重啟 fleet 才會啟動 instance）
+
 ---
 
 ## 資料目錄
@@ -281,6 +319,7 @@ GROQ_API_KEY=gsk_...          # 選用，語音轉文字
 | 路徑 | 用途 |
 |------|------|
 | `fleet.yaml` | Fleet 設定檔 |
+| `classicBot.yaml` | ClassicBot channel 設定（per-channel backend） |
 | `.env` | Bot token + API keys |
 | `daemon.log` | Fleet daemon 日誌 |
 | `fleet.pid` | Fleet manager PID |

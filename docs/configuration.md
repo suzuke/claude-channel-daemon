@@ -278,6 +278,44 @@ Values in `~/.agend/.env` take priority over inherited shell environment variabl
 
 ---
 
+## classicBot.yaml
+
+ClassicBot mode uses a separate config file at `~/.agend/classicBot.yaml`. This file is auto-created when you first use `/start` in a Discord text channel, and can be manually edited.
+
+```yaml
+# ClassicBot Configuration
+# Available backends: claude-code, gemini-cli, codex, opencode, kiro-cli
+defaults:
+  backend: claude-code          # Default backend for all classic channels
+
+channels:
+  general-chat:                 # Channel key (used to derive instance name: classic-general-chat)
+    channelId: "1234567890"     # Discord channel ID
+    backend: gemini-cli         # Optional: override default backend for this channel
+    createdBy: "368442276000694273"
+    createdAt: "2026-04-12T02:00:00Z"
+  dev-help:
+    channelId: "9876543210"     # No backend override → uses defaults.backend
+    createdBy: "368442276000694273"
+    createdAt: "2026-04-12T02:10:00Z"
+```
+
+### Key behaviors
+
+- **Backend fallback chain**: per-channel `backend` → `defaults.backend` → `fleet.yaml` `defaults.backend` → `claude-code`
+- **Auto-update**: `/start` adds a channel entry, `/stop` removes it
+- **Hot reload**: file changes are detected every 30 seconds — edit `defaults.backend` or a channel's `backend` and it takes effect on the next `/chat` message
+- **Instance naming**: derived from the channel key — `classic-<key>`
+- **`agend ls`**: classic instances appear with a `(classic)` tag
+
+### Manual management
+
+You can manually edit `classicBot.yaml` to:
+- Change the default backend for all classic channels
+- Override the backend for a specific channel
+- Remove channels (equivalent to `/stop`)
+- Add channels (they'll be picked up on next reload, but you'll also need to restart the fleet to start the instance)
+
 ## Data directory
 
 `~/.agend/`:
@@ -285,6 +323,7 @@ Values in `~/.agend/.env` take priority over inherited shell environment variabl
 | Path | Purpose |
 |------|---------|
 | `fleet.yaml` | Fleet configuration |
+| `classicBot.yaml` | ClassicBot channel config (per-channel backend) |
 | `.env` | Bot token + API keys |
 | `daemon.log` | Fleet daemon log |
 | `fleet.pid` | Fleet manager PID |
