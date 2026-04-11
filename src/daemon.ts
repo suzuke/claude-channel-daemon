@@ -229,9 +229,9 @@ export class Daemon extends EventEmitter {
       }
     }
 
-    await this.spawnClaudeWindow();
-    // Inject session snapshot (from context rotation) as the first message
-    await this.injectSnapshotMessage();
+    const resumed = await this.spawnClaudeWindow();
+    // Only inject snapshot if resume failed — successful resume already has full history
+    if (!resumed) await this.injectSnapshotMessage();
 
     if (!this.config.lightweight) {
       // 3. Pipe-pane for prompt detection
@@ -417,11 +417,6 @@ export class Daemon extends EventEmitter {
         try {
           this.saveSessionId();
           this.transcriptMonitor?.resetOffset();
-          // Clear stale session-id so respawn doesn't --resume a dead session
-          const sidFile = join(this.instanceDir, "session-id");
-          try { unlinkSync(sidFile); } catch { /* may not exist */ }
-          // Skip resume on crash respawn — previous session may be corrupted
-          this.skipResume = true;
           // Kill any same-name windows before respawn to prevent orphans.
           // Wrapped in try-catch: if tmux server is dead, listWindows throws —
           // must not block spawnClaudeWindow (which calls ensureSession).
@@ -434,10 +429,15 @@ export class Daemon extends EventEmitter {
               }
             }
           } catch { /* tmux server may be dead — ensureSession in trySpawn will recover */ }
+          // Write snapshot before spawn — consumed only if resume fails
           this.writeRotationSnapshot("crash");
-          await this.spawnClaudeWindow();
-          await this.injectSnapshotMessage();
-          this.logger.info("Respawned Claude window after crash");
+          // Try --resume first; spawnClaudeWindow falls back to fresh session if resume fails
+          const resumed = await this.spawnClaudeWindow();
+          if (!resumed) {
+            // Resume failed → fresh session → inject snapshot for context
+            await this.injectSnapshotMessage();
+          }
+          this.logger.info({ resumed }, "Respawned Claude window after crash");
           this.emit("crash_respawn", this.name);
         } catch (err) {
           this.logger.error({ err }, "Failed to respawn Claude window");
@@ -1051,9 +1051,10 @@ export class Daemon extends EventEmitter {
     }
   }
 
-  /** Spawn (or respawn) a CLI window in tmux */
-  private async spawnClaudeWindow(): Promise<void> {
+  /** Spawn a CLI window. Returns true if --resume was used successfully. */
+  private async spawnClaudeWindow(): Promise<boolean> {
     this.spawning = true;
+    let resumedSuccessfully = false;
     try {
     this.toolStatusLines = [];
     this.toolStatusMessageId = null;
@@ -1061,6 +1062,7 @@ export class Daemon extends EventEmitter {
       throw new Error("No backend configured — cannot spawn CLI window");
     }
 
+    const attemptedResume = !this.skipResume;
     const alive = await this.trySpawn();
     if (!alive) {
       // First attempt failed (stale --resume, crash, rate limit, etc.)
@@ -1076,6 +1078,8 @@ export class Daemon extends EventEmitter {
         await this.tmux!.killWindow();
         throw new Error("CLI failed to start after retry");
       }
+    } else if (attemptedResume) {
+      resumedSuccessfully = true;
     }
 
     this.lastSpawnAt = Date.now();
@@ -1083,6 +1087,7 @@ export class Daemon extends EventEmitter {
     } finally {
       this.spawning = false;
     }
+    return resumedSuccessfully;
   }
 
   /**

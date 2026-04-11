@@ -506,7 +506,9 @@ export class InstanceLifecycle {
     return this.daemons.has(name);
   }
 
-  /** Handle replace_instance tool call: handover → stop → create new → delete old config. */
+  /** Handle replace_instance tool call: handover → stop → create new → delete old config.
+   *  If the old instance has a worktree_source, ownership transfers to the new instance
+   *  implicitly via savedConfig — the worktree itself is not recreated or removed. */
   async handleReplace(
     args: Record<string, unknown>,
     respond: (result: unknown, error?: string) => void,
