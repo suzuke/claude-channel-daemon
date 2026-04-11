@@ -201,6 +201,32 @@ export class InstanceLifecycle {
     // Stop daemon and clean up tmux window (handles both in-memory and orphaned cases)
     await this.stop(name);
 
+    // Clean up backend config files (MCP config, instructions, etc.)
+    // This is needed even when daemon is not in memory — stop() only calls
+    // backend.cleanup() when daemon object exists. Without this, stale MCP
+    // entries remain in the working directory and crash new instances.
+    if (config.working_directory && config.backend) {
+      try {
+        const { createBackend } = await import("./backend/factory.js");
+        const instanceDir = this.ctx.getInstanceDir(name);
+        const backend = createBackend(config.backend, instanceDir);
+        if (backend?.cleanup) {
+          const backendConfig = {
+            workingDirectory: config.working_directory,
+            instanceDir,
+            instanceName: name,
+            mcpServers: {
+              agend: { command: "", args: [], env: {} },
+            },
+          };
+          backend.cleanup(backendConfig as import("./backend/types.js").CliBackendConfig);
+          this.ctx.logger.info({ name }, "Cleaned up backend config files");
+        }
+      } catch (err) {
+        this.ctx.logger.debug({ err, name }, "Backend cleanup failed (best effort)");
+      }
+    }
+
     // Clean up git worktree if applicable
     if (config.worktree_source && config.working_directory) {
       if (!existsSync(config.working_directory)) {

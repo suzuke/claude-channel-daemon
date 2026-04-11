@@ -37,6 +37,15 @@ export class KiroBackend implements CliBackend {
     try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch { /* new file */ }
 
     const servers = (mcpConfig.mcpServers ?? {}) as Record<string, unknown>;
+    // Remove stale agend entries whose wrapper scripts no longer exist
+    for (const [key, val] of Object.entries(servers)) {
+      if (key.startsWith("agend-")) {
+        const cmd = (val as Record<string, unknown>)?.command;
+        if (typeof cmd === "string" && !existsSync(cmd)) {
+          delete servers[key];
+        }
+      }
+    }
     for (const [name, entry] of Object.entries(config.mcpServers)) {
       const instanceKey = `${name}-${config.instanceName}`;
       const allEnv = { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName };
