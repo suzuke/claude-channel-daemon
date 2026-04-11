@@ -6,6 +6,10 @@
 - **Structured handoffs**: use `delegate_task` (with clear scope) and `report_result` (with correlation_id).
 - **Ask, don't assume**: use `request_information` when you need context from another instance.
 - **No ack spam**: don't send "got it" / "working on it" unless asked for status. Report when done.
+- **No pleasantries**: skip "great analysis", "I agree with your approach", "你的分析很到位". Start with substance.
+- **Silence = agreement**: if you have nothing to add or disagree with, don't reply. Only reply when you have new information, a disagreement, or a question.
+- **Batch your points**: combine all feedback into one message. Don't send follow-ups for things you forgot.
+- **One round-trip rule for reviews**: reviewer sends all findings in one message. Author fixes and reports back. Max 3 round-trips.
 
 ## Shared Decisions
 
