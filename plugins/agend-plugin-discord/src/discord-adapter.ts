@@ -55,6 +55,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   private generalChannelId?: string;
   private queue: MessageQueue;
   private lastChatId: string | null = null;
+  private attachmentUrls = new Map<string, string>();
 
   constructor(opts: DiscordAdapterOptions) {
     super();
@@ -125,12 +126,25 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
 
       // Collect attachments
       const attachments = msg.attachments.map((att) => ({
-        kind: "document" as const,
+        kind: (att.contentType?.startsWith("image/") ? "photo"
+          : att.contentType?.startsWith("video/") ? "video"
+          : att.contentType?.startsWith("audio/") ? "audio"
+          : "document") as "photo" | "video" | "audio" | "document",
         fileId: att.id,
         mime: att.contentType ?? undefined,
         size: att.size,
         filename: att.name ?? undefined,
       }));
+
+      // Store attachment URLs for later download
+      for (const att of msg.attachments.values()) {
+        this.attachmentUrls.set(att.id, att.url);
+      }
+      while (this.attachmentUrls.size > 1000) {
+        const first = this.attachmentUrls.keys().next().value;
+        if (first) this.attachmentUrls.delete(first);
+        else break;
+      }
 
       this.emit("message", {
         source: "discord",
@@ -404,12 +418,17 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   // ── File download ──────────────────────────────────────────────────────
 
   async downloadAttachment(fileId: string): Promise<string> {
-    // Discord attachment fileId is the attachment ID. We need to find the URL.
-    // Since Discord attachments include URLs directly, we'll search for the message
-    // containing this attachment. For MVP, we store the URL in the attachment metadata.
-    // Here we try to download via the Discord CDN URL pattern.
-    // In practice, the inbound message handler should store the URL.
-    throw new Error("downloadAttachment not yet implemented for Discord — use attachment URL directly");
+    const url = this.attachmentUrls.get(fileId);
+    if (!url) throw new Error(`No URL for attachment: ${fileId}`);
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+    const filename = fileId + "_" + (url.split("/").pop()?.split("?")[0] ?? "file");
+    const localPath = join(this.inboxDir, filename);
+    const dest = createWriteStream(localPath);
+    const body = response.body;
+    if (!body) throw new Error("No response body");
+    await pipeline(Readable.fromWeb(body as import("stream/web").ReadableStream), dest);
+    return localPath;
   }
 
   // ── Intent-oriented methods ──────────────────────────────────────────

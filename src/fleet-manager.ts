@@ -1713,15 +1713,19 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     // Only forward /chat messages to the agent
     if (!text.startsWith("/chat ") && text !== "/chat") return;
 
-    const chatText = text.slice(6).trim();
-    if (!chatText) return;
+    // Strip /chat prefix before processAttachments (which may prepend image tags)
+    const chatText = text.replace(/^\/chat\s*/, "").trim();
+    if (!chatText && !msg.attachments?.length) return;
+
+    const patchedMsg = { ...msg, text: chatText };
+    const { text: processedText, extraMeta } = await processAttachments(patchedMsg, this.adapter!, this.logger, instanceName);
 
     if (this.adapter && msg.chatId && msg.messageId) {
       this.adapter.react(msg.chatId, msg.messageId, "👀")
         .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
     }
 
-    await this.forwardToClassicInstance(instanceName, chatText, msg);
+    await this.forwardToClassicInstance(instanceName, processedText || chatText, msg, extraMeta);
   }
 
   /** Forward a message to a classic channel instance with chat log context */
@@ -1729,6 +1733,7 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     instanceName: string,
     text: string,
     msg: { chatId: string; threadId?: string; messageId: string; userId: string; username: string; source: string; timestamp: Date },
+    extraMeta?: Record<string, string>,
   ): Promise<void> {
     const logContext = this.getRecentChatLog(instanceName);
     const fullText = logContext
@@ -1753,6 +1758,7 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         ts: msg.timestamp.toISOString(),
         thread_id: msg.threadId ?? "",
         source: msg.source,
+        ...extraMeta,
       },
     });
     this.lastInboundUser.set(instanceName, msg.username);
