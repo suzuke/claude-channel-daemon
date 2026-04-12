@@ -196,7 +196,7 @@ describe("Workflow Template E2E", () => {
     );
     expect(instructions).toContain("Development Workflow");
     expect(instructions).toContain("Fleet Collaboration");
-    expect(instructions).toContain("Communication Rules");
+    expect(instructions).toContain("Communication Protocol");
     expect(instructions).toContain("Context Protection");
   });
 
@@ -220,7 +220,7 @@ describe("Workflow Template E2E", () => {
     expect(instructions).toContain("Custom Workflow");
     expect(instructions).toContain("custom workflow for testing");
     // Should NOT contain builtin template
-    expect(instructions).not.toContain("Communication Rules");
+    expect(instructions).not.toContain("Communication Protocol");
   });
 
   it("T15: workflow + systemPrompt both appear in instructions", () => {
@@ -230,7 +230,7 @@ describe("Workflow Template E2E", () => {
     );
     // Builtin workflow present
     expect(instructions).toContain("Fleet Collaboration");
-    expect(instructions).toContain("Communication Rules");
+    expect(instructions).toContain("Communication Protocol");
     // Custom systemPrompt also present
     expect(instructions).toContain("specialized testing agent");
   });
