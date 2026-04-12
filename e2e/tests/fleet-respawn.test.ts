@@ -7,8 +7,9 @@
  * T10: Verify crash-aware snapshot: rotation-state.json written on crash,
  *      persists after injection (not deleted), updated on subsequent crashes.
  *
- * Uses a shorter health check assertion window. The daemon health check runs
- * every 30s, so total wait can be up to ~35s (30s detection + backoff).
+ * Uses a shorter health check assertion window. The test config sets
+ * health_check_interval_ms to 3s, so detection + backoff + respawn
+ * should complete within ~10s.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
@@ -89,6 +90,7 @@ describe("Fleet Respawn E2E", () => {
           max_retries: 3,
           backoff: "linear",
           reset_after: 300000,
+          health_check_interval_ms: 3000,
         },
       },
       instances: {
@@ -197,7 +199,7 @@ describe("Fleet Respawn E2E", () => {
           return false;
         }
       },
-      { timeout: 60_000, interval: 2000, label: "respawn with new session_id" },
+      { timeout: 30_000, interval: 2000, label: "respawn with new session_id" },
     );
 
     // Verify new session ID
