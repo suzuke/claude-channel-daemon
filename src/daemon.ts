@@ -300,8 +300,8 @@ export class Daemon extends EventEmitter {
     // 10. Health check — detect crashed tmux window and respawn
     // Re-enabled: orphan window issue fixed by killing same-name windows before respawn.
     // Without this, a dead CLI window goes undetected and messages are silently lost.
+    this.startHealthCheck();
     if (!this.config.lightweight) {
-      this.startHealthCheck();
       this.startErrorMonitor();
     }
 
