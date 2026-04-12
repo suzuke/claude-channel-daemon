@@ -1550,6 +1550,20 @@ program
       try { execFileSync("tmux", tmuxArgs(["select-window", "-t", t]), { stdio: "pipe" }); selected = true; break; }
       catch { /* try next */ }
     }
+    // Fallback: search tmux windows for a partial name match (handles CJK truncation)
+    if (!selected) {
+      try {
+        const winList = execFileSync("tmux", tmuxArgs(["list-windows", "-t", session, "-F", "#{window_id} #{window_name}"]), { stdio: "pipe" }).toString().trim();
+        for (const line of winList.split("\n")) {
+          const [wid, ...rest] = line.split(" ");
+          const wname = rest.join(" ").replace(/-?\*?$/, ""); // strip trailing -/* markers
+          if (wname === name || name.startsWith(wname) || wname.startsWith(name)) {
+            try { execFileSync("tmux", tmuxArgs(["select-window", "-t", `${session}:${wid}`]), { stdio: "pipe" }); selected = true; break; }
+            catch { /* try next */ }
+          }
+        }
+      } catch { /* ignore */ }
+    }
     if (!selected) {
       console.error(`Cannot find tmux window for "${name}". The instance may need to be restarted.`);
       process.exit(1);

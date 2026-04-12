@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "agend-agend-ts-dev-t15813": {
-      "command": "/Users/suzuke/.agend/instances/agend-ts-dev-t15813/mcp-wrapper-agend.sh",
+    "agend-sidagend-lead-t1492586317018693673": {
+      "command": "/home/han/.agend/instances/sidagend-lead-t1492586317018693673/mcp-wrapper-agend.sh",
       "args": []
     }
   }
