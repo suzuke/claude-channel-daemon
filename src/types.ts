@@ -76,6 +76,8 @@ export interface InstanceConfig {
     max_retries: number;
     backoff: "exponential" | "linear";
     reset_after: number;
+    /** Health check polling interval in ms. Default: 30000 */
+    health_check_interval_ms?: number;
   };
   context_guardian: {
     grace_period_ms: number;

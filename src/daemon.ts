@@ -454,7 +454,7 @@ export class Daemon extends EventEmitter {
         }
 
         scheduleNext();
-      }, 30_000);
+      }, this.config.restart_policy.health_check_interval_ms ?? 30_000);
     };
 
     scheduleNext();
