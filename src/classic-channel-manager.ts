@@ -139,12 +139,13 @@ export class ClassicChannelManager {
     return join(getAgendHome(), "workspaces", instanceName, "chat-logs");
   }
 
-  static logMessage(instanceName: string, username: string, text: string, timestamp: Date): void {
+  static logMessage(instanceName: string, username: string, text: string, timestamp: Date, replyToText?: string): void {
     const logDir = ClassicChannelManager.chatLogDir(instanceName);
     mkdirSync(logDir, { recursive: true });
     const dateStr = timestamp.toISOString().slice(0, 10);
     const logFile = join(logDir, `${dateStr}.log`);
-    appendFileSync(logFile, `[${timestamp.toISOString()}] <${username}> ${text}\n`);
+    const replyPrefix = replyToText ? `[reply: ${replyToText.slice(0, 100)}] ` : "";
+    appendFileSync(logFile, `[${timestamp.toISOString()}] <${username}> ${replyPrefix}${text}\n`);
   }
 
   /** Delete chat log files older than retentionDays. Dates parsed as local to avoid UTC off-by-one. */

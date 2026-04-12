@@ -1727,7 +1727,7 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     this.logger.info({ instanceName, user: msg.username, textLen: text.length, hasChat: text.startsWith("/chat") }, "classic channel message received");
 
     // Log every message to the daily chat log
-    ClassicChannelManager.logMessage(instanceName, msg.username, text, msg.timestamp);
+    ClassicChannelManager.logMessage(instanceName, msg.username, text, msg.timestamp, msg.replyToText);
 
     // Only forward /chat messages to the agent
     if (!text.startsWith("/chat ") && text !== "/chat") return;
