@@ -146,6 +146,14 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
         else break;
       }
 
+      let replyToText: string | undefined;
+      if (msg.reference?.messageId) {
+        try {
+          const ref = await msg.fetchReference();
+          replyToText = ref.content || ref.embeds?.[0]?.description || undefined;
+        } catch { /* deleted message or no permission */ }
+      }
+
       this.emit("message", {
         source: "discord",
         adapterId: this.id,
@@ -158,6 +166,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
         timestamp: msg.createdAt,
         attachments: attachments.length > 0 ? attachments : undefined,
         replyTo: msg.reference?.messageId ?? undefined,
+        replyToText,
       });
     });
 
