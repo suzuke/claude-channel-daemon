@@ -260,14 +260,57 @@ defaults:
 
 ## Discord 轉接器 (Discord adapter (MVP))
 
-將您的 fleet 連接到 Discord 而非（或同時連接）Telegram。在 `fleet.yaml` 中配置：
+將您的 fleet 連接到 Discord 而非（或同時連接）Telegram。
 
-```yaml
-channel:
-  type: discord
-  bot_token_env: AGEND_DISCORD_TOKEN
-  guild_id: "123456789"
-```
+### 設定步驟
+
+1. **安裝 Discord 外掛：**
+   ```bash
+   npm install -g @suzuke/agend-plugin-discord
+   ```
+
+2. **建立 Discord bot**，前往 [Discord Developer Portal](https://discord.com/developers/applications)：
+   - 建立新 Application → Bot
+   - 啟用 **Privileged Gateway Intents**：Presence Intent、Server Members Intent、Message Content Intent
+   - 產生邀請 URL，scope 選 `bot`，權限選 `Send Messages`、`Read Message History`、`Manage Channels`
+   - 邀請 bot 到你的伺服器
+
+3. **執行 quickstart**（Discord 推薦方式）：
+   ```bash
+   agend quickstart    # 選擇 "Discord"
+   ```
+   > **注意：** `agend init`（進階設定精靈）目前僅支援 Telegram。Discord 請使用 `agend quickstart`。
+
+4. **或手動設定** `fleet.yaml`：
+   ```yaml
+   channel:
+     type: discord
+     mode: topic           # 必填 — 不寫的話 bot 會靜默不啟動
+     bot_token_env: AGEND_DISCORD_TOKEN
+     group_id: "123456789012345678"   # Discord snowflake ID 必須加引號，避免精度丟失
+     access:
+       mode: locked
+       allowed_users:
+         - "your_discord_user_id"     # User ID 也要加引號
+   ```
+
+5. **設定 bot token**，寫入 `~/.agend/.env`：
+   ```
+   AGEND_DISCORD_TOKEN=your_bot_token_here
+   ```
+
+### 疑難排解
+
+- **Bot 不上線：** 確認 `fleet.yaml` 中有設定 `mode: topic`。沒有的話 adapter 會靜默不啟動。
+- **訊息內容是空的：** 到 Discord Developer Portal → Bot → Privileged Gateway Intents 啟用 **Message Content Intent**。
+- **ID 精度丟失：** YAML 中的 Discord ID（guild ID、user ID）務必加引號 — 它們是 64-bit snowflake，超過 JavaScript 整數精度。
+- **MCP 導致啟動慢：** 如果 backend CLI 因 MCP server 連線而啟動逾時，可在 `fleet.yaml` 增加 timeout：
+  ```yaml
+  defaults:
+    startup_timeout_ms: 60000   # 預設：25000 (25 秒)
+  ```
+- **`registerBotCommands` ETIMEDOUT：** 這是非致命錯誤 — bot polling 仍會正常啟動。在網路不穩時會發生。
+- **`working_directory` 找不到：** v1.19 起目錄會自動建立。如果遇到此錯誤，請更新到最新版本。
 
 ## 外部轉接器外掛系統 (External adapter plugin system)
 

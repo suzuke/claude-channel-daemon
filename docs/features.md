@@ -246,14 +246,57 @@ defaults:
 
 ## Discord adapter (MVP)
 
-Connect your fleet to Discord instead of (or alongside) Telegram. Configure in `fleet.yaml`:
+Connect your fleet to Discord instead of (or alongside) Telegram.
 
-```yaml
-channel:
-  type: discord
-  bot_token_env: CCD_DISCORD_TOKEN
-  guild_id: "123456789"
-```
+### Setup
+
+1. **Install the Discord plugin:**
+   ```bash
+   npm install -g @suzuke/agend-plugin-discord
+   ```
+
+2. **Create a Discord bot** at [Discord Developer Portal](https://discord.com/developers/applications):
+   - Create a new Application → Bot
+   - Enable **Privileged Gateway Intents**: Presence Intent, Server Members Intent, Message Content Intent
+   - Generate an invite URL with `bot` scope and `Send Messages`, `Read Message History`, `Manage Channels` permissions
+   - Invite the bot to your server
+
+3. **Run the quickstart** (recommended for Discord):
+   ```bash
+   agend quickstart    # Select "Discord" when prompted
+   ```
+   > **Note:** `agend init` (advanced wizard) currently supports Telegram only. Use `agend quickstart` for Discord setup.
+
+4. **Or configure manually** in `fleet.yaml`:
+   ```yaml
+   channel:
+     type: discord
+     mode: topic           # Required — omitting this silently prevents bot startup
+     bot_token_env: AGEND_DISCORD_TOKEN
+     group_id: "123456789012345678"   # Quote Discord snowflake IDs to prevent precision loss
+     access:
+       mode: locked
+       allowed_users:
+         - "your_discord_user_id"     # Also quote user IDs
+   ```
+
+5. **Set the bot token** in `~/.agend/.env`:
+   ```
+   AGEND_DISCORD_TOKEN=your_bot_token_here
+   ```
+
+### Troubleshooting
+
+- **Bot doesn't come online:** Ensure `mode: topic` is set in `fleet.yaml`. Without it, the adapter silently never starts.
+- **Messages are empty:** Enable **Message Content Intent** in Discord Developer Portal → Bot → Privileged Gateway Intents.
+- **ID precision loss:** Always quote Discord IDs (guild ID, user ID) in YAML — they are 64-bit snowflakes that exceed JavaScript integer precision.
+- **Slow startup with MCP:** If backend CLI times out during startup due to MCP server connections, increase the timeout in `fleet.yaml`:
+  ```yaml
+  defaults:
+    startup_timeout_ms: 60000   # Default: 25000 (25s)
+  ```
+- **`registerBotCommands` ETIMEDOUT:** This is non-fatal — bot polling starts regardless. Occurs on unstable networks.
+- **`working_directory` not found:** Directories are auto-created since v1.19. If you see this error, update to the latest version.
 
 ## External adapter plugin system
 

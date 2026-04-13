@@ -65,6 +65,8 @@ agend fleet start               # 3. Launch your fleet 🎉
 
 Open Telegram, send a message to your bot, and start coding from your phone.
 
+> **Discord?** `agend quickstart` supports Discord too — install the plugin first: `npm install -g @suzuke/agend-plugin-discord`. See [Discord setup guide](docs/features.md#discord-adapter-mvp).
+
 ## How It Works
 
 ```mermaid

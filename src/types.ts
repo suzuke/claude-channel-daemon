@@ -53,7 +53,7 @@ export interface ChannelConfig {
   type: string;
   mode: "topic";
   bot_token_env: string;
-  group_id?: number;
+  group_id?: number | string;
   access: AccessConfig;
   options?: Record<string, unknown>;
   /** Override the Telegram Bot API root URL (e.g. for testing with a mock server). */
@@ -104,6 +104,8 @@ export interface InstanceConfig {
   worktree_source?: string;
   /** Workflow template: "builtin" (default), "file:path", inline string, or false to disable */
   workflow?: string | false;
+  /** Total startup timeout in ms for CLI backend (split 60/40 between output detection and idle wait). Default: 25000 */
+  startup_timeout_ms?: number;
 }
 
 export interface WebhookConfig {

@@ -1144,9 +1144,12 @@ export class Daemon extends EventEmitter {
     // Register with control client and wait for output + idle
     await this.controlClient?.registerWindow(windowId);
     if (this.controlClient) {
-      const hasOutput = await this.controlClient.waitForOutput(windowId, 15_000);
+      const total = this.config.startup_timeout_ms ?? 25_000;
+      const outputTimeout = Math.round(total * 0.6);
+      const idleTimeout = total - outputTimeout;
+      const hasOutput = await this.controlClient.waitForOutput(windowId, outputTimeout);
       if (!hasOutput) return false;
-      await this.controlClient.waitForIdle(windowId, 10_000);
+      await this.controlClient.waitForIdle(windowId, idleTimeout);
     } else {
       await new Promise(r => setTimeout(r, 10_000));
     }
