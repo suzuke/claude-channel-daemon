@@ -53,9 +53,9 @@ export class KiroBackend implements CliBackend {
       // Write a wrapper script that sets env vars explicitly
       const wrapperPath = join(this.instanceDir, `mcp-wrapper-${name}.sh`);
       const envExports = Object.entries(allEnv)
-        .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
+        .map(([k, v]) => `export ${k}='${String(v).replace(/'/g, "'\\''")}'`)
         .join("\n");
-      writeFileSync(wrapperPath, `#!/bin/bash\n${envExports}\nexec ${entry.command} ${entry.args.map((a: string) => JSON.stringify(a)).join(" ")}\n`);
+      writeFileSync(wrapperPath, `#!/bin/bash\n${envExports}\n# Wait for IPC socket to be ready (up to 10s)\nfor i in $(seq 1 20); do [ -S "$AGEND_SOCKET_PATH" ] && break; sleep 0.5; done\nexec ${entry.command} ${entry.args.map((a: string) => JSON.stringify(a)).join(" ")}\n`);
       chmodSync(wrapperPath, 0o755);
 
       servers[instanceKey] = {
