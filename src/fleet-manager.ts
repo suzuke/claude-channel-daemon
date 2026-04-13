@@ -38,6 +38,7 @@ import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
 import { StatuslineWatcher, type StatuslineWatcherContext } from "./statusline-watcher.js";
 import { outboundHandlers, type OutboundContext } from "./outbound-handlers.js";
 import { handleWebRequest } from "./web-api.js";
+import { handleAgentRequest, type AgentEndpointContext } from "./agent-endpoint.js";
 
 import { getTmuxSession } from "./config.js";
 
@@ -54,7 +55,7 @@ export function resolveReplyThreadId(
   return instanceConfig?.topic_id != null ? String(instanceConfig.topic_id) : undefined;
 }
 
-export class FleetManager implements FleetContext, LifecycleContext, ArchiverContext, StatuslineWatcherContext, OutboundContext {
+export class FleetManager implements FleetContext, LifecycleContext, ArchiverContext, StatuslineWatcherContext, OutboundContext, AgentEndpointContext {
   private children: Map<string, import("node:child_process").ChildProcess> = new Map();
   readonly lifecycle: InstanceLifecycle;
   /** @deprecated Use lifecycle.daemons — kept for backward compat */
@@ -1073,6 +1074,68 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     ipc.send({ type: "fleet_description_response", fleetRequestId, result: { description } });
   }
 
+  // ── Agent CLI HTTP handlers ─────────────────────────────────────────
+
+  async handleScheduleCrudHttp(instance: string, op: string, args: Record<string, unknown>): Promise<unknown> {
+    if (!this.scheduler) return { error: "Scheduler not available" };
+    switch (op) {
+      case "create":
+        return this.scheduler.create({
+          cron: args.cron as string, message: args.message as string,
+          source: instance, target: (args.target as string) || instance,
+          reply_chat_id: "", reply_thread_id: null,
+          label: args.label as string | undefined,
+          timezone: args.timezone as string | undefined,
+        });
+      case "list": return this.scheduler.list(args.target as string | undefined);
+      case "update": return this.scheduler.update(args.id as string, args);
+      case "delete": this.scheduler.delete(args.id as string); return "ok";
+      default: return { error: `Unknown schedule op: ${op}` };
+    }
+  }
+
+  async handleDecisionCrudHttp(instance: string, op: string, args: Record<string, unknown>): Promise<unknown> {
+    if (!this.scheduler) return { error: "Scheduler not available" };
+    const db = this.scheduler.db;
+    const projectRoot = this.fleetConfig?.instances[instance]?.working_directory ?? "";
+    switch (op) {
+      case "post": return db.createDecision({ ...args, created_by: instance } as any);
+      case "list": return db.listDecisions(projectRoot, args as any);
+      case "update": return db.updateDecision(args.id as string, args as any);
+      default: return { error: `Unknown decision op: ${op}` };
+    }
+  }
+
+  async handleTaskCrudHttp(instance: string, args: Record<string, unknown>): Promise<unknown> {
+    if (!this.scheduler) return { error: "Scheduler not available" };
+    const db = this.scheduler.db;
+    const action = args.action as string;
+    switch (action) {
+      case "create": return db.createTask({ ...args, created_by: instance } as any);
+      case "list": return db.listTasks({ assignee: args.filter_assignee as string, status: args.filter_status as string });
+      case "claim": return db.claimTask(args.id as string, instance);
+      case "done": return db.completeTask(args.id as string, args.result as string | undefined);
+      case "update": return db.updateTask(args.id as string, args as any);
+      default: return { error: `Unknown task action: ${action}` };
+    }
+  }
+
+  async handleSetDisplayNameHttp(instance: string, name: string): Promise<unknown> {
+    if (!this.fleetConfig) return { error: "Fleet config not available" };
+    if (!name || name.length > 30) return { error: "Name must be 1-30 characters" };
+    this.fleetConfig.instances[instance].display_name = name;
+    this.saveFleetConfig();
+    return { display_name: name };
+  }
+
+  async handleSetDescriptionHttp(instance: string, description: string): Promise<unknown> {
+    if (!this.fleetConfig) return { error: "Fleet config not available" };
+    if (!description) return { error: "Description cannot be empty" };
+    this.fleetConfig.instances[instance].description = description;
+    this.saveFleetConfig();
+    return { description };
+  }
+
   private summarizeToolCall(tool: string, args: Record<string, unknown>): string {
     switch (tool) {
       case "send_to_instance": return `send_to_instance(${args.instance_name})`;
@@ -1214,6 +1277,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }
     if (this.fleetConfig.templates && Object.keys(this.fleetConfig.templates).length > 0) {
       toSave.templates = this.fleetConfig.templates;
+    }
+    if (this.fleetConfig.profiles && Object.keys(this.fleetConfig.profiles).length > 0) {
+      toSave.profiles = this.fleetConfig.profiles;
     }
     toSave.instances = {};
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
@@ -1358,6 +1424,12 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     for (const client of this.sseClients) {
       client.write(payload);
     }
+  }
+
+  listClaimedTasks(assignee: string): Array<{ id: string; title: string }> {
+    try {
+      return this.scheduler?.db.listTasks({ assignee, status: "claimed" }) ?? [];
+    } catch { return []; }
   }
 
   async sendHangNotification(instanceName: string): Promise<void> {
@@ -2079,6 +2151,12 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
             res.end(JSON.stringify({ error: `Restart failed: ${(err as Error).message}` }));
           }
         })();
+        return;
+      }
+
+      // ── Agent CLI endpoint ─────
+      if (req.url === "/agent" && req.method === "POST") {
+        handleAgentRequest(req, res, this as unknown as import("./agent-endpoint.js").AgentEndpointContext);
         return;
       }
 

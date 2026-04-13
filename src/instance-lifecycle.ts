@@ -37,6 +37,8 @@ export interface LifecycleContext {
   touchActivity(name: string): void;
   sendHangNotification(name: string): Promise<void>;
   notifyInstanceTopic(name: string, text: string): void;
+  /** List claimed tasks for an instance (from task board). Returns empty array if unavailable. */
+  listClaimedTasks(assignee: string): Array<{ id: string; title: string }>;
   webhookEmit(event: string, name: string, data?: Record<string, unknown>): void;
   checkModelFailover(name: string, fiveHourPct: number): void;
   startStatuslineWatcher(name: string): void;
@@ -85,6 +87,23 @@ export class InstanceLifecycle {
       hangDetector.on("hang", safeHandler(async () => {
         this.ctx.eventLog?.insert(name, "hang_detected", {});
         this.ctx.logger.warn({ name }, "Instance appears hung");
+
+        // Check if instance has claimed tasks — nudge it to continue
+        const claimedTasks = this.ctx.listClaimedTasks(name);
+        if (claimedTasks.length > 0) {
+          const task = claimedTasks[0];
+          this.ctx.eventLog?.insert(name, "idle_task_nudge", { taskId: task.id, taskTitle: task.title });
+          // Inject nudge message into the instance's CLI session
+          const ipc = this.ctx.instanceIpcClients.get(name);
+          if (ipc?.connected) {
+            ipc.send({
+              type: "fleet_inbound",
+              content: `[system] You have a claimed task: "${task.title}" (#${task.id}). Continue working on it, or use task(done) / task(update, status=blocked) to update status.`,
+              meta: { chat_id: "", thread_id: "", ts: new Date().toISOString() },
+            });
+          }
+        }
+
         await this.ctx.sendHangNotification(name);
         this.ctx.webhookEmit("hang", name);
       }, this.ctx.logger, `hangDetector[${name}]`));

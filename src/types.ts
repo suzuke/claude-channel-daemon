@@ -169,6 +169,16 @@ export interface TemplateInstanceDef {
   lightweight?: boolean;
   workflow?: string | false;
   tags?: string[];
+  /** Reference to a profile in fleet.yaml profiles section */
+  profile?: string;
+}
+
+export interface ProfileConfig {
+  backend?: string;
+  model?: string;
+  model_failover?: string[];
+  tool_set?: string;
+  lightweight?: boolean;
 }
 
 export interface FleetTemplate {
@@ -185,5 +195,6 @@ export interface FleetConfig {
   instances: Record<string, InstanceConfig>;
   teams?: Record<string, TeamConfig>;
   templates?: Record<string, FleetTemplate>;
+  profiles?: Record<string, ProfileConfig>;
   health_port?: number;
 }

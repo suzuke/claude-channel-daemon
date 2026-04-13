@@ -420,6 +420,20 @@ const deployTemplate: Handler = async (ctx, args, respond) => {
 
   try {
     for (const [role, instanceDef] of Object.entries(template.instances)) {
+      // Resolve profile: instance-level fields override profile defaults
+      if (instanceDef.profile) {
+        const profile = ctx.fleetConfig.profiles?.[instanceDef.profile];
+        if (!profile) {
+          throw new Error(`Profile "${instanceDef.profile}" not found for role "${role}". Available: ${Object.keys(ctx.fleetConfig.profiles ?? {}).join(", ") || "(none)"}`);
+        }
+        // Apply profile defaults only for fields not set on the instance
+        if (!instanceDef.backend && profile.backend) instanceDef.backend = profile.backend;
+        if (!instanceDef.model && profile.model) instanceDef.model = profile.model;
+        if (!instanceDef.model_failover && profile.model_failover) instanceDef.model_failover = profile.model_failover;
+        if (!instanceDef.tool_set && profile.tool_set) instanceDef.tool_set = profile.tool_set;
+        if (instanceDef.lightweight == null && profile.lightweight != null) instanceDef.lightweight = profile.lightweight;
+      }
+
       const topicName = `${deploymentName}-${role}`;
       const deploymentTags = [
         `deployment:${deploymentName}`,

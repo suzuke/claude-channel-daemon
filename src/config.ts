@@ -90,6 +90,7 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     instances?: Record<string, Partial<InstanceConfig>>;
     teams?: FleetConfig["teams"];
     templates?: Record<string, FleetTemplate>;
+    profiles?: FleetConfig["profiles"];
     health_port?: number;
   } | null;
 
@@ -134,6 +135,7 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     instances,
     teams: parsed.teams ?? {},
     templates,
+    profiles: parsed.profiles,
     health_port: parsed.health_port,
   };
 }
