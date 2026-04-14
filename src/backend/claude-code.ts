@@ -109,6 +109,9 @@ export class ClaudeCodeBackend implements CliBackend {
 
   getStartupDialogs(): StartupDialog[] {
     return [
+      // Session resume prompt must be checked BEFORE ready pattern, because ❯ in
+      // "❯ 1. Resume from summary" would falsely match the ready pattern /❯/.
+      { pattern: /Resume from summary \(recommended\)/, keys: ["Enter"], description: "Claude session resume prompt — auto-select 'Resume from summary'" },
       { pattern: /[❯›]\s*\d+\.\s*No/m, keys: ["Down", "Enter"], description: "Claude 'No, exit' confirmation — navigate to Yes" },
       { pattern: /I accept|I trust/i, keys: ["Enter"], description: "Claude 'Yes, I accept' trust dialog" },
       { pattern: /Resume Session/i, keys: ["Escape"], description: "Claude resume session picker — start fresh" },
