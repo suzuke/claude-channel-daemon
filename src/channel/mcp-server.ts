@@ -14,7 +14,8 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { basename } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { IpcClient } from "./ipc-bridge.js";
 import { TOOLS } from "./mcp-tools.js";
 import { buildFleetInstructions } from "../instructions.js";
@@ -259,12 +260,36 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
 
-  // Detect parent death: when the CLI exits, stdin closes, transport shuts down.
-  // StdioServerTransport handles stdin lifecycle internally — no manual resume() needed.
+  // Detect parent death: StdioServerTransport only listens for 'data'/'error'
+  // on stdin — it never detects EOF. mcp.onclose only fires on explicit
+  // transport.close(), NOT on stdin EOF. So we need a direct stdin listener
+  // as the primary parent-death detection mechanism.
   mcp.onclose = () => {
-    process.stderr.write("agend: MCP transport closed (parent exited) — exiting\n");
+    process.stderr.write("agend: MCP transport closed — exiting\n");
     process.exit(0);
   };
+  process.stdin.on("end", () => {
+    process.stderr.write("agend: stdin EOF (parent exited) — exiting\n");
+    process.exit(0);
+  });
+  process.stdin.on("close", () => {
+    process.stderr.write("agend: stdin closed (parent exited) — exiting\n");
+    process.exit(0);
+  });
+  process.stdin.on("error", () => {
+    process.stderr.write("agend: stdin error (parent exited) — exiting\n");
+    process.exit(0);
+  });
+
+  // Write PID file so daemon can kill orphan MCP servers on crash respawn.
+  // Derived from AGEND_SOCKET_PATH (e.g. ~/.agend/instances/foo/channel.sock).
+  const pidFile = join(dirname(SOCKET_PATH), "channel.mcp.pid");
+  writeFileSync(pidFile, String(process.pid));
+  process.on("exit", () => {
+    try {
+      if (readFileSync(pidFile, "utf-8").trim() === String(process.pid)) unlinkSync(pidFile);
+    } catch { /* already cleaned up */ }
+  });
 
   // Connect to daemon IPC (will auto-reconnect on disconnect)
   await connectIpc();

@@ -424,6 +424,14 @@ export class Daemon extends EventEmitter {
         try {
           this.saveSessionId();
           this.transcriptMonitor?.resetOffset();
+          // Kill orphan MCP server from the crashed CLI session.
+          // MCP server writes its PID to channel.mcp.pid on startup.
+          try {
+            const pidFile = join(this.instanceDir, "channel.mcp.pid");
+            const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+            process.kill(pid, "SIGTERM");
+            this.logger.info({ pid }, "Killed orphan MCP server");
+          } catch { /* no pid file or process already dead */ }
           // Kill any same-name windows before respawn to prevent orphans.
           // Wrapped in try-catch: if tmux server is dead, listWindows throws —
           // must not block spawnClaudeWindow (which calls ensureSession).
