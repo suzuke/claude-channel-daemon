@@ -83,6 +83,15 @@ export class KiroBackend implements CliBackend {
     return /All tools are now trusted|Credits:.*Time:/m;
   }
 
+  getStartupDialogs(): StartupDialog[] {
+    return [
+      // --trust-all-tools shows a TUI confirmation: "❯ No, exit" / "Yes, I accept"
+      // Cursor defaults to "No, exit" — press Down to select "Yes, I accept", then Enter.
+      { pattern: /❯\s*No, exit/m, keys: ["Down", "Enter"], description: "Kiro trust-all-tools confirmation — select Yes" },
+      { pattern: /Yes, I accept/i, keys: ["Enter"], description: "Kiro trust-all-tools — confirm accept" },
+    ];
+  }
+
   getErrorPatterns(): ErrorPattern[] {
     return [
       { pattern: /rate.?limit|429|too many requests/i, type: "rate_limit", action: "failover", message: "Rate limit reached" },
