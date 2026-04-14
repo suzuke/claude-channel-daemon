@@ -73,6 +73,7 @@ export class Daemon extends EventEmitter {
   private recentToolActivity: string[] = [];
   private snapshotConsumed = false;
   private pasteLock: Promise<void> = Promise.resolve();
+  private pendingInstructionsUpdate: string | undefined;
   // PTY error pattern monitoring
   private errorMonitorTimer: ReturnType<typeof setInterval> | null = null;
   private errorWaitingForRecovery = false; // true = error detected, waiting for ready pattern
@@ -700,6 +701,10 @@ export class Daemon extends EventEmitter {
       this.logger.warn("Cannot push channel message: tmux not running");
       return;
     }
+    if (this.pendingInstructionsUpdate) {
+      writeFileSync(join(this.instanceDir, "prev-instructions"), this.pendingInstructionsUpdate);
+      this.pendingInstructionsUpdate = undefined;
+    }
     this.hangDetector?.recordInbound();
     // v3: record user messages for rotation snapshot
     this.recordRecentUserMessage(content, meta);
@@ -1084,6 +1089,10 @@ export class Daemon extends EventEmitter {
     if (this.snapshotConsumed) return;
     const snapshot = this.buildSnapshotPrompt();
     if (!snapshot || !this.tmux) return;
+    if (this.pendingInstructionsUpdate) {
+      writeFileSync(join(this.instanceDir, "prev-instructions"), this.pendingInstructionsUpdate);
+      this.pendingInstructionsUpdate = undefined;
+    }
     // Small delay to let the CLI fully render its ready prompt
     await new Promise(r => setTimeout(r, 1_000));
     try {
@@ -1150,11 +1159,13 @@ export class Daemon extends EventEmitter {
       const prevFile = join(this.instanceDir, "prev-instructions");
       let prev = "";
       try { prev = readFileSync(prevFile, "utf-8"); } catch {}
-      if (prev && prev !== backendConfig.instructions) {
-        this.logger.info("Instructions changed — skipping resume to reload");
-        backendConfig.skipResume = true;
+      if (prev !== backendConfig.instructions) {
+        if (prev) {
+          this.logger.info("Instructions changed — skipping resume to reload");
+          backendConfig.skipResume = true;
+        }
+        this.pendingInstructionsUpdate = backendConfig.instructions;
       }
-      writeFileSync(prevFile, backendConfig.instructions);
     }
 
     this.backend!.writeConfig(backendConfig);
