@@ -80,7 +80,8 @@ export class KiroBackend implements CliBackend {
   }
 
   getReadyPattern(): RegExp {
-    return /All tools are now trusted|Credits:.*Time:/m;
+    // Kiro 1.x: "All tools are now trusted" / Kiro 2.x: "Trust All Tools active"
+    return /All tools are now trusted|Trust All Tools active|Credits:.*Time:|ask a question or describe a task/m;
   }
 
   getErrorPatterns(): ErrorPattern[] {

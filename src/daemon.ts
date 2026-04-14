@@ -1242,8 +1242,9 @@ export class Daemon extends EventEmitter {
         // CLI is ready (pattern defined by each backend)
         if (this.backend!.getReadyPattern().test(pane)) return true;
 
-        // Fatal: command not found
-        if (/command not found|not found/i.test(pane)) return false;
+        // Fatal: command not found (must match full phrase to avoid false positives
+        // like Kiro's "agent X not found, using default")
+        if (/command not found|: not found$/m.test(pane)) return false;
       } catch {
         return false;
       }
