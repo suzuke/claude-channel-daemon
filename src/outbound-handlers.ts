@@ -126,7 +126,11 @@ const sendToInstance: Handler = (ctx, args, respond, meta) => {
   const taskSummary = ipcMeta.task_summary || (message ?? "").slice(0, 200);
   ctx.eventLog?.logActivity("message", senderLabel, taskSummary, targetName, ipcMeta.request_kind);
   ctx.queueMirrorMessage?.(`${senderLabel} → ${targetName}: ${(message ?? "").slice(0, 500)}${(message ?? "").length > 500 ? " […]" : ""}`);
-  respond({ sent: true, target: targetName, correlation_id: correlationId });
+  respond({ sent: true, target: targetName, correlation_id: correlationId,
+    ...(ctx.lifecycle.daemons.get(targetInstanceName)?.isErrorState && {
+      warning: `${targetName} is currently in error state (rate-limited or paused). Message delivered but may not be processed.`,
+    }),
+  });
 };
 
 const listInstances: Handler = (ctx, args, respond, meta) => {

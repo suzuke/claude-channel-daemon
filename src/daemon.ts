@@ -79,7 +79,12 @@ export class Daemon extends EventEmitter {
   // PTY error pattern monitoring
   private errorMonitorTimer: ReturnType<typeof setInterval> | null = null;
   private errorWaitingForRecovery = false; // true = error detected, waiting for ready pattern
-  private errorDetectedAt = 0; // timestamp when error was first detected
+  private errorDetectedAt = 0;
+
+  /** Whether this instance is in an error state (rate-limited, paused, or crash loop). */
+  get isErrorState(): boolean {
+    return this.errorWaitingForRecovery || this.healthCheckPaused || Daemon.tmuxServerPaused;
+  }
   private lastFailoverAt = 0; // cooldown: prevent repeated failover triggers
   private static FAILOVER_COOLDOWN_MS = 5 * 60_000; // 5 minutes
   private lastErrorNotifiedAt = new Map<string, number>(); // per-type cooldown for all actions
