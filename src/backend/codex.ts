@@ -92,6 +92,7 @@ export class CodexBackend implements CliBackend {
       { pattern: /authentication|401 Unauthorized/i, type: "auth_error", action: "pause", message: "OpenAI authentication error" },
       { pattern: /insufficient_quota|billing/i, type: "quota", action: "pause", message: "OpenAI quota exceeded" },
       { pattern: /you've hit your usage limit/i, type: "quota", action: "pause", message: "Codex usage limit reached — upgrade plan required" },
+      { pattern: /less than \d+% of your weekly limit/i, type: "quota", action: "notify", message: "Codex weekly limit running low" },
     ];
   }
 
