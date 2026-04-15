@@ -34,10 +34,17 @@ const SLOW_TOOLS = new Set(["start_instance", "create_instance", "delete_instanc
 // Safety nets
 // ---------------------------------------------------------------------------
 
-// Parent death detection moved to main() via mcp.onclose — see below.
-// DO NOT call process.stdin.resume() here. It switches stdin to flowing mode
-// before StdioServerTransport starts reading, causing data loss (the CLI's
-// initialize request gets discarded, breaking the MCP handshake).
+// Parent death detection: primary mechanism is process.ppid polling (see main).
+// On macOS, libuv/kqueue does not reliably emit stdin 'end' when the parent
+// dies — the broken pipe causes a CPU spin instead. ppid polling is the only
+// cross-platform reliable method. stdin listeners are kept as a fast path
+// for Linux (where epoll may correctly emit EOF).
+
+const PARENT_PID = process.ppid;
+
+function isOrphaned(): boolean {
+  return process.ppid === 1 || process.ppid !== PARENT_PID;
+}
 
 process.on("unhandledRejection", (err) => {
   process.stderr.write(`agend: unhandled rejection: ${err}\n`);
@@ -121,6 +128,10 @@ async function connectIpc(): Promise<void> {
 
 function scheduleReconnect(): void {
   if (reconnecting) return;
+  if (isOrphaned()) {
+    process.stderr.write("agend: orphaned (parent died) during reconnect — exiting\n");
+    process.exit(0);
+  }
   reconnectAttempts++;
   if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
     process.stderr.write(`agend: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) exceeded — exiting\n`);
@@ -260,10 +271,11 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
 
-  // Detect parent death: StdioServerTransport only listens for 'data'/'error'
-  // on stdin — it never detects EOF. mcp.onclose only fires on explicit
-  // transport.close(), NOT on stdin EOF. So we need a direct stdin listener
-  // as the primary parent-death detection mechanism.
+  // Parent death detection.
+  // Primary: ppid polling — works on all platforms, immune to libuv/kqueue bugs.
+  // Secondary: stdin end/close/error — may fire faster on Linux (epoll handles
+  // broken pipes correctly), but fails on macOS (libuv CPU spin, no EOF emit).
+  // mcp.onclose only fires on explicit transport.close(), kept for completeness.
   mcp.onclose = () => {
     process.stderr.write("agend: MCP transport closed — exiting\n");
     process.exit(0);
@@ -281,6 +293,14 @@ async function main(): Promise<void> {
     process.exit(0);
   });
 
+  // Primary orphan detection: poll parent PID every 5 seconds.
+  setInterval(() => {
+    if (isOrphaned()) {
+      process.stderr.write("agend: parent process died (ppid changed) — exiting\n");
+      process.exit(0);
+    }
+  }, 5_000);
+
   // Write PID file so daemon can kill orphan MCP servers on crash respawn.
   // Derived from AGEND_SOCKET_PATH (e.g. ~/.agend/instances/foo/channel.sock).
   const pidFile = join(dirname(SOCKET_PATH), "channel.mcp.pid");
@@ -293,6 +313,12 @@ async function main(): Promise<void> {
 
   // Connect to daemon IPC (will auto-reconnect on disconnect)
   await connectIpc();
+
+  // Immediate orphan check — don't let an orphan announce itself to the daemon
+  if (isOrphaned()) {
+    process.stderr.write("agend: orphaned before ready — exiting\n");
+    process.exit(0);
+  }
 
   process.stderr.write("agend: MCP server running\n");
 }

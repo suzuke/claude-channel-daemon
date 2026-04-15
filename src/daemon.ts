@@ -51,11 +51,14 @@ export class Daemon extends EventEmitter {
   // Session identity: map IPC socket → sessionName (from mcp_ready)
   private socketSessionNames = new Map<import("node:net").Socket, string>();
   // Crash recovery
+  private static tmuxServerCrashTimestamps: number[] = [];
+  private static tmuxServerPaused = false;
+  private static tmuxServerRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private healthCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private crashCount = 0;
   private lastCrashAt = 0;
   private lastSpawnAt = 0;
-  private rapidCrashCount = 0;
+  private crashTimestamps: number[] = [];
   private healthCheckPaused = false;
   private spawning = false;
   private skipResume = false;
@@ -316,7 +319,7 @@ export class Daemon extends EventEmitter {
 
     const scheduleNext = () => {
       this.healthCheckTimer = setTimeout(async () => {
-        if (!this.tmux || this.spawning || this.healthCheckPaused) {
+        if (!this.tmux || this.spawning || this.healthCheckPaused || Daemon.tmuxServerPaused) {
           scheduleNext();
           return;
         }
@@ -347,6 +350,25 @@ export class Daemon extends EventEmitter {
           if (!serverAlive) {
             crashType = "server";
             this.logger.error("tmux server died — all windows lost");
+
+            // Fleet-level circuit breaker: pause all instances on repeated tmux server crashes
+            Daemon.tmuxServerCrashTimestamps.push(Date.now());
+            const cutoff = Date.now() - 5 * 60_000;
+            Daemon.tmuxServerCrashTimestamps = Daemon.tmuxServerCrashTimestamps.filter(t => t > cutoff);
+            if (Daemon.tmuxServerCrashTimestamps.length >= 2 && !Daemon.tmuxServerPaused) {
+              Daemon.tmuxServerPaused = true;
+              this.logger.error("Fleet-level tmux server circuit breaker triggered — pausing all respawns for 30s");
+              this.emit("tmux_server_crash", this.name);
+              if (!Daemon.tmuxServerRecoveryTimer) {
+                Daemon.tmuxServerRecoveryTimer = setTimeout(() => {
+                  Daemon.tmuxServerRecoveryTimer = null;
+                  Daemon.tmuxServerPaused = false;
+                }, 30_000);
+              }
+              scheduleNext();
+              return;
+            }
+
             await new Promise(r => setTimeout(r, 2_000)); // let session stabilize
           } else {
             this.logger.warn({ exitCode }, "Claude window died (tmux server alive)");
@@ -374,23 +396,21 @@ export class Daemon extends EventEmitter {
         // Append to crash history
         this.appendCrashHistory({ exitCode, lastOutput, crashType });
 
-        // Detect rapid crash: window died within 60s of spawn
-        if (this.lastSpawnAt > 0 && Date.now() - this.lastSpawnAt < 60_000) {
-          this.rapidCrashCount++;
-        } else {
-          this.rapidCrashCount = 0;
-        }
+        // Detect rapid crash: sliding window — 3+ crashes in 5 minutes
+        this.crashTimestamps.push(Date.now());
+        const crashWindowMs = 5 * 60_000;
+        this.crashTimestamps = this.crashTimestamps.filter(t => t > Date.now() - crashWindowMs);
 
-        if (this.rapidCrashCount >= 3) {
+        if (this.crashTimestamps.length >= 3) {
           this.healthCheckPaused = true;
           this.logger.error(
-            { rapidCrashCount: this.rapidCrashCount },
-            "Claude keeps crashing shortly after launch (possible rate limit) — pausing respawn",
+            { crashesInWindow: this.crashTimestamps.length },
+            "3+ crashes in 5 minutes — pausing respawn",
           );
           // P1: Persist crash state so next process restart skips resume
           try {
             writeFileSync(join(this.instanceDir, "crash-state.json"), JSON.stringify({
-              rapidCrashCount: this.rapidCrashCount,
+              crashesInWindow: this.crashTimestamps.length,
               lastCrashAt: Date.now(),
               resumeDisabled: true,
             }));
@@ -1119,10 +1139,12 @@ export class Daemon extends EventEmitter {
       const sidFile = join(this.instanceDir, "session-id");
       try { unlinkSync(sidFile); } catch { /* may not exist */ }
       this.skipResume = true;
+      await this.killProcessTree();
       await this.tmux!.killWindow();
 
       const retryAlive = await this.trySpawn();
       if (!retryAlive) {
+        await this.killProcessTree();
         await this.tmux!.killWindow();
         throw new Error("CLI failed to start after retry");
       }
@@ -1136,6 +1158,18 @@ export class Daemon extends EventEmitter {
       this.spawning = false;
     }
     return resumedSuccessfully;
+  }
+
+  /** Kill the entire process tree of the current tmux pane (CLI + MCP server). */
+  private async killProcessTree(): Promise<void> {
+    if (!this.tmux) return;
+    try {
+      const pid = await TmuxManager.getPanePid(this.tmuxSessionName, this.tmux.getWindowId());
+      if (pid) {
+        process.kill(-pid, "SIGTERM");
+        this.logger.debug({ pid }, "Killed process group");
+      }
+    } catch { /* process group may not exist or already dead */ }
   }
 
   /**
@@ -1385,7 +1419,7 @@ export class Daemon extends EventEmitter {
         exitCode: data.exitCode,
         lastOutput: data.lastOutput,
         crashCount: this.crashCount + 1,
-        rapidCrashCount: this.rapidCrashCount,
+        crashesInWindow: this.crashTimestamps.length,
       };
       appendFileSync(historyPath, JSON.stringify(entry) + "\n");
 
