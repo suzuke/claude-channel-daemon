@@ -6,9 +6,197 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.21.5] - 2026-04-15
+
 ### Added
-- `replace_instance` MCP tool — atomically replace an instance with a fresh one, collecting handover context from the daemon's ring buffer and injecting it into the new instance via standard message delivery
-- Communication efficiency rules in workflow template — no pleasantries, silence = agreement, batch points, one round-trip for reviews
+- **Error state warning on `send_to_instance`** — when the target instance is rate-limited, paused, or in crash loop, the sender receives a warning in the tool response (#24)
+- **Codex weekly limit detection** — detects "less than N% of your weekly limit" warning and notifies via Telegram (action: notify)
+
+### Fixed
+- **MCP server orphan detection via ppid polling** — primary orphan detection now uses `process.ppid` polling (5s interval) instead of stdin EOF, which fails on macOS due to a libuv/kqueue bug that causes CPU spin instead of emitting `'end'`
+- **Fleet-level tmux server circuit breaker** — 2+ tmux server crashes in 5 minutes pauses all instance respawns for 30s, preventing thundering herd
+- **Process tree kill on spawn failure** — `killProcessTree()` sends SIGTERM to the entire process group (CLI + MCP server) before killing the tmux window
+- **Sliding window crash detection** — replaced `rapidCrashCount` (broken by backoff delays > 60s) with `crashTimestamps` sliding window: 3+ crashes in 5 minutes triggers pause
+
+## [1.21.4] - 2026-04-14
+
+### Fixed
+- **MCP server orphan cleanup on crash respawn** — daemon reads `channel.mcp.pid` and kills orphan MCP server before spawning new CLI
+- **stdin EOF detection for MCP server** — added `process.stdin.on('end'/'close'/'error')` listeners and PID file mechanism (later superseded by ppid polling in v1.21.5)
+
+## [1.21.3] - 2026-04-14
+
+### Fixed
+- E2E: mock CLI crash should exit with code 1, not 0
+
+## [1.21.2] - 2026-04-13
+
+### Fixed
+- **Delay writing prev-instructions until session established** — prevents change detection from failing on retry when first spawn attempt fails
+- E2E: update workflow-template test assertions for new heading behavior
+
+## [1.21.1] - 2026-04-13
+
+### Fixed
+- **Kiro CLI 2.0.0 support** — updated ready pattern and startup dialogs for new TUI; fixed false "not found" match
+
+## [1.21.0] - 2026-04-13
+
+### Added
+- **CLI mode** — `agent_mode: cli` config switches from MCP tools to HTTP-based agent CLI endpoint
+- **Agent CLI endpoint** — HTTP-based alternative to MCP tools for backends that don't support MCP well
+- **Idle task nudge** — automatically nudges idle instances with pending tasks from the task board
+
+### Fixed
+- Kiro: auto-dismiss trust-all-tools TUI confirmation on startup
+- OpenCode: don't add `--continue` when skipResume is true
+
+## [1.20.4] - 2026-04-12
+
+### Added
+- **Auto-dismiss interactive prompts** — backend-defined startup and runtime dialogs are automatically dismissed (trust folders, resume pickers, rate limit model switches)
+- **systemPrompt file: paths** — supports comma-separated `file:` paths and YAML arrays for multi-file prompt modularization
+
+### Fixed
+- Claude Code: add session resume prompt to startup dialogs
+- Instructions: avoid empty Development Workflow heading when workflow content has its own headers
+- Handle EADDRINUSE on health server — kill old process and retry
+- Discord onboarding: 10 UX pain points fixed
+- Kiro: use single-quoted env exports in MCP wrapper to prevent backtick/dollar interpretation
+
+## [1.20.2] - 2026-04-11
+
+### Added
+- **`agend health`** — fleet health diagnostics via HTTP endpoint (`/health`, `/status`)
+- **Communication efficiency rules** in workflow template — structured task flow, silence = agreement, batch points
+
+### Fixed
+- OpenCode skipResume not honored + restart notification mismatch
+- Safe worktree cleanup when directory is not a valid git worktree
+
+### Changed
+- Communication protocol refactored — reduce ack spam with structured task flow
+
+## [1.20.0] - 2026-04-10
+
+### Added
+- **`replace_instance` tool** — atomically replace an instance with a fresh one, collecting handover context from the daemon's ring buffer
+- **ContextGuardian simplified** — removed max_age timer, state machine, and all restart triggers. Pure monitoring only.
+
+### Fixed
+- Skip snapshot injection when `--resume` succeeds on crash recovery
+- Clean stale MCP entries on instance removal + writeConfig
+
+## [1.19.1] - 2026-04-10
+
+### Fixed
+- **3 UX pain points** — instructions reload on restart, config reload on single instance restart, Web UI create instance missing fields
+
+## [1.19.0] - 2026-04-09
+
+### Added
+- **Fleet templates** — `deploy_template` / `teardown_deployment` / `list_deployments` for reusable fleet configurations
+- **Configurable staggered startup** — `startup.concurrency` and `startup.stagger_delay_ms` in fleet.yaml defaults
+- **Backend column** in fleet status and MCP `list_instances`
+
+### Changed
+- `agend logs` consolidated — reads fleet.log directly
+- `agend fleet status` and `agend ls` merged into single command
+
+### Fixed
+- Clean up orphaned tmux windows on fleet startup
+- Prevent quit command race condition during fleet stopAll
+
+## [1.18.0] - 2026-04-08
+
+### Added
+- **Unified additive system prompt injection** — all 5 backends now use `--append-system-prompt-file` (Claude Code), steering files (Kiro), or equivalent. Fleet instructions no longer override built-in prompts.
+
+### Fixed
+- Always kill tmux window on instance stop/delete
+- OpenCode uses "instructions" not "contextPaths" in opencode.json
+
+## [1.17.5] - 2026-04-08
+
+### Added
+- **Crash output capture** — captures tmux pane content on crash for diagnostics
+- **tmux server crash detection** — distinguishes server-level crash from single window crash
+
+### Fixed
+- Kiro MCP env isolation — wrapper script approach replaces process.env pollution
+- Kiro MCP transport handshake failure — stdin race condition
+- Graceful shutdown via quit command before killing tmux window
+- Distinguish normal exit (code 0) vs crash by exit code in health check
+- Pre-trust codex workspace + add trust dialog pattern
+- Fleet start `--instance` delegates to running daemon via HTTP API
+
+## [1.17.3] - 2026-04-07
+
+### Added
+- **Per-instance memory usage** in `agend ls`
+- **Channel-aware replies** — pass source in inbound meta + fix format passthrough
+
+### Fixed
+- Codex MCP shell escaping + stale snapshot injection on restart
+
+## [1.17.1] - 2026-04-07
+
+### Added
+- **tmux socket isolation** for custom AGEND_HOME — prevents conflicts between multiple AgEnD installations
+
+## [1.17.0] - 2026-04-07
+
+### Added
+- **`AGEND_HOME` env var** — configurable data directory (default: `~/.agend`)
+
+### Fixed
+- Kiro CLI crash loop on restart — skipResume + tmux cleanup
+
+## [1.16.2] - 2026-04-07
+
+### Fixed
+- Crash respawn orphan cleanup must not block spawnClaudeWindow
+
+## [1.16.1] - 2026-04-07
+
+### Fixed
+- Prevent tmux server death during concurrent context rotation
+- P2 code review improvements
+
+## [1.16.0] - 2026-04-07
+
+### Fixed
+- P0+P1 code review findings (security, error handling, edge cases)
+
+## [1.15.8] - 2026-04-06
+
+### Fixed
+- Codex uses `resume --last` (per-CWD scoped, no SQLite dependency)
+
+## [1.15.6] - 2026-04-06
+
+### Fixed
+- Kiro resume uses boolean `--resume` flag
+
+## [1.15.5] - 2026-04-06
+
+### Fixed
+- Error monitor scans only after last prompt marker (reduces false positives)
+
+## [1.15.3] - 2026-04-06
+
+### Fixed
+- stop() cleanup + IPC reconnect on restart (#14, #12)
+
+## [1.15.1] - 2026-04-06
+
+### Added
+- **Auto-inject active decisions** into MCP instructions via env var
+- `/update` topic command for refreshing instance configuration
+
+## [1.15.0] - 2026-04-06
+
+### Added
 - Webhook notifications for fleet events (rotation, hang, cost alerts)
 - HTTP health endpoint (`/health`, `/status`) for external monitoring
 - Structured handover template with validation and retry on context rotation
@@ -17,11 +205,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Filter out Telegram service messages (topic rename, pin, etc.) to save tokens
 
 ### Changed
-- **ContextGuardian simplified to pure monitoring** — removed max_age timer, state machine (NORMAL/RESTARTING/GRACE), and all restart triggers. All CLI backends (Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI) have built-in auto-compact that handles context limits internally.
-- **Crash recovery tries --resume first** — on crash respawn, attempts `--resume` to restore full conversation history before falling back to fresh session + snapshot injection. Saves context when resume succeeds.
+- **Crash recovery tries --resume first** — on crash respawn, attempts `--resume` to restore full conversation history before falling back to fresh session + snapshot injection
 
 ### Fixed
-- Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
+- Minimal `claude-settings.json` — only AgEnD MCP tools in allow list, no longer overrides user's global permission settings
 
 ## [1.14.0] - 2026-04-07
 

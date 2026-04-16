@@ -26,9 +26,26 @@ Watches Claude's status line JSON for context usage metrics (used for dashboard 
 When a CLI process crashes, the daemon's health check detects the dead tmux window and:
 
 1. **Snapshot** — collects recent user messages, tool activity, and statusline data into `rotation-state.json`
-2. **Resume attempt** — tries `--resume` to restore the full conversation history
-3. **Fallback** — if resume fails, spawns a fresh session and injects the snapshot as context
-4. **Backoff** — exponential backoff on repeated crashes, pauses after 3 rapid crashes
+2. **Process cleanup** — kills the entire process tree (CLI + MCP server) via process group signal, and kills any orphan MCP server via PID file
+3. **Resume attempt** — tries `--resume` to restore the full conversation history
+4. **Fallback** — if resume fails, spawns a fresh session and injects the snapshot as context
+5. **Backoff** — exponential backoff on repeated crashes; 3+ crashes in a 5-minute sliding window pauses respawn
+
+### Fleet-level circuit breaker
+
+When the tmux server itself crashes (not just a single window), all instances lose their windows simultaneously. The fleet-level circuit breaker detects this:
+
+- 2+ tmux server crashes in 5 minutes → pauses all instance respawns for 30 seconds
+- Prevents thundering herd where all instances try to respawn at once
+- Auto-recovers after the pause period
+
+### MCP server orphan prevention
+
+When a CLI process dies, its MCP server child process should exit too. Three layers of protection:
+
+1. **ppid polling** (primary) — MCP server polls `process.ppid` every 5 seconds. If reparented to PID 1 (parent died), exits immediately. Works on all platforms, immune to macOS libuv/kqueue bugs.
+2. **stdin EOF listeners** (secondary) — listens for stdin `end`/`close`/`error` events. Works on Linux; unreliable on macOS due to libuv CPU spin on broken pipes.
+3. **PID file kill** (daemon-side) — MCP server writes its PID to `channel.mcp.pid`. On crash respawn, daemon reads the file and SIGTERMs the orphan before spawning a new CLI.
 
 ## Instance replacement
 
@@ -303,10 +320,10 @@ Connect your fleet to Discord instead of (or alongside) Telegram.
 Community adapters can be installed via npm and loaded automatically:
 
 ```bash
-npm install ccd-adapter-slack
+npm install agend-plugin-slack
 ```
 
-The daemon discovers adapters matching the `ccd-adapter-*` naming convention. Channel types are exported from the package entry point for adapter authors.
+The daemon discovers adapters matching the `agend-plugin-*` or `agend-adapter-*` naming convention. Channel types are exported from the package entry point for adapter authors.
 
 ## Kiro CLI backend
 
@@ -403,3 +420,75 @@ When auto-creating the General topic instance, AgEnD writes the correct instruct
 ## Builtin text standardization
 
 All system-generated text (schedule notifications, voice message labels, general instructions, fleet notifications) is now in English. Previously some messages were in Chinese.
+
+## AGEND_HOME — configurable data directory
+
+Set `AGEND_HOME` environment variable to change the data directory (default: `~/.agend`). Useful for running multiple isolated AgEnD installations. Each AGEND_HOME gets its own tmux socket to prevent conflicts.
+
+## Fleet templates
+
+Define reusable fleet configurations in `fleet.yaml` under the `templates` section. Deploy a template to create multiple instances and a team in one operation:
+
+- `deploy_template` — creates instances (each with its own git worktree) and optionally a team
+- `teardown_deployment` — stops and deletes all instances and team from a deployment
+- `list_deployments` — shows active deployments with instance status
+
+## Unified additive system prompt
+
+Fleet instructions are injected additively — they don't override the CLI's built-in system prompt. Each backend uses its native mechanism:
+
+- Claude Code: `--append-system-prompt-file`
+- Kiro CLI: `.kiro/steering/` directory
+- Gemini CLI: `GEMINI.md` in working directory
+- Codex: `AGENTS.md` in working directory
+- OpenCode: MCP instructions
+
+## Auto-dismiss interactive prompts
+
+Backend-defined startup and runtime dialogs are automatically dismissed without human intervention:
+
+- Trust folder confirmations
+- Resume session pickers
+- Rate limit model switch prompts (Codex)
+- Permission bypass confirmations
+
+Each backend defines its own dialog patterns and key sequences in `getStartupDialogs()` and `getRuntimeDialogs()`.
+
+## CLI mode (agent_mode)
+
+Alternative to MCP tools for backends that don't support MCP well. Set `agent_mode: cli` in fleet.yaml to use an HTTP-based agent CLI endpoint instead of MCP server. The agent CLI provides the same fleet tools via command-line HTTP calls.
+
+## Error state warning
+
+When `send_to_instance`, `delegate_task`, or `request_information` targets an instance that is rate-limited, paused, or in crash loop, the sender receives a warning in the tool response:
+
+```json
+{ "sent": true, "warning": "instance-name is currently in error state..." }
+```
+
+The message is still delivered — the warning is advisory, letting the sender decide whether to retry or escalate.
+
+## systemPrompt file paths
+
+The `systemPrompt` field in fleet.yaml supports a `file:` prefix to load content from a file:
+
+```yaml
+instances:
+  my-project:
+    systemPrompt: "file:prompts/role.md"
+```
+
+The file path is resolved relative to the working directory. If the file doesn't exist, the prompt is treated as empty.
+
+## Staggered startup
+
+Configure parallel instance startup with concurrency limits:
+
+```yaml
+defaults:
+  startup:
+    concurrency: 3        # max instances starting simultaneously
+    stagger_delay_ms: 2000 # delay between groups
+```
+
+Instances sharing the same working directory are serialized within a group to avoid config file races.

@@ -26,7 +26,7 @@ AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a comma
 |---|---|
 | Close the terminal, agent goes offline | Runs as a system service — survives reboots |
 | One terminal = one project | One bot, unlimited projects running in parallel |
-| Long-running sessions accumulate stale context | Auto-rotates sessions by max age to stay fresh |
+| Long-running sessions accumulate stale context | CLI auto-compact + crash recovery with context snapshots |
 | No idea what your agents are doing overnight | Daily cost reports + hang detection alerts |
 | Agents work in silos, can't coordinate | Peer-to-peer collaboration via MCP tools |
 | Runaway costs from unattended sessions | Per-instance daily spending limits with auto-pause |
@@ -54,6 +54,10 @@ AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a comma
 🖥️ **Web Dashboard** — Live fleet monitoring in the browser with SSE updates and integrated chat UI.
 
 🔌 **Extensible** — Discord adapter, webhook notifications, health endpoint, external session support via IPC.
+
+👥 **Teams & Task Board** — Named groups for targeted broadcasting. Shared task board for multi-step work tracking across instances.
+
+📋 **Fleet Templates** — Define reusable fleet configurations. Deploy multi-instance setups with one command, each with its own git worktree.
 
 ## Quick Start
 
