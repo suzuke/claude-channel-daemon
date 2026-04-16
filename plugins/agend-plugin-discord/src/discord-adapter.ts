@@ -148,17 +148,23 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
     });
 
     // Handle button interactions
+    // Trust boundary: deferUpdate() can throw DiscordAPIError[10062] if the
+    // interaction expires (>3s). Catch to prevent crashing the entire daemon.
     this.client.on("interactionCreate", async (interaction: Interaction) => {
-      if (!interaction.isButton()) return;
+      try {
+        if (!interaction.isButton()) return;
 
-      await interaction.deferUpdate();
+        await interaction.deferUpdate();
 
-      this.emit("callback_query", {
-        callbackData: interaction.customId,
-        chatId: this.guildId,
-        threadId: interaction.channelId,
-        messageId: interaction.message.id,
-      });
+        this.emit("callback_query", {
+          callbackData: interaction.customId,
+          chatId: this.guildId,
+          threadId: interaction.channelId,
+          messageId: interaction.message.id,
+        });
+      } catch (err) {
+        console.warn(`[discord] interactionCreate error (${(err as Error).message})`);
+      }
     });
 
     // Handle channel deletion (equivalent to topic_closed)
