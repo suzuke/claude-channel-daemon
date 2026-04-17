@@ -13,7 +13,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, totalmem, freemem } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, execSync, execFileSync } from "node:child_process";
 import { getAgendHome, getTmuxSocketName } from "./paths.js";
@@ -1458,6 +1458,11 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
         actStr
       );
     }
+
+    // System memory footer
+    const totalGB = totalmem() / (1024 ** 3);
+    const usedGB = (totalmem() - freemem()) / (1024 ** 3);
+    console.log(`\nSystem Memory: ${usedGB.toFixed(1)} / ${totalGB.toFixed(1)} GB`);
 }
 
 program
