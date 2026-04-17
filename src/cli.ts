@@ -1391,7 +1391,7 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
       if (context == null) {
         try {
           const pane = execFileSync("tmux", tmuxArgs([
-            "capture-pane", "-t", `agend:${name}`, "-p"
+            "capture-pane", "-t", `${sessionName}:${name}`, "-p"
           ]), { encoding: "utf-8", timeout: 2000 });
           const m = pane.match(/(\d+)%\s*!>\s*$/m);
           if (m) context = parseInt(m[1], 10);
