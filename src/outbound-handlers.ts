@@ -7,6 +7,10 @@ import type { Logger } from "./logger.js";
 import type { RoutingEngine } from "./routing-engine.js";
 import type { InstanceLifecycle } from "./instance-lifecycle.js";
 import type { EventLog } from "./event-log.js";
+import {
+  TeardownDeploymentArgs,
+  validateArgs,
+} from "./outbound-schemas.js";
 
 /** Shared context available to all outbound tool handlers. */
 export interface OutboundContext {
@@ -571,10 +575,11 @@ const deployTemplate: Handler = async (ctx, args, respond) => {
   }
 };
 
-const teardownDeployment: Handler = async (ctx, args, respond) => {
-  const name = args.name as string;
+const teardownDeployment: Handler = async (ctx, rawArgs, respond) => {
+  const v = validateArgs(TeardownDeploymentArgs, rawArgs, "teardown_deployment");
+  if (!v.ok) { respond(null, v.error); return; }
+  const { name } = v.data;
 
-  if (!name) { respond(null, "teardown_deployment: missing required argument 'name'"); return; }
   if (!ctx.fleetConfig) { respond(null, "Fleet config not available"); return; }
 
   // Find instances by deployment tag
