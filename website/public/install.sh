@@ -49,6 +49,30 @@ esac
 
 info "$OS_NAME ($ARCH)"
 
+# ── WSL Detection ────────────────────────────────────────
+
+IS_WSL=false
+if [ "$OS" = "Linux" ] && grep -qiE "microsoft|WSL" /proc/version 2>/dev/null; then
+  IS_WSL=true
+  warn "WSL environment detected"
+
+  # Check if node resolves to a Windows binary
+  if command_exists node; then
+    NODE_BIN_PATH=$(command -v node)
+    if [[ "$NODE_BIN_PATH" == /mnt/[a-z]/* ]]; then
+      warn "Windows Node.js detected at $NODE_BIN_PATH — this causes issues in WSL"
+      warn "Will install a native Linux Node.js via nvm instead"
+      # Shadow the Windows node so the version check below triggers nvm install
+      node() { return 1; }
+      command_exists() { [[ "$1" != "node" ]] && command -v "$1" >/dev/null 2>&1 || return 1; }
+    fi
+  fi
+
+  echo -e "  ${DIM}Tip: To permanently hide Windows PATH in WSL, add to /etc/wsl.conf:${NC}"
+  echo -e "  ${DIM}  [interop]${NC}"
+  echo -e "  ${DIM}  appendWindowsPath=false${NC}"
+fi
+
 # Detect package manager
 PKG_MGR=""
 if command_exists brew; then
@@ -92,10 +116,27 @@ if [ "$NODE_OK" = false ]; then
   nvm use 22
   nvm alias default 22
 
+  # Restore command_exists if we shadowed it for WSL
+  if [ "$IS_WSL" = true ]; then
+    unset -f node 2>/dev/null || true
+    unset -f command_exists 2>/dev/null || true
+    command_exists() { command -v "$1" >/dev/null 2>&1; }
+  fi
+
   if ! command_exists node; then
     error "Failed to install Node.js. Please install manually: https://nodejs.org"
   fi
   info "Node.js $(node -v) installed via nvm"
+fi
+
+# Ensure nvm node is first in PATH on WSL
+if [ "$IS_WSL" = true ] && [ -d "${NVM_DIR:-$HOME/.nvm}" ]; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+  NODE_BIN_PATH=$(command -v node 2>/dev/null || true)
+  if [[ "$NODE_BIN_PATH" == /mnt/[a-z]/* ]]; then
+    warn "Windows node still first in PATH — nvm node may not be active"
+  fi
 fi
 
 # ── Step 3: tmux ─────────────────────────────────────────
