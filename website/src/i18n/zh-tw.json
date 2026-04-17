@@ -8,7 +8,7 @@
   },
   "hero": {
     "tagline": "別再盯著 tmux。",
-    "taglineAccent": "從 Telegram 開始交付。",
+    "taglineAccent": "從 Telegram 調度 fleet。",
     "subtitle": "Agent Engineering Daemon — 用手機管理一整個 AI coding agent 團隊。5 種 backend、fleet mode、agent 協作，不用顧。",
     "cta": "快速開始",
     "github": "GitHub",
@@ -68,7 +68,7 @@
     "oneLiner": {
       "label": "一行安裝（macOS / Linux）",
       "cmd": "curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash",
-      "note": "自動裝 Node.js（經 nvm）、tmux、agend，完成後直接帶你進設定精靈。或照下面三步手動來。"
+      "note": "會透過 nvm 裝 Node.js，再裝 tmux、agend，接著直接進設定精靈。或照下面三步手動設定。"
     },
     "step1": { "label": "安裝", "cmd": "npm install -g @suzuke/agend" },
     "step2": { "label": "設定", "cmd": "agend quickstart" },
