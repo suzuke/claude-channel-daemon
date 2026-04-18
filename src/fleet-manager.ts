@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readdirSync, chmodSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { access } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -2113,7 +2113,13 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     // Generate web token before server starts so auth is enforced from the first request.
     this.webToken = randomBytes(24).toString("hex");
     const tokenPath = join(this.dataDir, "web.token");
-    writeFileSync(tokenPath, this.webToken);
+    writeFileSync(tokenPath, this.webToken, { mode: 0o600 });
+    // Defensive: if file existed previously with looser perms, tighten it.
+    try {
+      chmodSync(tokenPath, 0o600);
+    } catch {
+      // best-effort
+    }
 
     this.healthServer = createServer((req, res) => {
       res.setHeader("Content-Type", "application/json");
