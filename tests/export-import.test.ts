@@ -104,6 +104,39 @@ describe("ccd import", () => {
     expect(files.some((f) => f.startsWith(".env.bak."))).toBe(true);
   });
 
+  it("rejects archive with traversal entries (zip-slip)", async () => {
+    const { importConfig } = await import("../src/export-import.js");
+
+    const dstDir = makeDataDir("import-slip-dst");
+    const evilStaging = join(TMP, "evil");
+    mkdirSync(join(evilStaging, ".agend"), { recursive: true });
+    writeFileSync(join(evilStaging, "pwned.txt"), "owned");
+
+    // Build a tar whose entry path escapes the target dataDir.
+    const tarFile = join(TMP, "slip.tar.gz");
+    execSync(`tar czf "${tarFile}" -C "${evilStaging}" ".agend" "pwned.txt"`);
+
+    const origExit = process.exit;
+    const origErr = console.error;
+    let exited = false;
+    process.exit = ((code?: number) => {
+      exited = true;
+      throw new Error(`exit ${code ?? 0}`);
+    }) as never;
+    console.error = () => {};
+    try {
+      await importConfig(dstDir, tarFile);
+    } catch {
+      // expected
+    }
+    process.exit = origExit;
+    console.error = origErr;
+
+    expect(exited).toBe(true);
+    // And no stray file escaped.
+    expect(existsSync(join(TMP, "pwned.txt"))).toBe(false);
+  });
+
   it("warns about missing paths after import", async () => {
     const { exportConfig, importConfig } = await import(
       "../src/export-import.js"
