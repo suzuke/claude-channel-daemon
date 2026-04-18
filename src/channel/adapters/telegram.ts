@@ -261,8 +261,10 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     });
 
     // 409 Conflict = another getUpdates consumer is active (official plugin zombie,
-    // or second Claude Code instance). Retry with backoff until the slot frees up.
-    // Pattern from official telegram plugin.
+    // or second Claude Code instance). Retry with backoff until the slot frees up,
+    // but bail after MAX_CONFLICT_ATTEMPTS so a permanent collision doesn't spin
+    // forever — the operator needs to know.
+    const MAX_CONFLICT_ATTEMPTS = 30; // ≈ 7 min of backoff total
     void (async () => {
       for (let attempt = 1; ; attempt++) {
         try {
@@ -275,6 +277,11 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
           return; // bot.stop() was called — clean exit
         } catch (err) {
           if (err instanceof GrammyError && err.error_code === 409) {
+            if (attempt >= MAX_CONFLICT_ATTEMPTS) {
+              this.emit("polling_conflict_fatal", { attempts: attempt });
+              this.emit("error", err);
+              return;
+            }
             const delay = Math.min(1000 * attempt, 15000);
             this.emit("polling_conflict", { attempt, delay });
             await new Promise(r => setTimeout(r, delay));
