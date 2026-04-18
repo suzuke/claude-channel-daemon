@@ -13,13 +13,33 @@ export function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-function msUntilMidnight(timezone: string): number {
-  const now = new Date();
-  const tzNow = new Date(now.toLocaleString("en-US", { timeZone: timezone }));
-  const tzMidnight = new Date(tzNow);
-  tzMidnight.setHours(24, 0, 0, 0);
-  const diff = tzMidnight.getTime() - tzNow.getTime();
-  return diff > 0 ? diff : 24 * 60 * 60 * 1000;
+/**
+ * Milliseconds until the next local midnight in the given IANA timezone.
+ *
+ * The previous implementation used `new Date(now.toLocaleString(...))` which
+ * reinterprets a TZ-aware string as host-local time and quietly breaks on
+ * DST transitions. This version reads the TZ-local hour/minute/second via
+ * Intl.DateTimeFormat and computes the offset to 24:00 directly. The result
+ * is clamped to [1 min, 25 h] to tolerate the ±1h drift a DST transition
+ * could introduce between computation and the scheduled fire.
+ */
+export function msUntilMidnight(timezone: string): number {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = fmt.formatToParts(new Date());
+  const byType = Object.fromEntries(parts.map((p) => [p.type, p.value])) as Record<string, string>;
+  const h = parseInt(byType.hour ?? "0", 10);
+  const m = parseInt(byType.minute ?? "0", 10);
+  const s = parseInt(byType.second ?? "0", 10);
+  const msToMidnight = (24 - h) * 3_600_000 - m * 60_000 - s * 1000;
+  const ONE_MIN = 60_000;
+  const TWENTY_FIVE_HOURS = 25 * 3_600_000;
+  return Math.min(Math.max(msToMidnight, ONE_MIN), TWENTY_FIVE_HOURS);
 }
 
 export class CostGuard extends EventEmitter {

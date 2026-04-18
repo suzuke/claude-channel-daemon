@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdirSync, rmSync } from "node:fs";
-import { CostGuard } from "../src/cost-guard.js";
+import { CostGuard, msUntilMidnight } from "../src/cost-guard.js";
 import { EventLog } from "../src/event-log.js";
 import type { CostGuardConfig } from "../src/types.js";
 
@@ -164,5 +164,34 @@ describe("CostGuard", () => {
     vi.advanceTimersByTime(25 * 60 * 60 * 1000);
     expect(resetSpy).toHaveBeenCalled();
     guard.stop();
+  });
+});
+
+describe("msUntilMidnight (P2.8 DST-safe)", () => {
+  const ONE_MIN = 60_000;
+  const TWENTY_FIVE_HOURS = 25 * 3_600_000;
+
+  it("returns a value in [1min, 25h] for UTC", () => {
+    const v = msUntilMidnight("UTC");
+    expect(v).toBeGreaterThanOrEqual(ONE_MIN);
+    expect(v).toBeLessThanOrEqual(TWENTY_FIVE_HOURS);
+  });
+
+  it("returns a value in [1min, 25h] for America/New_York (DST zone)", () => {
+    const v = msUntilMidnight("America/New_York");
+    expect(v).toBeGreaterThanOrEqual(ONE_MIN);
+    expect(v).toBeLessThanOrEqual(TWENTY_FIVE_HOURS);
+  });
+
+  it("returns a value in [1min, 25h] for Asia/Taipei (no DST)", () => {
+    const v = msUntilMidnight("Asia/Taipei");
+    expect(v).toBeGreaterThanOrEqual(ONE_MIN);
+    expect(v).toBeLessThanOrEqual(TWENTY_FIVE_HOURS);
+  });
+
+  it("returns values that differ across timezones by no more than 24h", () => {
+    const a = msUntilMidnight("UTC");
+    const b = msUntilMidnight("Asia/Taipei");
+    expect(Math.abs(a - b)).toBeLessThanOrEqual(24 * 3_600_000);
   });
 });
