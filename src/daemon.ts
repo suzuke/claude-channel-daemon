@@ -1268,7 +1268,15 @@ export class Daemon extends EventEmitter {
       if (!hasOutput) return false;
       await this.controlClient.waitForIdle(windowId, idleTimeout);
     } else {
-      await new Promise(r => setTimeout(r, 10_000));
+      // No tmux control mode — fall back to transcript-based idle detection
+      // so fast startups don't pay a fixed 10 s wait and slow ones aren't
+      // truncated. Cap it at startup_timeout_ms to avoid hanging the boot
+      // when the CLI produces no transcript at all.
+      const total = this.config.startup_timeout_ms ?? 25_000;
+      await Promise.race([
+        this.waitForIdle(5_000),
+        new Promise((r) => setTimeout(r, total)),
+      ]);
     }
 
     // Dismiss confirmation dialogs and verify CLI reached prompt.
