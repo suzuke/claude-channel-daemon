@@ -55,6 +55,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   private generalChannelId?: string;
   private queue: MessageQueue;
   private lastChatId: string | null = null;
+  private attachmentPaths = new Map<string, string>();
 
   constructor(opts: DiscordAdapterOptions) {
     super();
@@ -123,14 +124,26 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
       const username = msg.author.username;
       const text = msg.content;
 
-      // Collect attachments
-      const attachments = msg.attachments.map((att) => ({
-        kind: "document" as const,
-        fileId: att.id,
-        mime: att.contentType ?? undefined,
-        size: att.size,
-        filename: att.name ?? undefined,
-      }));
+      // Collect and immediately download attachments
+      const attachments: { kind: "photo" | "document"; fileId: string; mime?: string; size: number; filename?: string }[] = [];
+      for (const att of msg.attachments.values()) {
+        try {
+          const rawName = new URL(att.url).pathname.split("/").pop() ?? att.id;
+          const filename = basename(rawName);
+          const localPath = join(this.inboxDir, filename);
+          const response = await fetch(att.url);
+          if (!response.ok || !response.body) continue;
+          await pipeline(Readable.fromWeb(response.body as import("stream/web").ReadableStream), createWriteStream(localPath));
+          this.attachmentPaths.set(att.id, localPath);
+          attachments.push({
+            kind: att.contentType?.startsWith("image/") ? "photo" : "document",
+            fileId: att.id,
+            mime: att.contentType ?? undefined,
+            size: att.size,
+            filename: att.name ?? undefined,
+          });
+        } catch { /* download failed — skip attachment */ }
+      }
 
       this.emit("message", {
         source: "discord",
@@ -369,12 +382,10 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   // ── File download ──────────────────────────────────────────────────────
 
   async downloadAttachment(fileId: string): Promise<string> {
-    // Discord attachment fileId is the attachment ID. We need to find the URL.
-    // Since Discord attachments include URLs directly, we'll search for the message
-    // containing this attachment. For MVP, we store the URL in the attachment metadata.
-    // Here we try to download via the Discord CDN URL pattern.
-    // In practice, the inbound message handler should store the URL.
-    throw new Error("downloadAttachment not yet implemented for Discord — use attachment URL directly");
+    const localPath = this.attachmentPaths.get(fileId);
+    if (!localPath) throw new Error(`No downloaded attachment found for: ${fileId}`);
+    this.attachmentPaths.delete(fileId);
+    return localPath;
   }
 
   // ── Intent-oriented methods ──────────────────────────────────────────
