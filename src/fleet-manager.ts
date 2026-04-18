@@ -20,6 +20,7 @@ import { IpcClient } from "./channel/ipc-bridge.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { createAdapter } from "./channel/factory.js";
 import { createLogger, type Logger } from "./logger.js";
+import { extractWebToken, computeCorsOrigin, parseCorsOriginsEnv } from "./web-auth.js";
 import { processAttachments } from "./channel/attachment-handler.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { Scheduler } from "./scheduler/index.js";
@@ -2174,16 +2175,33 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     this.healthServer = createServer((req, res) => {
       res.setHeader("Content-Type", "application/json");
 
+      // CORS: default locked down. Set AGEND_WEB_CORS_ORIGINS to a comma-separated
+      // list of origins to enable cross-origin access (e.g. "http://localhost:5173").
+      // Use "*" only if you understand the risk of exposing authenticated endpoints.
+      const allowedOrigins = parseCorsOriginsEnv(process.env.AGEND_WEB_CORS_ORIGINS);
+      const reqOrigin = typeof req.headers.origin === "string" ? req.headers.origin : null;
+      const corsOrigin = computeCorsOrigin(reqOrigin, allowedOrigins);
+      if (corsOrigin) {
+        res.setHeader("Access-Control-Allow-Origin", corsOrigin);
+        res.setHeader("Vary", "Origin");
+        res.setHeader("Access-Control-Allow-Headers", "Authorization, X-Agend-Token, Content-Type");
+      }
+
+      // Preflight: no auth required, just echo CORS decision.
+      if (req.method === "OPTIONS") {
+        res.writeHead(corsOrigin ? 204 : 403);
+        res.end();
+        return;
+      }
+
       // Public health probe — no auth required.
       if (req.method === "GET" && req.url === "/health") {
         // fallthrough to existing handler below
       } else {
-        // All other endpoints require a valid token (query ?token= or X-Agend-Token header).
+        // All other endpoints require a valid token via extractWebToken().
         // /ui/* will also re-check in web-api.ts, which is harmless.
         const parsedUrl = new URL(req.url ?? "/", `http://localhost:${port}`);
-        const headerToken = req.headers["x-agend-token"];
-        const providedToken = parsedUrl.searchParams.get("token")
-          ?? (typeof headerToken === "string" ? headerToken : null);
+        const providedToken = extractWebToken(req.headers, parsedUrl.searchParams);
         if (!this.webToken || providedToken !== this.webToken) {
           res.writeHead(401);
           res.end(JSON.stringify({ error: "Unauthorized" }));
@@ -2251,7 +2269,6 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
             currentTask,
           };
         });
-        res.setHeader("Access-Control-Allow-Origin", "*");
         res.writeHead(200);
         res.end(JSON.stringify({
           ...sysInfo,
@@ -2275,7 +2292,6 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         }
 
         const rows = this.eventLog?.listActivity({ since: sinceIso, limit: parseInt(limitParam, 10) }) ?? [];
-        res.setHeader("Access-Control-Allow-Origin", "*");
         res.writeHead(200);
         res.end(JSON.stringify(rows));
         return;
