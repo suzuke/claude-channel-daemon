@@ -103,7 +103,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   constructor(public dataDir: string) {
     this.lifecycle = new InstanceLifecycle(this);
     this.topicCommands = new TopicCommands(this);
-    this.topicArchiver = new TopicArchiver(this);
+    this.topicArchiver = new TopicArchiver(this, join(this.dataDir, "archived-topics.json"));
     this.statuslineWatcher = new StatuslineWatcher(this);
   }
 
