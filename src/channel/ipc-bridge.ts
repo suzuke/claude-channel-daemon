@@ -15,9 +15,23 @@ function encode(msg: unknown): string {
   return JSON.stringify(msg) + "\n";
 }
 
-const MAX_LINE_BUFFER = 10 * 1024 * 1024; // 10 MB
+// Cap a single IPC line at 1 MB. Legitimate daemon↔manager messages are
+// JSON-typed events well under that; a larger buffer is almost always a
+// runaway sender or an attempted DoS. Override with AGEND_IPC_MAX_LINE_MB
+// (integer MB) if a deployment really needs more.
+const MAX_LINE_BUFFER = (() => {
+  const env = process.env.AGEND_IPC_MAX_LINE_MB;
+  if (env) {
+    const mb = parseInt(env, 10);
+    if (Number.isFinite(mb) && mb > 0) return mb * 1024 * 1024;
+  }
+  return 1 * 1024 * 1024; // 1 MB
+})();
 
-function makeLineParser(onMessage: (msg: unknown) => void, onOverflow?: () => void) {
+/** Exposed for tests. */
+export function __getMaxLineBuffer(): number { return MAX_LINE_BUFFER; }
+
+export function makeLineParser(onMessage: (msg: unknown) => void, onOverflow?: () => void) {
   let buf = "";
   return (data: Buffer | string) => {
     buf += data.toString();
