@@ -114,6 +114,10 @@ export interface WebhookConfig {
   url: string;
   events: string[];
   headers?: Record<string, string>;
+  /** HMAC-SHA256 secret. When set, body is signed and sent as `X-Agend-Signature: sha256=<hex>`. */
+  secret?: string;
+  /** Maximum POST attempts (1 = no retry). Default 3. */
+  max_attempts?: number;
 }
 
 export interface FleetDefaults extends Partial<InstanceConfig> {
