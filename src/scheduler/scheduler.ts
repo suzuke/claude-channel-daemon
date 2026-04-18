@@ -1,18 +1,11 @@
 import { Cron } from "croner";
 import { SchedulerDb } from "./db.js";
+import { validateTimezone as sharedValidateTimezone } from "../config.js";
 import type { Schedule, CreateScheduleParams, UpdateScheduleParams, SchedulerConfig, ScheduleRun } from "./types.js";
 
-/**
- * Reject unknown timezones. Uses `Intl.DateTimeFormat`, which throws RangeError
- * for invalid IANA names but accepts canonical aliases like "UTC" that
- * `Intl.supportedValuesOf("timeZone")` doesn't enumerate.
- */
+/** Thin wrapper over the shared validator to preserve this module's error prefix. */
 function validateTimezone(tz: string): void {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-  } catch {
-    throw new Error(`Unknown timezone: ${tz}`);
-  }
+  sharedValidateTimezone(tz, "timezone");
 }
 
 export class Scheduler {

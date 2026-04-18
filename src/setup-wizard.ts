@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { stdin, stdout } from "node:process";
@@ -599,7 +599,9 @@ export async function runSetupWizard(): Promise<void> {
   }
   envContent += `${tokenEnvName}=${token}\n`;
   if (groqApiKey) envContent += `GROQ_API_KEY=${groqApiKey}\n`;
-  writeFileSync(ENV_PATH, envContent);
+  writeFileSync(ENV_PATH, envContent, { mode: 0o600 });
+  // Defensive: tighten existing file if it predates the mode option.
+  try { chmodSync(ENV_PATH, 0o600); } catch { /* best-effort */ }
   console.log(`  ${green("✓")} ${ENV_PATH}`);
 
   // fleet.yaml
