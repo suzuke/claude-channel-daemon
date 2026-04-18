@@ -11,6 +11,46 @@ import { MessageQueue } from "../message-queue.js";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
 
+const DEFAULT_API_ROOT = "https://api.telegram.org";
+
+/**
+ * Validate a user-supplied Telegram apiRoot against a conservative allowlist.
+ *
+ * Accepted:
+ *  - The official API root (`https://api.telegram.org`)
+ *  - localhost / 127.0.0.1 / ::1 on any port (E2E mock servers)
+ *  - Any host listed in `AGEND_TELEGRAM_API_ROOT_ALLOWLIST` (comma-separated)
+ *
+ * Rejected otherwise — blocks accidentally (or maliciously) routing bot
+ * traffic, including the bot token, to an arbitrary third-party endpoint.
+ */
+export function validateTelegramApiRoot(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error(`Invalid telegram apiRoot URL: ${raw}`);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(`Telegram apiRoot must be http(s): ${raw}`);
+  }
+  const host = u.hostname.toLowerCase();
+  const allowed = new Set<string>(["api.telegram.org", "localhost", "127.0.0.1", "::1"]);
+  const extra = process.env.AGEND_TELEGRAM_API_ROOT_ALLOWLIST;
+  if (extra) {
+    for (const h of extra.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)) {
+      allowed.add(h);
+    }
+  }
+  if (!allowed.has(host)) {
+    throw new Error(
+      `Telegram apiRoot host "${host}" is not in the allowlist. ` +
+        `Set AGEND_TELEGRAM_API_ROOT_ALLOWLIST to override.`,
+    );
+  }
+  return raw;
+}
+
 /** Convert a threadId string to a Telegram message_thread_id number.
  * Returns undefined for null/undefined or for the General topic (id=1),
  * which must not receive message_thread_id in Telegram API calls. */
@@ -45,7 +85,9 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     this.id = opts.id;
     this.accessManager = opts.accessManager;
     this.inboxDir = opts.inboxDir;
-    this.apiRoot = (opts.apiRoot ?? "https://api.telegram.org").replace(/\/+$/, "");
+    const rawApiRoot = opts.apiRoot ?? DEFAULT_API_ROOT;
+    validateTelegramApiRoot(rawApiRoot);
+    this.apiRoot = rawApiRoot.replace(/\/+$/, "");
 
     mkdirSync(this.inboxDir, { recursive: true });
 
