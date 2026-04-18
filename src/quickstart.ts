@@ -277,6 +277,9 @@ export async function runQuickstart(): Promise<void> {
 
     // ── Project roots ────────────────────────────────────
 
+    console.log(bold("Project Roots (optional)"));
+    console.log(`  ${dim("Directories containing your projects. Agents use these to find repos.")}\n`);
+
     const roots = detectProjectRoots();
     let projectRoots: string[] = [];
     if (roots.length > 0) {
@@ -291,6 +294,20 @@ export async function runQuickstart(): Promise<void> {
         console.log(`  ${green("✓")} ${best.path}`);
       }
     }
+    if (projectRoots.length === 0) {
+      const manual = (await rl.question("  Enter path (or leave blank to skip): ")).trim();
+      if (manual) {
+        const expanded = resolve(manual.replace(/^~/, homedir()));
+        projectRoots = [expanded];
+        console.log(`  ${green("✓")} ${expanded}`);
+        if (!existsSync(expanded)) {
+          console.log(`  ${dim("(directory does not exist yet — will be used when created)")}`);
+        }
+      } else {
+        console.log(`  ${dim("Skipped")}`);
+      }
+    }
+    console.log();
 
     // ── Write config ─────────────────────────────────────
 
