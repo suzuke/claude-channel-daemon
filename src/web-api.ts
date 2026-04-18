@@ -9,6 +9,76 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import type { LifecycleCreateArgs } from "./instance-lifecycle.js";
 import { CreateInstanceArgs, validateArgs } from "./outbound-schemas.js";
+import { z } from "zod";
+
+// ── Strict public-facing schemas ────────────────────────────────────────────
+// web-api endpoints must reject unknown fields so the dashboard cannot inject
+// internal-only flags that would reach handleCreate/scheduler/config writers.
+
+const MAX_TEXT = 16_384;
+
+const TaskCreateSchema = z.object({
+  title: z.string().min(1).max(512),
+  description: z.string().max(MAX_TEXT).optional(),
+  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  assignee: z.string().max(128).optional(),
+}).strict();
+
+const TaskUpdateSchema = z.object({
+  action: z.enum(["claim", "complete", "update"]).optional(),
+  assignee: z.string().max(128).optional(),
+  result: z.string().max(MAX_TEXT).optional(),
+  status: z.string().max(64).optional(),
+  title: z.string().max(512).optional(),
+  description: z.string().max(MAX_TEXT).optional(),
+  priority: z.string().max(64).optional(),
+}).strict();
+
+const ScheduleCreateSchema = z.object({
+  cron: z.string().min(1).max(256),
+  message: z.string().min(1).max(MAX_TEXT),
+  target: z.string().min(1).max(256),
+  label: z.string().max(256).optional(),
+  timezone: z.string().max(128).optional(),
+}).strict();
+
+const TeamCreateSchema = z.object({
+  name: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
+  members: z.array(z.string().min(1).max(256)).min(1).max(256),
+  description: z.string().max(MAX_TEXT).optional(),
+}).strict();
+
+const ConfigUpdateSchema = z.object({
+  channel: z.object({
+    group_id: z.union([z.number(), z.string()]).optional(),
+    access: z.record(z.string(), z.unknown()).optional(),
+  }).strict().optional(),
+  defaults: z.object({
+    backend: z.enum(["claude-code", "gemini-cli", "codex", "opencode", "kiro-cli"]).optional(),
+    model: z.string().max(128).optional(),
+  }).strict().optional(),
+  project_roots: z.array(z.string().min(1).max(1024)).max(64).optional(),
+}).strict();
+
+const SendMessageSchema = z.object({
+  instance: z.string().min(1).max(128),
+  message: z.string().min(1).max(MAX_TEXT),
+}).strict();
+
+function parseOrReject<T>(
+  schema: z.ZodType<T>,
+  data: unknown,
+  res: ServerResponse,
+): T | null {
+  const r = schema.safeParse(data);
+  if (!r.success) {
+    const issue = r.error.issues[0];
+    const path = issue.path.join(".");
+    json(res, 400, { error: `${path || "body"}: ${issue.message}` });
+    return null;
+  }
+  return r.data;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -334,11 +404,13 @@ export function handleWebRequest(
     (async () => {
       try {
         const body = await parseBody(req);
+        const parsed = parseOrReject(TaskCreateSchema, body, res);
+        if (!parsed) return;
         const task = ctx.scheduler!.db.createTask({
-          title: body.title as string,
-          description: body.description as string | undefined,
-          priority: body.priority as string | undefined,
-          assignee: body.assignee as string | undefined,
+          title: parsed.title,
+          description: parsed.description,
+          priority: parsed.priority,
+          assignee: parsed.assignee,
           created_by: "web-user",
         });
         json(res, 200, task);
@@ -359,14 +431,17 @@ export function handleWebRequest(
     (async () => {
       try {
         const body = await parseBody(req);
-        const action = body.action as string;
+        const parsed = parseOrReject(TaskUpdateSchema, body, res);
+        if (!parsed) return;
         let result: unknown;
-        if (action === "claim") {
-          result = ctx.scheduler!.db.claimTask(id, (body.assignee as string) || "web-user");
-        } else if (action === "complete") {
-          result = ctx.scheduler!.db.completeTask(id, body.result as string | undefined);
+        if (parsed.action === "claim") {
+          result = ctx.scheduler!.db.claimTask(id, parsed.assignee || "web-user");
+        } else if (parsed.action === "complete") {
+          result = ctx.scheduler!.db.completeTask(id, parsed.result);
         } else {
-          result = ctx.scheduler!.db.updateTask(id, body);
+          // Strip action before passing remaining fields to updateTask
+          const { action: _a, ...rest } = parsed;
+          result = ctx.scheduler!.db.updateTask(id, rest);
         }
         json(res, 200, result);
       } catch (err) {
@@ -389,7 +464,9 @@ export function handleWebRequest(
     (async () => {
       try {
         const body = await parseBody(req);
-        const schedule = ctx.scheduler!.create(body);
+        const parsed = parseOrReject(ScheduleCreateSchema, body, res);
+        if (!parsed) return;
+        const schedule = ctx.scheduler!.create(parsed);
         json(res, 200, schedule);
       } catch (err) { json(res, 400, { error: (err as Error).message }); }
     })();
@@ -418,15 +495,16 @@ export function handleWebRequest(
     (async () => {
       try {
         const body = await parseBody(req);
-        const name = body.name as string;
-        const members = body.members as string[];
-        const description = body.description as string | undefined;
-        if (!name || !members?.length) { json(res, 400, { error: "name and members required" }); return; }
+        const parsed = parseOrReject(TeamCreateSchema, body, res);
+        if (!parsed) return;
         if (!ctx.fleetConfig) { json(res, 500, { error: "No fleet config" }); return; }
         if (!ctx.fleetConfig.teams) (ctx.fleetConfig as { teams: Record<string, unknown> }).teams = {};
-        (ctx.fleetConfig.teams as Record<string, unknown>)[name] = { members, description };
+        (ctx.fleetConfig.teams as Record<string, unknown>)[parsed.name] = {
+          members: parsed.members,
+          description: parsed.description,
+        };
         ctx.saveFleetConfig();
-        json(res, 200, { created: name });
+        json(res, 200, { created: parsed.name });
       } catch (err) { json(res, 400, { error: (err as Error).message }); }
     })();
     return true;
@@ -467,28 +545,28 @@ export function handleWebRequest(
     (async () => {
       try {
         const body = await parseBody(req);
+        const parsed = parseOrReject(ConfigUpdateSchema, body, res);
+        if (!parsed) return;
         const config = ctx.fleetConfig;
         if (!config) { json(res, 500, { error: "No fleet config" }); return; }
         const ch = config.channel as Record<string, unknown> | undefined;
         // Update channel settings
-        if (body.channel && ch) {
-          const update = body.channel as Record<string, unknown>;
-          if (update.group_id != null) (config.channel as Record<string, unknown>).group_id = update.group_id;
-          if (update.access) (config.channel as Record<string, unknown>).access = update.access;
+        if (parsed.channel && ch) {
+          if (parsed.channel.group_id != null) (config.channel as Record<string, unknown>).group_id = parsed.channel.group_id;
+          if (parsed.channel.access) (config.channel as Record<string, unknown>).access = parsed.channel.access;
         }
         // Update defaults
-        if (body.defaults) {
+        if (parsed.defaults) {
           const d = (config as Record<string, unknown>).defaults as Record<string, unknown>;
-          const upd = body.defaults as Record<string, unknown>;
-          if (upd.backend) d.backend = upd.backend;
-          if (upd.model) d.model = upd.model;
+          if (parsed.defaults.backend) d.backend = parsed.defaults.backend;
+          if (parsed.defaults.model) d.model = parsed.defaults.model;
         }
         // Update project_roots
-        if (body.project_roots) {
-          (config as Record<string, unknown>).project_roots = body.project_roots;
+        if (parsed.project_roots) {
+          (config as Record<string, unknown>).project_roots = parsed.project_roots;
         }
         ctx.saveFleetConfig();
-        const needsRestart = !!(body.channel as Record<string, unknown>)?.group_id;
+        const needsRestart = parsed.channel?.group_id != null;
         json(res, 200, { saved: true, needs_restart: needsRestart });
       } catch (err) { json(res, 400, { error: (err as Error).message }); }
     })();
@@ -503,10 +581,26 @@ export function handleWebRequest(
 /** Handle POST /ui/send — extracted for readability. */
 function handleSendMessage(req: IncomingMessage, res: ServerResponse, ctx: WebApiContext): void {
   let body = "";
-  req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+  let size = 0;
+  req.on("data", (chunk: Buffer) => {
+    size += chunk.length;
+    if (size > MAX_TEXT * 2) {
+      // Stop accumulating early on obviously oversized bodies.
+      req.destroy();
+      return;
+    }
+    body += chunk.toString();
+  });
   req.on("end", () => {
     try {
-      const { instance, message } = JSON.parse(body) as { instance: string; message: string };
+      const raw = JSON.parse(body);
+      const parsed = SendMessageSchema.safeParse(raw);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        json(res, 400, { error: `${issue.path.join(".") || "body"}: ${issue.message}` });
+        return;
+      }
+      const { instance, message } = parsed.data;
       const ipc = ctx.instanceIpcClients.get(instance);
       if (!ipc) {
         json(res, 404, { error: `Instance not found: ${instance}` });
