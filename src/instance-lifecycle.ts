@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
-import { join, basename, dirname, resolve } from "node:path";
+import { existsSync, readFileSync, mkdirSync, realpathSync } from "node:fs";
+import { join, basename, dirname, resolve, sep as pathSep } from "node:path";
 import { access, unlink } from "node:fs/promises";
 import { getAgendHome } from "./paths.js";
 import type { InstanceConfig, FleetConfig } from "./types.js";
@@ -358,15 +358,29 @@ export class InstanceLifecycle {
       }
     }
 
-    // Enforce project_roots boundary when configured.
-    // Note: uses path.resolve() (string normalization), not fs.realpathSync(),
-    // so symlinks are not resolved — known limitation.
+    // Enforce project_roots boundary when configured. Use realpathSync so
+    // symlinks cannot be used to escape the allowed roots (a directory under
+    // an allowed root that symlinks to `/etc` would otherwise pass the string
+    // prefix check).
     const roots = this.ctx.fleetConfig?.project_roots;
     if (directory && roots?.length) {
-      const resolved = resolve(directory);
+      let resolved: string;
+      try {
+        resolved = realpathSync(resolve(directory));
+      } catch {
+        respond(null, `Directory "${directory}" is not accessible`);
+        return;
+      }
       const allowed = roots.some(r => {
-        const root = resolve(r.replace(/^~/, process.env.HOME || "~"));
-        return resolved === root || resolved.startsWith(root + "/");
+        const raw = resolve(r.replace(/^~/, process.env.HOME || "~"));
+        let root: string;
+        try {
+          root = realpathSync(raw);
+        } catch {
+          // Root doesn't exist on disk — cannot be a valid boundary.
+          return false;
+        }
+        return resolved === root || resolved.startsWith(root + pathSep);
       });
       if (!allowed) {
         respond(null, `Directory "${directory}" is not under project_roots. Allowed: ${roots.join(", ")}`);

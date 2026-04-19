@@ -170,6 +170,12 @@ export class TmuxManager {
   }
 
   async pipeOutput(logPath: string): Promise<void> {
+    // pipe-pane's shell command runs via /bin/sh -c. Reject control characters
+    // that would break out of the single-quote escape (newlines, NULs, etc.);
+    // only expect absolute paths produced by getAgendHome() / instanceDir.
+    if (/[\x00-\x1f]/.test(logPath)) {
+      throw new Error(`Invalid log path (contains control characters): ${JSON.stringify(logPath)}`);
+    }
     const escaped = logPath.replace(/'/g, "'\\''");
     await exec("tmux", TmuxManager.tmuxArgs([
       "pipe-pane", "-t", `${this.sessionName}:${this.windowId}`,

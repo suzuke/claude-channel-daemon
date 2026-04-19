@@ -7,7 +7,7 @@ import {
   readdirSync,
   readFileSync,
 } from "node:fs";
-import { join, basename, resolve } from "node:path";
+import { join, basename, resolve, sep as pathSep } from "node:path";
 import { homedir } from "node:os";
 
 const MINIMAL_FILES = ["fleet.yaml", ".env", "scheduler.db"];
@@ -19,6 +19,12 @@ const RUNTIME_EXCLUDES = [
   "fleet.log",
   "node_modules",
 ];
+
+// Reject tarballs above this size to blunt zip-bomb style exhaustion.
+const MAX_IMPORT_BYTES = 500 * 1024 * 1024;
+// Additional cap on the *uncompressed* size reported by the gzip footer, so
+// a small tarball that expands to many GB is rejected before tar extraction.
+const MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024;
 
 export async function exportConfig(
   dataDir: string,
@@ -76,7 +82,74 @@ export async function importConfig(
     process.exit(1);
   }
 
+  // Size guard (zip-bomb style).
+  const inputSize = statSync(absFile).size;
+  if (inputSize > MAX_IMPORT_BYTES) {
+    console.error(`Import file exceeds ${MAX_IMPORT_BYTES} bytes: ${inputSize}`);
+    process.exit(1);
+  }
+
+  // Read the uncompressed size advertised in the gzip footer. gzip stores this
+  // as a 32-bit value (wraps above 4 GB) so treat it as a hint: if the report
+  // already exceeds the cap, reject; otherwise fall through. Combined with the
+  // compressed cap above this covers common zip-bomb shapes.
+  try {
+    const gzList = execFileSync("gzip", ["-l", "-q", absFile], {
+      stdio: ["ignore", "pipe", "pipe"],
+    }).toString("utf8");
+    const line = gzList.split("\n").find((l) => /^\s*\d/.test(l));
+    const cols = line?.trim().split(/\s+/) ?? [];
+    const reportedUncompressed = Number(cols[1]);
+    if (Number.isFinite(reportedUncompressed) && reportedUncompressed > MAX_UNCOMPRESSED_BYTES) {
+      console.error(
+        `Import archive uncompressed size exceeds ${MAX_UNCOMPRESSED_BYTES} bytes: ${reportedUncompressed}`,
+      );
+      process.exit(1);
+    }
+  } catch {
+    // gzip -l failed — leave enforcement to tar extraction below.
+  }
+
   mkdirSync(dataDir, { recursive: true });
+
+  // Zip-slip / absolute-path protection: list every entry in the archive and
+  // verify the resolved path stays under dataDir's parent. Reject absolute
+  // paths, `..` segments and entries that escape after path resolution.
+  const extractRoot = resolve(join(dataDir, ".."));
+  const expectedPrefix = resolve(dataDir) + pathSep;
+  const expectedBase = basename(resolve(dataDir));
+  let entries: string[];
+  try {
+    const stdout = execFileSync("tar", ["tzf", absFile], { stdio: ["ignore", "pipe", "pipe"] });
+    entries = stdout
+      .toString("utf8")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  } catch (err) {
+    console.error(`Failed to list archive contents: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  for (const entry of entries) {
+    if (entry.startsWith("/") || entry.includes("..")) {
+      console.error(`Refusing to import archive with unsafe entry: ${entry}`);
+      process.exit(1);
+    }
+    const dest = resolve(extractRoot, entry);
+    // Each entry must land inside the target dataDir (same basename as export).
+    // Allow the dataDir itself and anything beneath it.
+    if (dest !== resolve(dataDir) && !dest.startsWith(expectedPrefix)) {
+      console.error(`Refusing to import entry outside dataDir: ${entry}`);
+      process.exit(1);
+    }
+    // First path component must match dataDir's basename (tar strips nothing
+    // here — we rely on the export producing `basename(dataDir)/...`).
+    const firstSeg = entry.split(/[\\/]/, 1)[0];
+    if (firstSeg !== expectedBase) {
+      console.error(`Refusing to import entry with unexpected root: ${entry}`);
+      process.exit(1);
+    }
+  }
 
   // Backup existing config files
   const timestamp = Date.now();
@@ -89,8 +162,11 @@ export async function importConfig(
     }
   }
 
-  // Extract — strip the top-level directory name
-  execFileSync("tar", ["xzf", absFile, "-C", join(dataDir, "..")], { stdio: "pipe" });
+  // Extract — strip the top-level directory name.
+  // `-P` is intentionally NOT used: we want tar's default behaviour of
+  // rejecting absolute paths. The per-entry audit above already caught any
+  // absolute or traversal entries.
+  execFileSync("tar", ["xzf", absFile, "-C", extractRoot], { stdio: "pipe" });
   console.log(`Imported to: ${dataDir}`);
 
   // Validate paths in fleet.yaml

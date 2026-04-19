@@ -21,8 +21,48 @@ export function detectPlatform(): "macos" | "linux" {
   return platform() === "darwin" ? "macos" : "linux";
 }
 
+// A value ending up inside a systemd unit line (or plist <string>) must not
+// contain control characters — a newline would let an attacker close the
+// current directive and inject new ones (e.g. ExecStartPost=rm -rf ~).
+// The `]]>` guard prevents escaping out of plist CDATA in future templates.
+function assertSafeServiceValue(name: string, value: string): void {
+  if (/[\x00-\x1f\x7f]/.test(value)) {
+    throw new Error(
+      `Unsafe service template variable ${name}: contains control characters`,
+    );
+  }
+  if (value.includes("]]>")) {
+    throw new Error(
+      `Unsafe service template variable ${name}: contains plist CDATA terminator`,
+    );
+  }
+}
+
+function assertAbsolutePath(name: string, value: string): void {
+  if (!value.startsWith("/")) {
+    throw new Error(`Service template variable ${name} must be an absolute path`);
+  }
+}
+
+function validateVars(vars: ServiceVars & { path: string }): void {
+  assertSafeServiceValue("label", vars.label);
+  assertSafeServiceValue("execPath", vars.execPath);
+  assertSafeServiceValue("workingDirectory", vars.workingDirectory);
+  assertSafeServiceValue("logPath", vars.logPath);
+  assertSafeServiceValue("path", vars.path);
+  assertAbsolutePath("execPath", vars.execPath);
+  assertAbsolutePath("workingDirectory", vars.workingDirectory);
+  assertAbsolutePath("logPath", vars.logPath);
+  // label is used as a filename component — restrict to safe charset
+  if (!/^[A-Za-z0-9._-]+$/.test(vars.label)) {
+    throw new Error(`Service label must match [A-Za-z0-9._-]+, got: ${vars.label}`);
+  }
+}
+
 function withDefaults(vars: ServiceVars): ServiceVars & { path: string } {
-  return { ...vars, path: vars.path ?? process.env.PATH ?? "" };
+  const full = { ...vars, path: vars.path ?? process.env.PATH ?? "" };
+  validateVars(full);
+  return full;
 }
 
 export function renderLaunchdPlist(vars: ServiceVars): string {

@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readdirSync, chmodSync, realpathSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { access } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { join, dirname, basename } from "node:path";
+import { join, dirname, basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgendHome } from "./paths.js";
 import yaml from "js-yaml";
@@ -140,7 +140,30 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   /** Load fleet.yaml and build routing table */
   loadConfig(configPath: string): FleetConfig {
     this.fleetConfig = loadFleetConfig(configPath);
+    this.warnOnUnresolvableProjectRoots();
     return this.fleetConfig;
+  }
+
+  /** Warn once about any project_roots that cannot be realpath'd. Without
+   * this, a typo in fleet.yaml shows up as "Directory is not under
+   * project_roots" at create-time, making the real problem invisible. */
+  private warnedRoots = new Set<string>();
+  private warnOnUnresolvableProjectRoots(): void {
+    const roots = this.fleetConfig?.project_roots;
+    if (!roots?.length) return;
+    for (const r of roots) {
+      if (this.warnedRoots.has(r)) continue;
+      const raw = resolve(r.replace(/^~/, process.env.HOME || "~"));
+      try {
+        realpathSync(raw);
+      } catch (err) {
+        this.logger.warn(
+          { root: r, resolved: raw, err: (err as Error).message },
+          "project_roots entry cannot be resolved — instances rooted here will be rejected",
+        );
+        this.warnedRoots.add(r);
+      }
+    }
   }
 
   /** Build topic routing table: { topicId -> RouteTarget } */
@@ -2113,7 +2136,13 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     // Generate web token before server starts so auth is enforced from the first request.
     this.webToken = randomBytes(24).toString("hex");
     const tokenPath = join(this.dataDir, "web.token");
-    writeFileSync(tokenPath, this.webToken);
+    writeFileSync(tokenPath, this.webToken, { mode: 0o600 });
+    // Defensive: if file existed previously with looser perms, tighten it.
+    try {
+      chmodSync(tokenPath, 0o600);
+    } catch {
+      // best-effort
+    }
 
     this.healthServer = createServer((req, res) => {
       res.setHeader("Content-Type", "application/json");

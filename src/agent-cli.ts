@@ -4,22 +4,42 @@
  * Sends JSON POST to the daemon's /agent endpoint and prints JSON result.
  *
  * Usage: agend-agent <op> [args...]
- * Env:   AGEND_PORT (default 19280), AGEND_INSTANCE_NAME (required)
+ * Env:   AGEND_PORT (default 19280), AGEND_INSTANCE_NAME (required),
+ *        AGEND_HOME (default ~/.agend)
  */
 import { request } from "node:http";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const PORT = parseInt(process.env.AGEND_PORT ?? "19280", 10);
 const INSTANCE = process.env.AGEND_INSTANCE_NAME ?? "";
+const DATA_DIR = process.env.AGEND_HOME || join(homedir(), ".agend");
+
+function readInstanceToken(): string | null {
+  if (!INSTANCE) return null;
+  try {
+    return readFileSync(join(DATA_DIR, "instances", INSTANCE, "agent.token"), "utf-8").trim();
+  } catch {
+    return null;
+  }
+}
 
 function post(op: string, args: Record<string, unknown>): Promise<string> {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({ instance: INSTANCE, op, args });
+    const token = readInstanceToken();
+    const headers: Record<string, string | number> = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body),
+    };
+    if (token) headers["X-Agend-Instance-Token"] = token;
     const req = request({
       hostname: "127.0.0.1",
       port: PORT,
       path: "/agent",
       method: "POST",
-      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+      headers,
     }, (res) => {
       let data = "";
       res.on("data", (chunk: Buffer) => { data += chunk; });

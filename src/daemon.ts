@@ -1,7 +1,8 @@
 import { join, dirname, basename, resolve } from "node:path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync, appendFileSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync, appendFileSync, statSync, chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { InstanceConfig, RotationSnapshot, RotationSnapshotEvent } from "./types.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -12,6 +13,7 @@ import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import type { CliBackend, CliBackendConfig, ErrorPattern, StartupDialog } from "./backend/types.js";
+import { shellQuote } from "./backend/types.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { getTmuxSession } from "./config.js";
 import { routeToolCall } from "./channel/tool-router.js";
@@ -1222,7 +1224,25 @@ export class Daemon extends EventEmitter {
 
     this.backend!.writeConfig(backendConfig);
     this.backend!.preTrust?.(this.config.working_directory);
-    let envPrefix = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name}`;
+
+    // Generate a fresh per-instance agent token each spawn. agent-cli reads
+    // this file from <instanceDir>/agent.token (mode 0o600) and sends its
+    // value in the X-Agend-Instance-Token header; the daemon-side /agent
+    // endpoint verifies it matches the on-disk value for the claimed
+    // instance. This prevents other local processes (even those holding
+    // the global web token) from impersonating instances.
+    const agentTokenPath = join(this.instanceDir, "agent.token");
+    const agentToken = randomBytes(32).toString("hex");
+    writeFileSync(agentTokenPath, agentToken, { mode: 0o600 });
+    try { chmodSync(agentTokenPath, 0o600); } catch {}
+
+    // AGEND_HOME points the child's agent-cli at the same data dir the daemon
+    // is using, so it can locate <instanceDir>/agent.token. resolve() normalizes
+    // the path so a trailing slash on instanceDir doesn't leak into env. The
+    // value is POSIX single-quoted (JSON quoting would let $, `, \ through to
+    // the shell) before being splice into the tmux command line.
+    const agendHome = resolve(this.instanceDir, "..", "..");
+    let envPrefix = `TERM=xterm-256color AGEND_INSTANCE_NAME=${shellQuote(this.name)} AGEND_HOME=${shellQuote(agendHome)}`;
     if (backendConfig.agentMode === "cli" && backendConfig.agentPort) {
       envPrefix += ` AGEND_PORT=${backendConfig.agentPort}`;
     }
@@ -1511,7 +1531,9 @@ export class Daemon extends EventEmitter {
     const branch = (args.branch as string) || "HEAD";
     // Validate branch ref: git refs allow [A-Za-z0-9._/-], reject `..` to prevent
     // worktreePath escape via basename(source)-${branch.replace("/", "-")}.
-    if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..")) {
+    // Reject leading `-` or `+` so git cannot interpret the value as an option
+    // flag (e.g. `--upload-pack=...`), which execFile cannot prevent on its own.
+    if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..") || /^[-+]/.test(branch)) {
       respond(null, `Invalid branch name: ${branch}`);
       return;
     }
@@ -1530,9 +1552,12 @@ export class Daemon extends EventEmitter {
     const worktreePath = join(repoDir, safeName);
 
     try {
-      // Resolve branch/ref to verify it exists
-      await execFileAsync("git", ["rev-parse", "--verify", branch], { cwd: source });
-      await execFileAsync("git", ["worktree", "add", "--detach", worktreePath, branch], { cwd: source });
+      // Resolve branch/ref to verify it exists. Use `--` so git never treats
+      // branch as an option flag (defense in depth on top of the regex above).
+      await execFileAsync("git", ["rev-parse", "--verify", "--", branch], { cwd: source });
+      // `--` prevents git from parsing branch (or a future path variable) as
+      // an option flag; mirrors the rev-parse call above.
+      await execFileAsync("git", ["worktree", "add", "--detach", "--", worktreePath, branch], { cwd: source });
       const { stdout: commitHash } = await execFileAsync("git", ["rev-parse", "--short", "HEAD"], { cwd: worktreePath });
       respond({ path: worktreePath, branch, source, commit: commitHash.trim() });
     } catch (err) {

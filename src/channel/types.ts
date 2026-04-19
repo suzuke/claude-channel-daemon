@@ -41,7 +41,7 @@ export interface ChannelAdapter extends EventEmitter {
   downloadAttachment(fileId: string): Promise<string>;
 
   handlePairing(chatId: string, userId: string): Promise<string>;
-  confirmPairing(code: string): Promise<boolean>;
+  confirmPairing(code: string, callerUserId?: string): Promise<boolean>;
 
   readonly topology: "topics" | "channels" | "flat";
 

@@ -667,7 +667,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     return code;
   }
 
-  async confirmPairing(code: string): Promise<boolean> {
-    return this.accessManager.confirmCode(code);
+  async confirmPairing(code: string, callerUserId?: string): Promise<boolean> {
+    return this.accessManager.confirmCode(code, callerUserId);
   }
 }

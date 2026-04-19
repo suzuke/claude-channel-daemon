@@ -37,4 +37,32 @@ describe("ServiceInstaller", () => {
     expect(plist).toContain("<key>PATH</key>");
     expect(plist).toContain(process.env.PATH!);
   });
+
+  it("rejects logPath with newline (systemd directive injection)", () => {
+    expect(() => renderSystemdUnit({
+      ...vars,
+      logPath: "/tmp/log\nExecStartPost=/bin/rm -rf /",
+    })).toThrow(/control characters/);
+  });
+
+  it("rejects workingDirectory with NUL", () => {
+    expect(() => renderLaunchdPlist({
+      ...vars,
+      workingDirectory: "/tmp/\x00escape",
+    })).toThrow(/control characters/);
+  });
+
+  it("rejects non-absolute execPath", () => {
+    expect(() => renderSystemdUnit({
+      ...vars,
+      execPath: "agend",
+    })).toThrow(/absolute path/);
+  });
+
+  it("rejects label containing special chars", () => {
+    expect(() => renderLaunchdPlist({
+      ...vars,
+      label: "com.agend; /bin/sh",
+    })).toThrow(/label must match/);
+  });
 });

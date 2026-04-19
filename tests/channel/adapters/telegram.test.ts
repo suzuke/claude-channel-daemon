@@ -321,10 +321,17 @@ describe("TelegramAdapter", () => {
     expect(code).toBe("AABBCC");
   });
 
-  it("confirmPairing delegates to AccessManager.confirmCode", async () => {
+  it("confirmPairing delegates to AccessManager.confirmCode with callerUserId", async () => {
+    const spy = vi.spyOn(am, "confirmCode").mockReturnValue(true);
+    const result = await adapter.confirmPairing("AABBCC", "999");
+    expect(spy).toHaveBeenCalledWith("AABBCC", "999");
+    expect(result).toBe(true);
+  });
+
+  it("confirmPairing forwards undefined callerUserId when omitted", async () => {
     const spy = vi.spyOn(am, "confirmCode").mockReturnValue(true);
     const result = await adapter.confirmPairing("AABBCC");
-    expect(spy).toHaveBeenCalledWith("AABBCC");
+    expect(spy).toHaveBeenCalledWith("AABBCC", undefined);
     expect(result).toBe(true);
   });
 

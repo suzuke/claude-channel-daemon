@@ -4,8 +4,17 @@
  *
  * Request:  POST /agent { "instance": "dev", "op": "reply", "args": { "text": "hello" } }
  * Response: JSON result (same shape as MCP tool results)
+ *
+ * Authentication: every request must carry `X-Agend-Instance-Token`. The
+ * daemon writes a fresh 32-byte token to <instanceDir>/agent.token (mode 0600)
+ * on each spawn; agent-cli reads it and sends it in the header. The endpoint
+ * verifies the header matches the on-disk token for the claimed instance,
+ * preventing a local process from impersonating another instance.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import type { OutboundContext } from "./outbound-handlers.js";
 import { outboundHandlers } from "./outbound-handlers.js";
 import { routeToolCall } from "./channel/tool-router.js";
@@ -47,11 +56,44 @@ const OP_MAP: Record<string, string> = {
 type CrudHandler = (ctx: OutboundContext, instance: string, args: Record<string, unknown>) => Promise<unknown>;
 
 export interface AgentEndpointContext extends OutboundContext {
+  /** Absolute data directory (e.g. ~/.agend). Used to locate per-instance token files. */
+  readonly dataDir: string;
   handleScheduleCrudHttp(instance: string, op: string, args: Record<string, unknown>): Promise<unknown>;
   handleDecisionCrudHttp(instance: string, op: string, args: Record<string, unknown>): Promise<unknown>;
   handleTaskCrudHttp(instance: string, args: Record<string, unknown>): Promise<unknown>;
   handleSetDisplayNameHttp(instance: string, name: string): Promise<unknown>;
   handleSetDescriptionHttp(instance: string, description: string): Promise<unknown>;
+}
+
+/**
+ * Constant-time comparison of the provided header against the per-instance
+ * token file. Returns true on match, false on any error (missing file, bad
+ * instance name, length mismatch, wrong value).
+ */
+function verifyInstanceToken(
+  ctx: AgentEndpointContext,
+  instance: string,
+  provided: string | undefined,
+): boolean {
+  if (!provided) return false;
+  // instance name must be a safe filename component
+  if (!/^[A-Za-z0-9._-]+$/.test(instance)) return false;
+  const tokenPath = join(ctx.dataDir, "instances", instance, "agent.token");
+  let expected: string;
+  try {
+    expected = readFileSync(tokenPath, "utf-8").trim();
+  } catch {
+    return false;
+  }
+  if (!expected) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 export function handleAgentRequest(
@@ -78,6 +120,16 @@ export function handleAgentRequest(
       if (!instance || !op) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: "Missing instance or op" }));
+        return;
+      }
+
+      const headerToken = req.headers["x-agend-instance-token"];
+      const providedToken = typeof headerToken === "string"
+        ? headerToken
+        : Array.isArray(headerToken) ? headerToken[0] : undefined;
+      if (!verifyInstanceToken(ctx, instance, providedToken)) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: "Invalid or missing instance token" }));
         return;
       }
 
