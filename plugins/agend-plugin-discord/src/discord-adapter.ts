@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, createWriteStream } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { createWriteStream } from "node:fs";
 import {
   Client,
   GatewayIntentBits,
@@ -124,26 +124,45 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
       const username = msg.author.username;
       const text = msg.content;
 
-      // Collect and immediately download attachments
-      const attachments: { kind: "photo" | "document"; fileId: string; mime?: string; size: number; filename?: string }[] = [];
-      for (const att of msg.attachments.values()) {
-        try {
-          const rawName = new URL(att.url).pathname.split("/").pop() ?? att.id;
-          const filename = basename(rawName);
-          const localPath = join(this.inboxDir, filename);
-          const response = await fetch(att.url);
-          if (!response.ok || !response.body) continue;
-          await pipeline(Readable.fromWeb(response.body as import("stream/web").ReadableStream), createWriteStream(localPath));
-          this.attachmentPaths.set(att.id, localPath);
-          attachments.push({
-            kind: att.contentType?.startsWith("image/") ? "photo" : "document",
-            fileId: att.id,
-            mime: att.contentType ?? undefined,
-            size: att.size,
-            filename: att.name ?? undefined,
-          });
-        } catch { /* download failed — skip attachment */ }
-      }
+      // Collect and immediately download attachments in parallel.
+      // Discord CDN URLs expire (~24h), so we fetch them while they are still valid.
+      const downloaded = await Promise.all(
+        [...msg.attachments.values()].map(async (att) => {
+          try {
+            // Prefix with att.id (Discord snowflake, guaranteed unique) to avoid
+            // filename collisions between attachments sharing the same display name.
+            const rawName = att.name ?? new URL(att.url).pathname.split("/").pop() ?? att.id;
+            const localPath = join(this.inboxDir, `${att.id}-${basename(rawName)}`);
+            const response = await fetch(att.url);
+            if (!response.ok || !response.body) {
+              console.warn(
+                `[discord] attachment download failed for ${att.id}: HTTP ${response.status} ${response.statusText}`,
+              );
+              return null;
+            }
+            await pipeline(
+              Readable.fromWeb(response.body as import("stream/web").ReadableStream),
+              createWriteStream(localPath),
+            );
+            this.attachmentPaths.set(att.id, localPath);
+            return {
+              kind: (att.contentType?.startsWith("image/") ? "photo" : "document") as "photo" | "document",
+              fileId: att.id,
+              mime: att.contentType ?? undefined,
+              size: att.size,
+              filename: att.name ?? undefined,
+            };
+          } catch (err) {
+            console.warn(
+              `[discord] attachment download failed for ${att.id}: ${(err as Error).message}`,
+            );
+            return null;
+          }
+        }),
+      );
+      const attachments = downloaded.filter(
+        (a): a is NonNullable<typeof a> => a !== null,
+      );
 
       this.emit("message", {
         source: "discord",
@@ -206,6 +225,14 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   async stop(): Promise<void> {
     this.queue.stop();
     this.client.destroy();
+    // Clean up any attachments that were downloaded but never consumed via
+    // downloadAttachment() — prevents disk leak when the agent drops messages.
+    await Promise.all(
+      [...this.attachmentPaths.values()].map((p) =>
+        unlink(p).catch(() => {}),
+      ),
+    );
+    this.attachmentPaths.clear();
   }
 
   // ── Text / file sending ────────────────────────────────────────────────
