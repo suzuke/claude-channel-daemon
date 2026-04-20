@@ -6,8 +6,10 @@
 
 ## [未發佈] (Unreleased)
 
+## [1.23.1] - 2026-04-21
+
 ### 修復 (Fixed)
-- **Instance 目錄被外部刪除時健康檢查迴圈會停止** — 先前若 daemon 執行中有人 `rm -rf ~/.agend/instances/<name>`，健康檢查每 ~30s 會不斷嘗試 respawn，產生 `ENOENT … rotation-state.json` / `tmux server died` / `Failed to respawn Claude window` 的連鎖錯誤 spam。現在每次 tick 開頭會檢查 `instanceDir` 是否還存在，不存在就暫停該 instance 的健康檢查。
+- **Instance 目錄被外部刪除時健康檢查迴圈會停止** (PR #46) — 先前若 daemon 執行中有人 `rm -rf ~/.agend/instances/<name>`，健康檢查每 ~30s 會不斷嘗試 respawn，產生 `ENOENT … rotation-state.json` / `tmux server died` / `Failed to respawn Claude window` 的連鎖錯誤 spam。現在每次 tick 開頭會檢查 `instanceDir` 是否還存在，不存在就暫停該 instance 的健康檢查。
 
 ## [1.23.0] - 2026-04-20
 

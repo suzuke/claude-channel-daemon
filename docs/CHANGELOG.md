@@ -6,8 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.23.1] - 2026-04-21
+
 ### Fixed
-- **Health check loop stops when instance directory is removed externally** — previously, `rm -rf ~/.agend/instances/<name>` while the daemon was running caused the health check to respawn-crash every ~30s indefinitely, spamming `ENOENT … rotation-state.json` / `tmux server died` / `Failed to respawn Claude window`. Loop now detects missing `instanceDir` at the start of each tick and pauses itself.
+- **Health check loop stops when instance directory is removed externally** (PR #46) — previously, `rm -rf ~/.agend/instances/<name>` while the daemon was running caused the health check to respawn-crash every ~30s indefinitely, spamming `ENOENT … rotation-state.json` / `tmux server died` / `Failed to respawn Claude window`. Loop now detects missing `instanceDir` at the start of each tick and pauses itself.
 
 ## [1.23.0] - 2026-04-20
 
