@@ -6,6 +6,50 @@
 
 ## [未發佈] (Unreleased)
 
+## [1.23.0] - 2026-04-20
+
+收束 `docs/fix-plan.md` Phase 1–4 安全/可靠性修復計畫。共 36 項修復／重構，分散於 7 個 PR（#33, #38, #39, #40, #41, #42, #43, #44）。
+
+### 安全 (Security)
+- **Phase 1 邊界硬化** (PR #33) — 每 instance 獨立 `/agent` token、`/ui/*` 全部 mutation 走 zod 驗證、template 變數消毒、tar entry 驗證、`project_roots` symlink resolve、branch / logPath 防 argument injection、`web.token` 0o600。
+- **Telegram apiRoot 白名單** (P3.3, `9a7b16b`) — 防止透過攻擊者控制的 `apiRoot` 外洩 bot token。
+- **Webhook HMAC-SHA256 簽章** (P3.1, `e65b97c`) — outbound webhook 簽章；接收端可驗證來源。
+- **STT 必須顯式 opt-in** (P3.4, `1fc513e`) — 語音轉文字不再因有 env 就啟用，需 `fleet.yaml` `stt.enabled: true`。
+- **`/update` 安全化** (P3.6, `740c202`, `d38a583`) — 空 `allowed_users` 整個拒絕 `/update`；兩段 token 確認（8 hex、60s TTL）；安裝時版本鎖；健康探針失敗自動回滾；supersede 通知。
+- **`access-path` 拒絕 instance 名 path traversal** (P4.3, `d5d41b7`) — 白名單 `^[A-Za-z0-9._-]+$`，拒 `..` / `/` / `\` / NUL。
+- **`.env` 0o600** (P4.4, `49a4328`) — wizard 寫憑證檔加上嚴格權限 + chmod 兜底。
+- **CORS 收緊、支援 Bearer auth** (P3.5, `b180232`) — 拿掉 wildcard CORS；web API 接受 `Authorization: Bearer <token>`。
+- **`paths.ts` md5 → sha256** (P4.5, `1f91c3c`) — 消除 FIPS／掃描器告警。custom `AGEND_HOME` 用戶升級後 tmux session/socket 後綴會變一次。
+
+### 修正 (Fixed)
+- **Telegram 409 polling 上限** (P3.2, `c67f776`) — retry 上限 30 次，避免無窮 polling。
+- **Topic archiver 持久化** (P2.6, `f134a66`, `42d5d1f`) — archived topic 跨重啟保留，atomic write 至 `<dataDir>/archived-topics.json`。
+- **IPC 單行上限 10MB → 1MB** (P3.7, `d446384`) — overflow 結構化拒絕,避免 OOM。
+- **Tmux pane cache 在 control-mode 重連時清除** (P2.1, `e967bbb`)。
+- **TranscriptMonitor 重入鎖** (P2.4, `65be144`) — 防止重疊的 `pollIncrement`。
+- **Scheduler 啟動時 catch-up 24h 內漏跑** (P2.3, `01e1e32`, `24d6f8a`)。
+- **Cost-guard session rotation 重置 emitted flags** (P2.2, `875a0b2`) — `warnEmitted` / `limitEmitted` 正確重置，rotation 後新 session 不會無聲衝過 daily cap。
+- **SSE dead client 驅逐 + socket error 處理** (P2.5, `ae2a810`) — `broadcastSseEvent` 對單一 dead client 寫入失敗不再 break 整個 loop；`req.on("error")` 在 ECONNRESET 清理 client set。
+- **拿掉 instance 啟動後多餘的 sleep+reconnect** (P2.7, `872547b`) — `startInstance` await 鏈已保證 IPC 就緒。
+- **Cost-guard DST 處理** (P2.8, `3c9ff9f`) — `msUntilMidnight` 改用 `Intl.DateTimeFormat` + 二分搜尋，DST 春令／秋令日不再偏 ±1h。
+- **MessageQueue flood-control backoff 重置** (P3.8, `3474c04`) — drop 後 backoff 真正重置，不會卡在 ~30s。
+
+### 變更 (Changed)
+- **`fleet-manager.ts` 拆檔** (P4.1, PR #43) — 2842 → 1658 行（-1184）。新增四個模組：
+  - `fleet-dashboard-html.ts`（442 行）— dashboard HTML 常數
+  - `fleet-instructions.ts`（168 行）— `GENERAL_INSTRUCTIONS` + `ensureGeneralInstructions`
+  - `fleet-rpc-handlers.ts`（387 行）— IPC + HTTP CRUD dispatch
+  - `fleet-health-server.ts`（326 行）— `startHealthServer` + `getUiStatus` + `extractWebToken`
+
+  皆採 Context-injection：模組宣告 narrow `XxxContext` interface、FleetManager `implements`、外部以 `this` 呼叫純函數。
+- **`daemon.handleToolCall` 抽出 helper** (P4.2, `e6a9596`) — 抽出 `dispatchFleetRpc(...)`。`handleToolCall` 182 → ~120 行，daemon.ts 淨 -51 行。
+- **`validateTimezone` 單一化** (P4.4, `49a4328`) — `scheduler/scheduler.ts` 移除本地副本，import `config.ts` 的版本。
+
+### 文件 (Docs)
+- **`docs/fix-plan.md` Phase 1–4 結案** — 所有 P 項目皆 ✅ 或移至 **Deferred / Future Work**（logger rotation、cost-guard tiebreaker 兩項屬 feature 不屬 fix）。
+- **`docs/p4.1-split-plan.md` 歸檔** — 四模組拆檔策略紀錄。
+- **`docs/issue-evaluations.md` 新增** — 對 open issue #24（usage-limit notify）、#8（default topic preset）做效益／tradeoff 分析，供未來規劃用。
+
 ## [1.22.1] - 2026-04-19
 
 ### 修正

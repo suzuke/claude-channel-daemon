@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-04-20
+
+Phase 1–4 of the security/reliability fix plan (`docs/fix-plan.md`) closes here. 36 individual fixes/refactors across 7 PRs (#33, #38, #39, #40, #41, #42, #43, #44).
+
+### Security
+- **Phase 1 boundaries** (PR #33) — per-instance `/agent` token, zod validation on all `/ui/*` mutations, template var sanitization, tar entry validation, symlink resolution for `project_roots`, branch/logPath argument injection hardening, `web.token` 0o600.
+- **Telegram apiRoot allowlist** (P3.3, `9a7b16b`) — prevents bot-token exfil via attacker-controlled `apiRoot`.
+- **Webhook HMAC-SHA256 signing** (P3.1, `e65b97c`) — outbound webhooks now signed; receivers can verify origin.
+- **STT requires explicit opt-in** (P3.4, `1fc513e`) — voice transcription no longer activates from env var alone; needs `stt.enabled: true` in `fleet.yaml`.
+- **`/update` hardened** (P3.6, `740c202`, `d38a583`) — empty `allowed_users` rejects `/update` entirely; two-step token confirm (8 hex, 60s TTL); version pin during install; auto-rollback on health check fail; supersede notifications.
+- **`access-path` rejects path traversal in instance names** (P4.3, `d5d41b7`) — whitelist `^[A-Za-z0-9._-]+$`, rejects `..` / `/` / `\` / NUL.
+- **`.env` file mode 0o600** (P4.4, `49a4328`) — wizard writes credential files with restrictive permissions + chmod fallback.
+- **CORS tightened, Bearer auth supported** (P3.5, `b180232`) — wildcard CORS removed; web API accepts `Authorization: Bearer <token>` header.
+- **`paths.ts` md5 → sha256** (P4.5, `1f91c3c`) — eliminates FIPS / scanner alerts. Custom `AGEND_HOME` users will see tmux session/socket suffix change once on upgrade.
+
+### Fixed
+- **Telegram 409 polling cap** (P3.2, `c67f776`) — caps retries to 30 to prevent infinite poll loops.
+- **Topic archiver persistence** (P2.6, `f134a66`, `42d5d1f`) — archived topic state now persists across restarts via atomic write of `<dataDir>/archived-topics.json`.
+- **IPC single-line buffer cap 10MB → 1MB** (P3.7, `d446384`) — overflow rejected with structured error instead of OOM.
+- **Tmux pane cache invalidation on control-mode reconnect** (P2.1, `e967bbb`).
+- **TranscriptMonitor reentry guard** (P2.4, `65be144`) — prevents overlapping `pollIncrement` runs.
+- **Scheduler catch-up for missed runs within 24h** (P2.3, `01e1e32`, `24d6f8a`).
+- **Cost-guard daily-cap reset on session rotation** (P2.2, `875a0b2`) — `warnEmitted`/`limitEmitted` flags now reset properly so post-rotation sessions don't silently exceed daily cap.
+- **SSE dead client eviction + socket error handling** (P2.5, `ae2a810`) — `broadcastSseEvent` no longer breaks the loop on a dead client write; `req.on("error")` now cleans up client set on ECONNRESET.
+- **Drop redundant sleep+reconnect after instance start** (P2.7, `872547b`) — `startInstance` await chain already guarantees IPC ready; secondary `connectIpcToInstance` was pure dead code.
+- **Cost-guard DST handling** (P2.8, `3c9ff9f`) — `msUntilMidnight` now uses `Intl.DateTimeFormat` + binary search instead of `setHours(24,0,0,0)`, so DST spring/fall transitions don't shift the daily reset by ±1h.
+- **MessageQueue flood-control backoff reset** (P3.8, `3474c04`) — backoff now actually resets after status_update drop instead of staying at ~30s.
+
+### Changed
+- **`fleet-manager.ts` decomposed** (P4.1, PR #43) — 2842 → 1658 lines (-1184). Four new modules:
+  - `fleet-dashboard-html.ts` (442 lines) — dashboard HTML constant
+  - `fleet-instructions.ts` (168 lines) — `GENERAL_INSTRUCTIONS` + `ensureGeneralInstructions`
+  - `fleet-rpc-handlers.ts` (387 lines) — IPC + HTTP CRUD dispatch
+  - `fleet-health-server.ts` (326 lines) — `startHealthServer` + `getUiStatus` + `extractWebToken`
+
+  All modules use a Context-injection pattern: each declares a narrow `XxxContext` interface, FleetManager `implements` it, and exported functions take `this` as their first arg.
+- **`daemon.handleToolCall` factored** (P4.2, `e6a9596`) — extracted `dispatchFleetRpc(fleetReqId, broadcast, timeoutMs, timeoutMessage, respond)` helper. `handleToolCall` 182 → ~120 lines, daemon.ts -51 lines net.
+- **`validateTimezone` unified** (P4.4, `49a4328`) — `scheduler/scheduler.ts` no longer duplicates the validator; imports the canonical version from `config.ts`.
+
+### Docs
+- **`docs/fix-plan.md` Phase 1–4 closed** — all P-items either ✅ or moved to **Deferred / Future Work** (logger rotation, cost-guard tiebreaker — both feature-class, not fix-class).
+- **`docs/p4.1-split-plan.md` archived** — record of the four-module decomposition strategy.
+- **`docs/issue-evaluations.md` added** — analysis of open issues #24 (usage-limit notify) and #8 (default topic preset) with effort/tradeoff breakdowns for future planning.
+
 ## [1.22.1] - 2026-04-19
 
 ### Fixed
