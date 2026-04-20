@@ -16,6 +16,11 @@ function validateTimezone(tz: string): void {
 }
 
 export class Scheduler {
+  /** Cap how far back we look for missed fires on init. Avoids dumping
+   * dozens of "morning standup" pings on the user after a long outage,
+   * while still recovering from short crashes/restarts. */
+  private static readonly CATCHUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
   readonly db: SchedulerDb;
   private jobs: Map<string, Cron> = new Map();
   private onTrigger: (schedule: Schedule) => void | Promise<void>;
@@ -39,7 +44,41 @@ export class Scheduler {
 
   init(): void {
     this.db.pruneOldRuns();
+    this.runCatchUp();
     this.registerAllJobs();
+  }
+
+  /**
+   * On startup, fire any schedule whose most recent expected run was missed
+   * within the catch-up window. Only one catch-up fire per schedule — we
+   * don't replay every missed minute of `* * * * *`. Schedules that haven't
+   * been triggered yet use `created_at` as the reference point so a new
+   * schedule registered while the daemon was down still gets caught up.
+   */
+  private runCatchUp(): void {
+    const now = Date.now();
+    const cutoff = now - Scheduler.CATCHUP_WINDOW_MS;
+    for (const schedule of this.db.list()) {
+      if (!schedule.enabled) continue;
+
+      const refIso = schedule.last_triggered_at ?? schedule.created_at;
+      const refMs = Date.parse(refIso);
+      if (Number.isNaN(refMs)) continue;
+
+      try {
+        const cron = new Cron(schedule.cron, { timezone: schedule.timezone });
+        const next = cron.nextRun(new Date(refMs));
+        if (!next) continue;
+        const nextMs = next.getTime();
+        if (nextMs > now) continue;       // not yet due
+        if (nextMs < cutoff) continue;    // too old, don't spam
+        if (this.executing.has(schedule.id)) continue;
+        this.runWithLock(schedule);
+      } catch {
+        // Bad cron expression or croner edge case — skip rather than crash init
+        continue;
+      }
+    }
   }
 
   reload(): void {
