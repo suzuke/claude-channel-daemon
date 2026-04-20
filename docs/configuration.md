@@ -172,6 +172,13 @@ All fields from `instances.<name>` can be set here as defaults. Additionally:
 | `url` | string | Webhook endpoint URL |
 | `events` | string[] | Events to notify (see below). Use `["*"]` for all events |
 | `headers` | object | Optional HTTP headers |
+| `secret` | string | Optional HMAC-SHA256 signing key. When set, every POST includes `X-AgEnD-Signature: sha256=<hex>` (computed over `${timestamp}.${rawBody}`) and `X-AgEnD-Timestamp` for replay protection |
+
+Every POST also carries an `X-AgEnD-Delivery: <uuid>` header that stays
+constant across retries — receivers can use it for idempotency.
+
+Failed POSTs retry on network error or `5xx` (delays: 1s, 4s; max 3 attempts).
+`4xx` responses are treated as caller misconfig and are NOT retried.
 
 Webhook events:
 

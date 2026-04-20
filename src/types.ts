@@ -114,6 +114,15 @@ export interface WebhookConfig {
   url: string;
   events: string[];
   headers?: Record<string, string>;
+  /**
+   * Optional HMAC-SHA256 secret. When set, every POST includes:
+   *   X-AgEnD-Signature: sha256=<hex digest of `${timestamp}.${body}`>
+   *   X-AgEnD-Timestamp: <unix seconds at send time>
+   * Receivers verify by recomputing the HMAC over `${timestamp}.${rawBody}`
+   * and rejecting if `|now - timestamp|` exceeds their tolerance window
+   * (recommended ≤5 min, to neutralize replay).
+   */
+  secret?: string;
 }
 
 export interface FleetDefaults extends Partial<InstanceConfig> {
