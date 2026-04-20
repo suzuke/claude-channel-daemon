@@ -94,14 +94,14 @@
 
 | ID | 項目 | 狀態 | Commit |
 |---|---|---|---|
-| P3.1 | Webhook HMAC + retry 策略 | ⬜ | - |
+| P3.1 | Webhook HMAC + retry 策略 | ✅ | `e65b97c` |
 | P3.2 | Telegram 409 polling 上限 | ✅ | `c67f776` |
 | P3.3 | Telegram apiRoot 白名單 | ✅ | `9a7b16b` |
-| P3.4 | STT 隱私開關（opt-in） | ⬜ | - |
+| P3.4 | STT 隱私開關（opt-in） | ✅ | `1fc513e` |
 | P3.5 | CORS 收緊 + Bearer header | ✅ | `b180232` |
-| P3.6 | `/update` 安全化（版本鎖、回滾、二次確認） | ⬜ | - |
+| P3.6 | `/update` 安全化（版本鎖、回滾、二次確認） | ✅ | `740c202` |
 | P3.7 | IPC 單行上限 10MB → 1MB | ✅ | `d446384` |
-| P3.8 | MessageQueue flood control reset | ⬜ | - |
+| P3.8 | MessageQueue flood control reset | ✅ | `3474c04` |
 
 ---
 
@@ -161,6 +161,18 @@
   1. P2.7 純刪除無單元測試保護。合併前在乾淨環境跑一次 `agend up` 確認 instances 仍能正確接上 IPC（觀察 `/sysinfo` 顯示 `IPC:✓`）。
   2. SSE 測試的 `FakeClient` 用了 `as unknown as ServerResponse` 型別橋接，非 blocker，未來可抽成共用 mock helper。
 - 下一輪建議優先（Phase 3 剩 4 項）：**P3.1 Webhook HMAC** → **P3.4 STT opt-in** → **P3.6 /update 安全化** → **P3.8 MessageQueue flood reset**，然後進 Phase 4。
+
+---
+
+**更新（2026-04-20，Phase 3 全部完成）：**
+
+- PR #40 開出（round 4）— 4 commits 收束 Phase 3 剩餘四項：
+  - `e65b97c` P3.1 Webhook HMAC-SHA256 簽章 + 5xx/網路錯誤 retry（4xx 不 retry）+ X-AgEnD-Delivery 冪等 UUID（同一交付重試共用）。新增 `tests/webhook-emitter.test.ts` 7 個測試。
+  - `1fc513e` P3.4 STT 隱私 opt-in：原本只要設了 `GROQ_API_KEY` env 就會把語音上傳雲端，現在必須 `fleet.yaml` 顯式 `stt.enabled: true` 且 env 有值才會 download/transcribe。新增 `tests/attachment-handler.test.ts` 6 個測試 + setup-wizard 2 個測試。文件補 `docs/configuration*.md` `stt:` 區塊。
+  - `740c202` P3.6 `/update` 安全化：(a) `allowed_users` 為空時整個 `/update` 拒絕；(b) 兩段確認：先 `/update [version]` 註冊 60s 單次有效 6-hex token（只發起者可確認）；(c) 版本鎖定 `npm install -g @suzuke/agend@<ver>`；(d) 安裝後 `agend --version` 健康探針，失敗自動回滾到原版本；(e) `/update cancel` 清待確認。新增 `tests/topic-commands-update.test.ts` 12 個測試。
+  - `3474c04` P3.8 MessageQueue flood control 修復：原本 `runWorker` 在 backoff > 10s 後丟掉 status_update，但程式碼只有「已清理，重置 backoff」的死註解、實際沒重置；429 風暴後即使佇列瘦身也仍以 ~30s 重試。改為丟棄後立即把 backoff 重置為 1s 並寫 warn log。
+- 驗證：`npx tsc --noEmit` 綠；`npx vitest run` 482/482 全綠。
+- Phase 3 全綠，Phase 4 五項待開：P4.1 拆檔（fleet-manager 仍 2819 行）、P4.2 handleToolCall 主分流抽出、P4.3 access-path 驗證、P4.4 .env 權限 + validateTimezone 去重、P4.5 小修補集合。
 
 ### Phase 1 commits（按時間由新到舊）
 
