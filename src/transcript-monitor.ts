@@ -10,6 +10,7 @@ export class TranscriptMonitor extends EventEmitter {
   private transcriptPath: string | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private offsetFile: string;
+  private polling = false; // reentry guard for pollIncrement
 
   constructor(private instanceDir: string, private logger: Logger) {
     super();
@@ -54,6 +55,19 @@ export class TranscriptMonitor extends EventEmitter {
   }
 
   async pollIncrement(): Promise<void> {
+    // Reentry guard: setInterval keeps firing even when the previous poll is
+    // still awaiting stat/read. Two concurrent runs would race on byteOffset
+    // (both could read the same byte range and emit duplicate entries).
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      await this._doPoll();
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  private async _doPoll(): Promise<void> {
     if (!this.transcriptPath) {
       this.transcriptPath = await this.resolveTranscriptPath();
       if (!this.transcriptPath) return;

@@ -81,4 +81,19 @@ describe("TranscriptMonitor", () => {
     await monitor.pollIncrement(); // no new data
     expect(texts).toHaveLength(1);
   });
+
+  it("skips concurrent pollIncrement calls (reentry guard)", async () => {
+    const jsonlPath = join(tmpDir, "transcript.jsonl");
+    const entry = { message: { role: "assistant", content: [{ type: "text", text: "once" }] } };
+    writeFileSync(jsonlPath, JSON.stringify(entry) + "\n");
+
+    monitor.setTranscriptPath(jsonlPath);
+    const texts: string[] = [];
+    monitor.on("assistant_text", (text) => texts.push(text));
+
+    // Fire two polls simultaneously; second should bail before reading
+    // any bytes, so the entry is emitted exactly once.
+    await Promise.all([monitor.pollIncrement(), monitor.pollIncrement()]);
+    expect(texts).toHaveLength(1);
+  });
 });
