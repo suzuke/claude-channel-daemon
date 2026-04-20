@@ -77,14 +77,14 @@
 
 | ID | 項目 | 狀態 | Commit |
 |---|---|---|---|
-| P2.1 | TmuxControlClient reconnect 清 pane map | ⬜ | - |
-| P2.2 | Cost guard rotation reset emitted flags | ✅ | (pre-existing in `cost-guard.ts:119-121` `trackers.clear()` 重建 tracker) |
-| P2.3 | Scheduler catch-up 機制 | ⬜ | - |
-| P2.4 | TranscriptMonitor 防重入 | ⬜ | - |
-| P2.5 | SSE client 清理 | ✅ | (pre-existing in `web-api.ts:237-240` `req.on("close")`) |
+| P2.1 | TmuxControlClient reconnect 清 pane map | ✅ | `e967bbb` |
+| P2.2 | Cost guard rotation reset emitted flags | ✅ | `875a0b2` (前次 "pre-existing" 判定錯誤：`trackers.clear()` 只跑在 `resetDaily`，rotation 路徑用 `snapshotAndReset` 不清 emitted flags) |
+| P2.3 | Scheduler catch-up 機制 | ✅ | `01e1e32` + `24d6f8a` (review fix) |
+| P2.4 | TranscriptMonitor 防重入 | ✅ | `65be144` |
+| P2.5 | SSE client 清理 | ✅ | `ae2a810` (前次 "pre-existing" 判定錯誤：原 `req.on("close")` 只清 interval；dead client 寫入 throw 會 break 整個 broadcast loop，且未掛 `req.on("error")` → ECONNRESET 路徑漏清) |
 | P2.6 | Topic archiver 持久化 | ✅ | `f134a66` |
-| P2.7 | 啟動 waitForIdle 取代 setTimeout | ✅ | (pre-existing in `daemon.ts:1267-1269`) |
-| P2.8 | msUntilMidnight DST 修復 | ✅ | (pre-existing in `cost-guard.ts:16-23` `setHours(24,0,0,0)` tz-aware) |
+| P2.7 | 啟動 waitForIdle 取代 setTimeout | ✅ | `872547b` (前次 "pre-existing" 判定錯誤：`fleet-manager.start():489` 與 `topic-commands.bindAndStart()` 都還有冗餘 `sleep + connectIpcToInstance`；本 commit 為直接刪除而非 `waitForIdle` 替換 — `startInstance` 的 await 鏈已保證 IPC 就緒) |
+| P2.8 | msUntilMidnight DST 修復 | ✅ | `3c9ff9f` (前次 "pre-existing" 判定錯誤：`setHours(24,0,0,0)` 是 local-tz 操作，搭配 `toLocaleString` 重解讀，DST 春令日少 1h、秋令日多 1h 都會偏一小時；改用 `Intl.DateTimeFormat` + 二分搜尋找實際換日點) |
 
 詳細修法見原 review 彙整。
 
@@ -96,9 +96,9 @@
 |---|---|---|---|
 | P3.1 | Webhook HMAC + retry 策略 | ⬜ | - |
 | P3.2 | Telegram 409 polling 上限 | ✅ | `c67f776` |
-| P3.3 | Telegram apiRoot 白名單 | ⬜ | - |
+| P3.3 | Telegram apiRoot 白名單 | ✅ | `9a7b16b` |
 | P3.4 | STT 隱私開關（opt-in） | ⬜ | - |
-| P3.5 | CORS 收緊 + Bearer header | ⬜ | - |
+| P3.5 | CORS 收緊 + Bearer header | ✅ | `b180232` |
 | P3.6 | `/update` 安全化（版本鎖、回滾、二次確認） | ⬜ | - |
 | P3.7 | IPC 單行上限 10MB → 1MB | ✅ | `d446384` |
 | P3.8 | MessageQueue flood control reset | ⬜ | - |
@@ -140,6 +140,27 @@
 - 驗證：`npx tsc --noEmit` 綠；`npx vitest run` 411/411 全綠
 - 同時於本輪重新驗證 codebase，確認 P2.2 / P2.5 / P2.7 / P2.8 / P4.6 已在過去某時點完成（subagent 初判遺漏，本文件已更新）
 - 下一輪建議優先：**P2.1 (pane map)** → **P2.4 (TranscriptMonitor 重入)** → **P2.3 (Scheduler catch-up)** → **P3.5 (CORS + Bearer)** → **P3.3 (apiRoot 白名單)**
+
+---
+
+**更新（2026-04-20，Phase 2 全部完成 + Phase 3 過半）：**
+
+- PR #38 已合（round 2）：
+  - `e967bbb` P2.1 TmuxControlClient pane cache reset
+  - `65be144` P2.4 TranscriptMonitor 重入鎖
+  - `01e1e32` + `24d6f8a` P2.3 Scheduler catch-up
+  - `b180232` P3.5 CORS + Bearer
+  - `9a7b16b` P3.3 Telegram apiRoot 白名單
+- PR #39 開出（round 3，待 review）— 4 commits：`875a0b2` P2.2、`ae2a810` P2.5、`872547b` P2.7、`3c9ff9f` P2.8。`vitest run` 454/454 綠。
+- **重要更正**：原表把 P2.2 / P2.5 / P2.7 / P2.8 標為 "pre-existing ✅" 全部是錯的。本輪重新讀程式碼在每一處都找到真實 bug：
+  - P2.2 `trackers.clear()` 只跑於 `resetDaily`；rotation 走 `snapshotAndReset`，不清 `warnEmitted/limitEmitted` → 重啟後新 session 會無聲衝過 daily cap。
+  - P2.5 `req.on("close")` 只清 interval；`broadcastSseEvent` 對 dead client 寫入 throw 會 break 整個 loop，且未掛 `req.on("error")` → ECONNRESET 漏清 client set。
+  - P2.7 `fleet-manager.start():489` 與 `topic-commands.bindAndStart()` 都還有 `setTimeout + 二次 connectIpcToInstance`；`startInstance` 的 await 鏈早已保證 IPC 就緒，純屬冗餘。本輪採刪除而非 `waitForIdle` 替換（KISS）。
+  - P2.8 `setHours(24,0,0,0)` 是 local-tz 操作，配合 `toLocaleString` 雙重重解讀，DST 春令日少 1h、秋令日多 1h 都會偏一小時。改用 `Intl.DateTimeFormat` 的 `en-CA` YYYY-MM-DD 觀察 + 二分搜尋找實際換日點，自然處理 23h/24h/25h day length。
+- **PR #39 review 追蹤項**（合併前處理）：
+  1. P2.7 純刪除無單元測試保護。合併前在乾淨環境跑一次 `agend up` 確認 instances 仍能正確接上 IPC（觀察 `/sysinfo` 顯示 `IPC:✓`）。
+  2. SSE 測試的 `FakeClient` 用了 `as unknown as ServerResponse` 型別橋接，非 blocker，未來可抽成共用 mock helper。
+- 下一輪建議優先（Phase 3 剩 4 項）：**P3.1 Webhook HMAC** → **P3.4 STT opt-in** → **P3.6 /update 安全化** → **P3.8 MessageQueue flood reset**，然後進 Phase 4。
 
 ### Phase 1 commits（按時間由新到舊）
 

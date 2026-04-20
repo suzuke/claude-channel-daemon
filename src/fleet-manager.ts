@@ -37,7 +37,7 @@ import { InstanceLifecycle, type LifecycleContext } from "./instance-lifecycle.j
 import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
 import { StatuslineWatcher, type StatuslineWatcherContext } from "./statusline-watcher.js";
 import { outboundHandlers, type OutboundContext } from "./outbound-handlers.js";
-import { handleWebRequest } from "./web-api.js";
+import { handleWebRequest, broadcastSseEvent } from "./web-api.js";
 import { handleAgentRequest, type AgentEndpointContext } from "./agent-endpoint.js";
 
 import { getTmuxSession } from "./config.js";
@@ -486,8 +486,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       await this.resolveTopicIcons();
       this.topicArchiver.startPoller();
 
-      await new Promise(r => setTimeout(r, 3000));
-      await this.connectToInstances(fleet);
+      // IPC is already wired by startInstancesWithConcurrency → startInstance →
+      // connectIpcToInstance. The previous 3s sleep + connectToInstances loop
+      // was redundant.
 
       for (const name of Object.keys(fleet.instances)) {
         this.startStatuslineWatcher(name);
@@ -624,13 +625,6 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       this.pruneStaleExternalSessions().catch(err =>
         this.logger.debug({ err }, "Session prune failed"));
     }, 5 * 60 * 1000);
-  }
-
-  /** Connect IPC clients to each daemon instance's channel.sock */
-  private async connectToInstances(fleet: FleetConfig): Promise<void> {
-    for (const name of Object.keys(fleet.instances)) {
-      await this.connectIpcToInstance(name);
-    }
   }
 
   /** Connect IPC to a single instance with all handlers */
@@ -1555,10 +1549,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   /** Push an SSE event to all connected Web UI clients. */
   emitSseEvent(event: string, data: unknown): void {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const client of this.sseClients) {
-      client.write(payload);
-    }
+    broadcastSseEvent(this.sseClients, event, data, (err) =>
+      this.logger.debug({ err }, "SSE client write failed; evicting"),
+    );
   }
 
   listClaimedTasks(assignee: string): Array<{ id: string; title: string }> {

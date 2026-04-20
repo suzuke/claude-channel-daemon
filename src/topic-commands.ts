@@ -232,10 +232,10 @@ export class TopicCommands {
     this.ctx.saveFleetConfig();
     this.ctx.routingTable.set(String(topicId), { kind: "instance", name: instanceName });
 
+    // startInstance awaits lifecycle.start → daemon.start (IPC listening) →
+    // connectIpcToInstance. By the time it resolves, IPC is already wired —
+    // the previous code's 5s sleep + second connect was leftover paranoia.
     await this.ctx.startInstance(instanceName, this.ctx.fleetConfig.instances[instanceName], true);
-
-    await new Promise(r => setTimeout(r, 5000));
-    await this.ctx.connectIpcToInstance(instanceName);
 
     this.ctx.logger.info({ instanceName, topicId }, "Topic bound and started");
     return instanceName;

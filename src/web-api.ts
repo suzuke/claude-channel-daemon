@@ -68,6 +68,34 @@ const SendMessageSchema = z.object({
   message: z.string().min(1).max(MAX_TEXT),
 }).strict();
 
+/**
+ * Push a single SSE frame to every client. If a client throws (closed socket
+ * after a network drop, etc.), evict it from the set and continue — without
+ * the eviction the dead entry leaks forever, and without the try/catch a
+ * single dead client breaks delivery to every client iterated after it.
+ */
+export function broadcastSseEvent(
+  clients: Set<ServerResponse>,
+  event: string,
+  data: unknown,
+  onError?: (err: unknown) => void,
+): void {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const dead: ServerResponse[] = [];
+  for (const client of clients) {
+    try {
+      client.write(payload);
+    } catch (err) {
+      dead.push(client);
+      onError?.(err);
+    }
+  }
+  for (const c of dead) {
+    clients.delete(c);
+    try { c.end(); } catch { /* socket already gone */ }
+  }
+}
+
 function parseOrReject<T>(
   schema: z.ZodType<T>,
   data: unknown,
@@ -232,12 +260,25 @@ export function handleWebRequest(
     res.write(`event: status\ndata: ${JSON.stringify(ctx.getUiStatus())}\n\n`);
     ctx.sseClients.add(res);
     const interval = setInterval(() => {
-      res.write(`event: status\ndata: ${JSON.stringify(ctx.getUiStatus())}\n\n`);
+      try {
+        res.write(`event: status\ndata: ${JSON.stringify(ctx.getUiStatus())}\n\n`);
+      } catch {
+        cleanup();
+      }
     }, 10_000);
-    req.on("close", () => {
+    let cleanedUp = false;
+    const cleanup = (): void => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       ctx.sseClients.delete(res);
       clearInterval(interval);
-    });
+    };
+    // `close` covers normal disconnects; `error` covers network resets that
+    // never deliver a clean FIN. Without both, dead clients accumulate in
+    // sseClients and the heartbeat interval keeps firing forever.
+    req.on("close", cleanup);
+    req.on("error", cleanup);
+    res.on("error", cleanup);
     return true;
   }
 
