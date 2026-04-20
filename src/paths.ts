@@ -12,7 +12,14 @@ export function getTmuxSessionName(): string {
   const home = getAgendHome();
   const defaultHome = join(homedir(), ".agend");
   if (home === defaultHome) return "agend";
-  return "agend-" + createHash("md5").update(home).digest("hex").slice(0, 6);
+  // sha256 instead of md5: this hash is not security-critical (we just need a
+  // short stable suffix so two custom AGEND_HOME values don't collide on the
+  // tmux session/socket namespace), but md5 trips FIPS-mode Node and security
+  // scanners. The suffix value WILL change for users with a custom
+  // AGEND_HOME — that only affects an in-memory tmux session/socket name, so
+  // a single daemon restart resyncs cleanly (any orphan tmux session under
+  // the old name can be killed manually).
+  return "agend-" + createHash("sha256").update(home).digest("hex").slice(0, 6);
 }
 
 /**
@@ -24,5 +31,12 @@ export function getTmuxSocketName(): string | null {
   const home = getAgendHome();
   const defaultHome = join(homedir(), ".agend");
   if (home === defaultHome) return null;
-  return "agend-" + createHash("md5").update(home).digest("hex").slice(0, 6);
+  // sha256 instead of md5: this hash is not security-critical (we just need a
+  // short stable suffix so two custom AGEND_HOME values don't collide on the
+  // tmux session/socket namespace), but md5 trips FIPS-mode Node and security
+  // scanners. The suffix value WILL change for users with a custom
+  // AGEND_HOME — that only affects an in-memory tmux session/socket name, so
+  // a single daemon restart resyncs cleanly (any orphan tmux session under
+  // the old name can be killed manually).
+  return "agend-" + createHash("sha256").update(home).digest("hex").slice(0, 6);
 }
