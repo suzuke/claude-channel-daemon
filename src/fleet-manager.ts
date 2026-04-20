@@ -42,37 +42,9 @@ import { handleAgentRequest, type AgentEndpointContext } from "./agent-endpoint.
 import { ensureGeneralInstructions } from "./fleet-instructions.js";
 import { rpcHandlers, summarizeToolCall, resolveDisplayName as rpcResolveDisplayName } from "./fleet-rpc-handlers.js";
 import { ACTIVITY_VIEWER_HTML } from "./fleet-dashboard-html.js";
+import { startHealthServer, getUiStatus as healthGetUiStatus } from "./fleet-health-server.js";
 
 import { getTmuxSession } from "./config.js";
-
-/**
- * Extract a web token from a request, accepting (in order):
- *   1. `?token=` query string
- *   2. `Authorization: Bearer <token>` header (standard)
- *   3. `X-Agend-Token: <token>` header (legacy compatibility)
- *
- * Centralized so the CLI/SDK callers can rely on Bearer alongside the
- * existing query/header schemes without duplicating parsing.
- */
-export function extractWebToken(
-  parsedUrl: URL,
-  headers: Record<string, string | string[] | undefined>,
-): string | null {
-  const queryToken = parsedUrl.searchParams.get("token");
-  if (queryToken) return queryToken;
-
-  const auth = headers["authorization"];
-  const authStr = Array.isArray(auth) ? auth[0] : auth;
-  if (authStr && /^Bearer\s+/i.test(authStr)) {
-    return authStr.replace(/^Bearer\s+/i, "").trim();
-  }
-
-  const headerToken = headers["x-agend-token"];
-  if (typeof headerToken === "string") return headerToken;
-  if (Array.isArray(headerToken) && headerToken.length > 0) return headerToken[0];
-
-  return null;
-}
 
 export function resolveReplyThreadId(
   argsThreadId: unknown,
@@ -514,7 +486,13 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }
 
     // Health HTTP endpoint
-    this.startHealthServer(fleet.health_port ?? 19280);
+    {
+      const port = fleet.health_port ?? 19280;
+      const hs = startHealthServer(this, port);
+      this.healthServer = hs.server;
+      this.webToken = hs.webToken;
+      this.startedAt = hs.startedAt;
+    }
 
     // SIGHUP: hot-reload instance config (add/remove/restart instances)
     const onSighup = () => {
@@ -1672,255 +1650,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }
   }
 
-  // ── Health HTTP endpoint ─────────────────────────────────────────────
-
-  private startHealthServer(port: number): void {
-    this.startedAt = Date.now();
-
-    // Generate web token before server starts so auth is enforced from the first request.
-    this.webToken = randomBytes(24).toString("hex");
-    const tokenPath = join(this.dataDir, "web.token");
-    writeFileSync(tokenPath, this.webToken, { mode: 0o600 });
-    // Defensive: if file existed previously with looser perms, tighten it.
-    try {
-      chmodSync(tokenPath, 0o600);
-    } catch {
-      // best-effort
-    }
-
-    this.healthServer = createServer((req, res) => {
-      res.setHeader("Content-Type", "application/json");
-
-      // Public health probe — no auth required.
-      if (req.method === "GET" && req.url === "/health") {
-        // fallthrough to existing handler below
-      } else {
-        // All other endpoints require a valid token. Accepts ?token= query,
-        // Authorization: Bearer <token>, or legacy X-Agend-Token header.
-        // /ui/* will also re-check in web-api.ts, which is harmless.
-        const parsedUrl = new URL(req.url ?? "/", `http://localhost:${port}`);
-        const providedToken = extractWebToken(parsedUrl, req.headers);
-        if (!this.webToken || providedToken !== this.webToken) {
-          res.writeHead(401);
-          res.end(JSON.stringify({ error: "Unauthorized" }));
-          return;
-        }
-      }
-
-      if (req.method === "GET" && req.url === "/health") {
-        const instanceCount = this.fleetConfig?.instances
-          ? Object.keys(this.fleetConfig.instances).length
-          : 0;
-        res.writeHead(200);
-        res.end(JSON.stringify({
-          status: "ok",
-          instances: instanceCount,
-          uptime: Math.floor((Date.now() - this.startedAt) / 1000),
-        }));
-        return;
-      }
-
-      if (req.method === "GET" && req.url === "/status") {
-        const instances = Object.keys(this.fleetConfig?.instances ?? {}).map(name => {
-          const statusFile = join(this.getInstanceDir(name), "statusline.json");
-          let context_pct = 0;
-          let cost = 0;
-          try {
-            const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-            context_pct = data.context_window?.used_percentage ?? 0;
-            cost = data.cost?.total_cost_usd ?? 0;
-          } catch (err) {
-            this.logger.debug({ err, name }, "statusline.json read failed (/status)");
-          }
-          return {
-            name,
-            status: this.getInstanceStatus(name),
-            context_pct,
-            cost,
-          };
-        });
-        res.writeHead(200);
-        res.end(JSON.stringify({ instances }));
-        return;
-      }
-
-      // Fleet API (enriched for agent board)
-      if (req.method === "GET" && req.url === "/api/fleet") {
-        const sysInfo = this.getSysInfo();
-        const enriched = sysInfo.instances.map(inst => {
-          const config = this.fleetConfig?.instances[inst.name];
-          // Find claimed tasks for this instance
-          let currentTask: string | null = null;
-          try {
-            const tasks = this.scheduler?.db.listTasks({ assignee: inst.name, status: "claimed" });
-            if (tasks?.length) currentTask = tasks[0].title;
-          } catch (err) {
-            this.logger.debug({ err, name: inst.name }, "Scheduler listTasks failed (/api/fleet)");
-          }
-          return {
-            ...inst,
-            description: config?.description ?? null,
-            backend: config?.backend ?? "claude-code",
-            tool_set: config?.tool_set ?? "full",
-            general_topic: config?.general_topic ?? false,
-            lastActivity: this.lastActivityMs(inst.name) || null,
-            currentTask,
-          };
-        });
-        // Same-origin only — token-bearing requests come from the dashboard
-        // served by this same daemon, so no CORS allowance is needed.
-        res.writeHead(200);
-        res.end(JSON.stringify({
-          ...sysInfo,
-          instances: enriched,
-        }));
-        return;
-      }
-
-      // Activity API
-      if (req.method === "GET" && req.url?.startsWith("/api/activity")) {
-        const url = new URL(req.url, `http://localhost:${port}`);
-        const sinceParam = url.searchParams.get("since") ?? "2h";
-        const limitParam = url.searchParams.get("limit") ?? "500";
-
-        const match = sinceParam.match(/^(\d+)(m|h|d)$/);
-        let sinceIso: string | undefined;
-        if (match) {
-          const val = parseInt(match[1], 10);
-          const unit = match[2] === "d" ? 86400000 : match[2] === "h" ? 3600000 : 60000;
-          sinceIso = new Date(Date.now() - val * unit).toISOString();
-        }
-
-        const rows = this.eventLog?.listActivity({ since: sinceIso, limit: parseInt(limitParam, 10) }) ?? [];
-        // Same-origin only — see /api/fleet rationale.
-        res.writeHead(200);
-        res.end(JSON.stringify(rows));
-        return;
-      }
-
-      // Activity viewer
-      if (req.method === "GET" && (req.url === "/activity" || req.url === "/activity/")) {
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.writeHead(200);
-        res.end(ACTIVITY_VIEWER_HTML);
-        return;
-      }
-
-      // Instance start via API
-      if (req.method === "POST" && req.url?.startsWith("/api/instance/") && req.url.endsWith("/start")) {
-        const name = decodeURIComponent(req.url.slice("/api/instance/".length, -"/start".length));
-        const config = this.fleetConfig?.instances[name];
-        if (!config) {
-          res.writeHead(404);
-          res.end(JSON.stringify({ error: `Instance not found: ${name}` }));
-          return;
-        }
-        (async () => {
-          try {
-            const topicMode = this.fleetConfig?.channel?.mode === "topic";
-            await this.startInstance(name, config, topicMode ?? false);
-            this.emitSseEvent("status", this.getUiStatus());
-            res.writeHead(200);
-            res.end(JSON.stringify({ ok: true }));
-          } catch (err) {
-            res.writeHead(500);
-            res.end(JSON.stringify({ error: `Start failed: ${(err as Error).message}` }));
-          }
-        })();
-        return;
-      }
-
-      // Instance restart (immediate, no idle wait)
-      if (req.method === "POST" && req.url?.startsWith("/restart/")) {
-        const name = decodeURIComponent(req.url.slice("/restart/".length));
-        this.logger.info({ name }, "Instance restart requested via HTTP");
-        (async () => {
-          try {
-            await this.restartSingleInstance(name);
-            this.logger.info({ name }, "Instance restarted");
-            this.emitSseEvent("status", this.getUiStatus());
-            res.writeHead(200);
-            res.end(JSON.stringify({ restarted: name }));
-          } catch (err) {
-            this.logger.error({ err, name }, "Instance restart failed");
-            const status = (err as Error).message.includes("not found") ? 404 : 500;
-            res.writeHead(status);
-            res.end(JSON.stringify({ error: `Restart failed: ${(err as Error).message}` }));
-          }
-        })();
-        return;
-      }
-
-      // ── Agent CLI endpoint ─────
-      if (req.url === "/agent" && req.method === "POST") {
-        handleAgentRequest(req, res, this as unknown as import("./agent-endpoint.js").AgentEndpointContext);
-        return;
-      }
-
-      // ── Web UI endpoints (delegated to web-api.ts) ─────
-
-      const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-      if (handleWebRequest(req, res, url, this as unknown as import("./web-api.js").WebApiContext)) return;
-
-      res.writeHead(404);
-      res.end(JSON.stringify({ error: "not found" }));
-    });
-
-    this.healthServer.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE") {
-        this.logger.warn({ port }, "Health port in use — attempting takeover");
-        const pidPath = join(this.dataDir, "fleet.pid");
-        try {
-          if (existsSync(pidPath)) {
-            const oldPid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
-            if (oldPid && oldPid !== process.pid) {
-              process.kill(oldPid, "SIGTERM");
-              this.logger.info({ oldPid }, "Killed old fleet process");
-            }
-          }
-        } catch (err) {
-          this.logger.debug({ err }, "Old fleet process kill skipped (already gone or no permission)");
-        }
-        setTimeout(() => {
-          if (!this.healthServer) return;
-          this.healthServer.listen(port, "127.0.0.1", () => {
-            this.logger.info({ port }, "Health endpoint listening (after takeover)");
-          }).on("error", () => {
-            this.logger.warn({ port }, "Health port still in use — skipping health endpoint");
-          });
-        }, 1500);
-        return;
-      }
-      this.logger.error({ err, port }, "Health server error");
-    });
-
-    this.healthServer.listen(port, "127.0.0.1", () => {
-      this.logger.info({ port }, "Health endpoint listening");
-    });
-
-    this.logger.info({ url: `http://localhost:${port}/ui?token=${this.webToken}` }, "Web UI available");
-  }
-
   getUiStatus(): unknown {
-    const instances = Object.keys(this.fleetConfig?.instances ?? {}).map(name => {
-      const statusFile = join(this.getInstanceDir(name), "statusline.json");
-      let context_pct = 0;
-      let cost = 0;
-      let model = "";
-      try {
-        const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-        context_pct = data.context_window?.used_percentage ?? 0;
-        cost = data.cost?.total_cost_usd ?? 0;
-        model = data.model?.display_name ?? "";
-      } catch (err) {
-        this.logger.debug({ err, name }, "statusline.json read failed (getUiStatus)");
-      }
-      return { name, status: this.getInstanceStatus(name), context_pct, cost, model };
-    });
-    return {
-      instances,
-      uptime: Math.floor((Date.now() - this.startedAt) / 1000),
-    };
+    return healthGetUiStatus(this, this.startedAt);
   }
+
 }
 

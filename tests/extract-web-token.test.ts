@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractWebToken } from "../src/fleet-manager.js";
+import { extractWebToken } from "../src/fleet-health-server.js";
 
 function url(qs = ""): URL {
   return new URL(`http://localhost:8080/api/fleet${qs}`);
