@@ -243,7 +243,7 @@ export async function runQuickstart(): Promise<void> {
 
       // Plugin check
       try {
-        execSync("node -e \"require.resolve('@suzuke/agend-plugin-discord')\"", { stdio: "pipe" });
+        execSync("npm list -g @suzuke/agend-plugin-discord --depth=0", { stdio: "pipe" });
         pluginInstalled = true;
       } catch { /* not installed */ }
       if (!pluginInstalled) {
@@ -313,7 +313,8 @@ export async function runQuickstart(): Promise<void> {
           console.log(`    ${i + 1}. ${textChannels[i].name} ${dim(`(${textChannels[i].id})`)}`);
         }
         const cChoice = await rl.question(`  Choose general channel [1]: `);
-        const cIdx = Math.max(0, Math.min(textChannels.length - 1, parseInt(cChoice || "1", 10) - 1));
+        const parsed = parseInt(cChoice || "1", 10);
+        const cIdx = isNaN(parsed) ? 0 : Math.max(0, Math.min(textChannels.length - 1, parsed - 1));
         generalChannelId = textChannels[cIdx].id;
         console.log(`  ${green("✓")} General channel: ${textChannels[cIdx].name} (${generalChannelId})`);
       } else {
