@@ -80,7 +80,20 @@ vi.mock("grammy", () => {
   // Expose handlers map so tests can fire them
   (globalThis as Record<string, unknown>).__grammyHandlers = handlers;
 
-  return { Bot: MockBot, InputFile: MockInputFile, InlineKeyboard: MockInlineKeyboard };
+  class MockGrammyError extends Error {
+    error_code: number;
+    constructor(message: string, error_code: number) {
+      super(message);
+      this.error_code = error_code;
+    }
+  }
+
+  return {
+    Bot: MockBot,
+    InputFile: MockInputFile,
+    InlineKeyboard: MockInlineKeyboard,
+    GrammyError: MockGrammyError,
+  };
 });
 
 // ── Imports after mock ────────────────────────────────────────────────────
@@ -175,6 +188,34 @@ describe("TelegramAdapter", () => {
   it("stop() stops the queue and bot", async () => {
     await adapter.start();
     await expect(adapter.stop()).resolves.toBeUndefined();
+  });
+
+  it("gives up after MAX_409_RETRIES on persistent 409 conflict", async () => {
+    vi.useFakeTimers();
+    try {
+      const grammy = await import("grammy");
+      const GrammyError = (grammy as unknown as { GrammyError: new (m: string, c: number) => Error & { error_code: number } }).GrammyError;
+      const bot = (adapter as unknown as { bot: { start: ReturnType<typeof vi.fn> } }).bot;
+      bot.start = vi.fn(() => Promise.reject(new GrammyError("conflict", 409)));
+
+      const errors: Error[] = [];
+      const conflicts: number[] = [];
+      adapter.on("error", (e: Error) => errors.push(e));
+      adapter.on("polling_conflict", ({ attempt }: { attempt: number }) => conflicts.push(attempt));
+
+      await adapter.start();
+      // Drain the 409 backoff loop (cap is 30 retries; max delay is 15s each)
+      for (let i = 0; i < 35; i++) {
+        await vi.advanceTimersByTimeAsync(15_000);
+      }
+
+      expect(bot.start).toHaveBeenCalledTimes(30);
+      expect(conflicts).toHaveLength(29); // emitted before each delay; final attempt skips delay
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toMatch(/giving up/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // ── sendText ─────────────────────────────────────────────────────────────

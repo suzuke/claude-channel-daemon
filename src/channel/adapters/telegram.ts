@@ -261,10 +261,11 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     });
 
     // 409 Conflict = another getUpdates consumer is active (official plugin zombie,
-    // or second Claude Code instance). Retry with backoff until the slot frees up.
-    // Pattern from official telegram plugin.
+    // or second Claude Code instance). Retry with backoff, but cap attempts so a
+    // permanently-stuck conflict does not loop forever.
+    const MAX_409_RETRIES = 30; // ~7 min total at 15s ceiling
     void (async () => {
-      for (let attempt = 1; ; attempt++) {
+      for (let attempt = 1; attempt <= MAX_409_RETRIES; attempt++) {
         try {
           await this.bot.start({
             drop_pending_updates: attempt === 1,
@@ -275,6 +276,12 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
           return; // bot.stop() was called — clean exit
         } catch (err) {
           if (err instanceof GrammyError && err.error_code === 409) {
+            if (attempt >= MAX_409_RETRIES) {
+              this.emit("error", new Error(
+                `Telegram polling: 409 conflict persisted after ${MAX_409_RETRIES} attempts; giving up`,
+              ));
+              return;
+            }
             const delay = Math.min(1000 * attempt, 15000);
             this.emit("polling_conflict", { attempt, delay });
             await new Promise(r => setTimeout(r, delay));

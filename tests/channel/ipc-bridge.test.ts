@@ -67,6 +67,31 @@ describe("IPC Bridge", () => {
     await client.connect(); // should work
   });
 
+  it("drops client when a single line exceeds the 1 MB buffer cap", async () => {
+    tmpDir = join(tmpdir(), `ccd-ipc-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    const sockPath = join(tmpDir, "test.sock");
+
+    server = new IpcServer(sockPath);
+    const received: unknown[] = [];
+    server.on("message", (msg) => received.push(msg));
+    await server.listen();
+
+    client = new IpcClient(sockPath);
+    let disconnected = false;
+    client.on("disconnect", () => { disconnected = true; });
+    await client.connect();
+
+    // Server-side: write a payload exceeding 1 MB on a single line (no \n)
+    // to trigger the line-parser overflow path.
+    const huge = "x".repeat(1_100_000);
+    server.broadcast({ type: "evil", payload: huge });
+
+    await new Promise(r => setTimeout(r, 200));
+    expect(received).toHaveLength(0); // overflow before parse
+    expect(disconnected).toBe(true);  // client socket destroyed
+  });
+
   it("rejects socket path exceeding OS limit", async () => {
     tmpDir = join(tmpdir(), `ccd-ipc-${Date.now()}`);
     mkdirSync(tmpDir, { recursive: true });

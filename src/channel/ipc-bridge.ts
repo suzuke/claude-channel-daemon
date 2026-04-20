@@ -15,7 +15,11 @@ function encode(msg: unknown): string {
   return JSON.stringify(msg) + "\n";
 }
 
-const MAX_LINE_BUFFER = 10 * 1024 * 1024; // 10 MB
+// 1 MB is well above any legitimate IPC payload (tool calls/responses,
+// schedule/decision/task lists). The previous 10 MB ceiling was loose
+// DoS protection — a runaway producer could buffer 10 MB per client
+// before being dropped.
+const MAX_LINE_BUFFER = 1 * 1024 * 1024;
 
 function makeLineParser(onMessage: (msg: unknown) => void, onOverflow?: () => void) {
   let buf = "";
