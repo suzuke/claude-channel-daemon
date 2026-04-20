@@ -111,9 +111,9 @@
 |---|---|---|---|
 | P4.1 | 拆檔（daemon.ts / fleet-manager.ts / cli.ts） | ⬜ | fleet-manager 仍 2819 行 |
 | P4.2 | `handleToolCall` 路由抽取 | 🟦 部分 | `outboundHandlers` Map + `routeToolCall` 已抽出，但 `daemon.ts:820-1002` 主分流仍是 180 行 if-chain |
-| P4.3 | `access-path` 驗證 | 🟦 部分 | `tool-router.ts assertSendable()` 有覆蓋 reply tools；`access-manager` 仍缺路徑驗證 |
-| P4.4 | `.env` 權限 + docs 同步 + validateTimezone 單一化 | ⬜ | `validateTimezone` 仍重複定義於 `config.ts` 與 `scheduler/scheduler.ts` |
-| P4.5 | 小修補集合 | ⬜ | `paths.ts:15,27` 仍用 `createHash("md5")`；無 logger rotation；無 cost-guard tiebreaker；「根目錄 test-perm-detect.ts」誤判（已在 .gitignore） |
+| P4.3 | `access-path` 驗證 | ✅ | `d5d41b7` `access-path.ts` 加 `assertSafeInstanceName` 拒 `..`/`/`/`\\`/NUL/empty；topic 模式不受影響 |
+| P4.4 | `.env` 權限 + validateTimezone 單一化 | ✅ | `49a4328` scheduler 改 import `config.ts` 的 `validateTimezone`；`quickstart.ts`/`setup-wizard.ts` 寫 `.env` 帶 `mode: 0o600` + chmod 兜底 |
+| P4.5 | 小修補集合 | 🟦 部分 | `1f91c3c` `paths.ts` md5 → sha256（避開 FIPS / 掃描器告警，預期會改 custom AGEND_HOME 的 tmux session/socket 後綴一次）；`test-perm-detect.ts` 已確認在 `.gitignore`；logger 仍只在啟動 truncate 一次（長駐 daemon 需排程，暫緩）；cost-guard tiebreaker 規格不明，暫緩 |
 | P4.6 | 測試 hygiene | ✅ | e2e 已在 `e2e/tests/`；單元測試使用 `waitFor`；無已知 hygiene 問題 |
 
 ---
@@ -173,6 +173,20 @@
   - `3474c04` P3.8 MessageQueue flood control 修復：原本 `runWorker` 在 backoff > 10s 後丟掉 status_update，但程式碼只有「已清理，重置 backoff」的死註解、實際沒重置；429 風暴後即使佇列瘦身也仍以 ~30s 重試。改為丟棄後立即把 backoff 重置為 1s 並寫 warn log。
 - 驗證：`npx tsc --noEmit` 綠；`npx vitest run` 482/482 全綠。
 - Phase 3 全綠，Phase 4 五項待開：P4.1 拆檔（fleet-manager 仍 2819 行）、P4.2 handleToolCall 主分流抽出、P4.3 access-path 驗證、P4.4 .env 權限 + validateTimezone 去重、P4.5 小修補集合。
+
+---
+
+**更新（2026-04-20，Phase 4 round 1：低風險小修）：**
+
+- PR #41 開出（round 1）— 3 commits 收束 Phase 4 中三項較小、可獨立 cherry-pick 的安全/衛生修補：
+  - `d5d41b7` P4.3 `access-path.ts` 加 `assertSafeInstanceName` — instance 名做 `^[A-Za-z0-9._-]+$` 白名單，拒 `..`/`/`/`\\`/NUL/empty。topic mode 不變（不嵌 instance）。新增 3 個測試。
+  - `49a4328` P4.4 `validateTimezone` 統一 — `scheduler/scheduler.ts` 移除本地副本，改 import `config.ts` 的版本（`(tz, field)` 簽名）；`quickstart.ts` / `setup-wizard.ts` 寫 `.env` 加 `mode: 0o600` + `chmodSync` 兜底（writeFileSync 的 mode 旗在覆寫舊檔時無效）。
+  - `1f91c3c` P4.5 `paths.ts:15,27` `createHash("md5")` → `sha256`（取前 6 hex），消除 FIPS / 掃描器告警。**行為改變**：custom AGEND_HOME 的 tmux session/socket 後綴會變一次，daemon 重啟自動同步，孤兒 tmux session 需手動清。預設 AGEND_HOME 不受影響（用字面量 `agend`）。
+- 驗證：`npx tsc --noEmit` 綠；`npx vitest run` 486/486 全綠（+4 新測試）。
+- 暫緩項：
+  - **P4.5 logger rotation** — 現行 `truncateLogIfNeeded` 只在啟動跑一次，長駐 daemon 的 log 仍會無上限增長。需要在 `createLogger` 後排個 `setInterval`（或 hook 到既有 scheduler）週期觸發，屬於小型 feature，留給下一輪。
+  - **P4.5 cost-guard tiebreaker** — 規格不明（fix-plan 只說「無 cost-guard tiebreaker」），程式碼也無對應 TODO。需要原作者澄清 tie 是指什麼場景才動。
+- 下一輪建議優先：**P4.1 拆檔**（fleet-manager.ts 仍 2819 行，Discord & Telegram 邏輯多處重複，拆出 `instance-lifecycle.ts`/`webhook-router.ts`/`channel-loader.ts` 應可砍 600-800 行）+ **P4.2 handleToolCall 路由表化**（`daemon.ts:820-1002` 180 行 if-chain → 改成 dispatcher map）。兩項都是大型 refactor，建議獨立 PR 各自可 review。
 
 ### Phase 1 commits（按時間由新到舊）
 
