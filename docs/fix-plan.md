@@ -110,7 +110,7 @@
 | ID | 項目 | 狀態 | Commit |
 |---|---|---|---|
 | P4.1 | 拆檔（daemon.ts / fleet-manager.ts / cli.ts） | ⬜ | fleet-manager 仍 2819 行 |
-| P4.2 | `handleToolCall` 路由抽取 | 🟦 部分 | `outboundHandlers` Map + `routeToolCall` 已抽出，但 `daemon.ts:820-1002` 主分流仍是 180 行 if-chain |
+| P4.2 | `handleToolCall` 路由抽取 | ✅ | `e6a9596` 抽出 `dispatchFleetRpc(fleetReqId, broadcast, timeoutMs, timeoutMessage, respond)`；五個 fleet-RPC 分支 + fleet_outbound 後備改用 helper，`handleToolCall` 從 182 行降到 ~120 行，daemon.ts 整體 -51 行 |
 | P4.3 | `access-path` 驗證 | ✅ | `d5d41b7` `access-path.ts` 加 `assertSafeInstanceName` 拒 `..`/`/`/`\\`/NUL/empty；topic 模式不受影響 |
 | P4.4 | `.env` 權限 + validateTimezone 單一化 | ✅ | `49a4328` scheduler 改 import `config.ts` 的 `validateTimezone`；`quickstart.ts`/`setup-wizard.ts` 寫 `.env` 帶 `mode: 0o600` + chmod 兜底 |
 | P4.5 | 小修補集合 | 🟦 部分 | `1f91c3c` `paths.ts` md5 → sha256（避開 FIPS / 掃描器告警，預期會改 custom AGEND_HOME 的 tmux session/socket 後綴一次）；`test-perm-detect.ts` 已確認在 `.gitignore`；logger 仍只在啟動 truncate 一次（長駐 daemon 需排程，暫緩）；cost-guard tiebreaker 規格不明，暫緩 |
@@ -187,6 +187,17 @@
   - **P4.5 logger rotation** — 現行 `truncateLogIfNeeded` 只在啟動跑一次，長駐 daemon 的 log 仍會無上限增長。需要在 `createLogger` 後排個 `setInterval`（或 hook 到既有 scheduler）週期觸發，屬於小型 feature，留給下一輪。
   - **P4.5 cost-guard tiebreaker** — 規格不明（fix-plan 只說「無 cost-guard tiebreaker」），程式碼也無對應 TODO。需要原作者澄清 tie 是指什麼場景才動。
 - 下一輪建議優先：**P4.1 拆檔**（fleet-manager.ts 仍 2819 行，Discord & Telegram 邏輯多處重複，拆出 `instance-lifecycle.ts`/`webhook-router.ts`/`channel-loader.ts` 應可砍 600-800 行）+ **P4.2 handleToolCall 路由表化**（`daemon.ts:820-1002` 180 行 if-chain → 改成 dispatcher map）。兩項都是大型 refactor，建議獨立 PR 各自可 review。
+
+---
+
+**更新（2026-04-20，Phase 4 round 2：handleToolCall 收斂）：**
+
+- PR #42 開出（round 2）— 1 commit：
+  - `e6a9596` P4.2 daemon `handleToolCall` 抽出 `dispatchFleetRpc(fleetReqId, broadcast, timeoutMs, timeoutMessage, respond)`；五個 fleet-RPC 分支（`set_display_name/set_description`、`task`、decisions、schedules、cross-instance）+ topic-mode `fleet_outbound` 後備全部改用 helper，每個分支只剩 broadcast 形狀與 timeout 兩個變項。`handleToolCall` 從 182 行降到 ~120 行；`daemon.ts` 整體 1645 → 1594 行（-51）。**純結構整理，無行為差異**；486 全測試綠（含 critical-coverage 與 integration-e2e 涵蓋的 RPC 往返）。
+- 暫緩項持續：
+  - **P4.5 logger rotation** — 重新評估後維持原狀。現行 `truncateLogIfNeeded` 在 `createLogger` 開始時跑一次（在 pino 開檔之前），因此每次 daemon 重啟會重置。改成 `setInterval` 週期 truncate **不安全**：pino 的 `SonicBoom` 流持有 fd，外部從 0 偏移截斷後 pino 下一筆寫入會落在原 offset，產生稀疏檔（中間是 NUL bytes）。要做真正 rotation 需引入 `pino-roll` 等 dependency 或改用外部 logrotate；屬 feature，不屬 fix。長駐 daemon 用戶若 log 過大應週期性重啟，或自行配 logrotate。
+  - **P4.5 cost-guard tiebreaker** — 規格仍不明，待原作者澄清。
+- 下一輪建議優先：**P4.1 拆檔**（fleet-manager.ts，獨立 PR）。Phase 4 完成度：P4.2/P4.3/P4.4 全綠，P4.5 已交付主要兩項，P4.6 已綠，剩 P4.1。
 
 ### Phase 1 commits（按時間由新到舊）
 
