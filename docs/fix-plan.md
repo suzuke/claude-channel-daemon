@@ -109,7 +109,7 @@
 
 | ID | 項目 | 狀態 | Commit |
 |---|---|---|---|
-| P4.1 | 拆檔（daemon.ts / fleet-manager.ts / cli.ts） | ⬜ | fleet-manager 仍 2819 行 |
+| P4.1 | 拆檔（daemon.ts / fleet-manager.ts / cli.ts） | ✅ | `b674a11`+`2336db4`+`d555c33`+`d38b0b2` `fleet-manager.ts` 2842→1658 行（-1184）。抽出 4 個模組：`fleet-dashboard-html.ts`（dashboard HTML 常數，442 行）、`fleet-instructions.ts`（GENERAL_INSTRUCTIONS + ensureGeneralInstructions，168 行）、`fleet-rpc-handlers.ts`（5 個 IPC CRUD + 5 個 HTTP CRUD + summarizeToolCall + resolveDisplayName，387 行；FleetManager 留 thin forwarder 給 *Http 因 AgentEndpointContext 要求）、`fleet-health-server.ts`（startHealthServer + getUiStatus + extractWebToken，326 行）。daemon.ts/cli.ts 留待後續輪次。 |
 | P4.2 | `handleToolCall` 路由抽取 | ✅ | `e6a9596` 抽出 `dispatchFleetRpc(fleetReqId, broadcast, timeoutMs, timeoutMessage, respond)`；五個 fleet-RPC 分支 + fleet_outbound 後備改用 helper，`handleToolCall` 從 182 行降到 ~120 行，daemon.ts 整體 -51 行 |
 | P4.3 | `access-path` 驗證 | ✅ | `d5d41b7` `access-path.ts` 加 `assertSafeInstanceName` 拒 `..`/`/`/`\\`/NUL/empty；topic 模式不受影響 |
 | P4.4 | `.env` 權限 + validateTimezone 單一化 | ✅ | `49a4328` scheduler 改 import `config.ts` 的 `validateTimezone`；`quickstart.ts`/`setup-wizard.ts` 寫 `.env` 帶 `mode: 0o600` + chmod 兜底 |
