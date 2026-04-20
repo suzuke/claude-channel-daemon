@@ -451,6 +451,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         (schedule) => this.handleScheduleTrigger(schedule),
         schedulerConfig,
         (name) => this.fleetConfig?.instances?.[name] != null,
+        this.logger,
       );
       this.scheduler.init();
       this.logger.info("Scheduler initialized");

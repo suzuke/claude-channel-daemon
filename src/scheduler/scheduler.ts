@@ -1,6 +1,7 @@
 import { Cron } from "croner";
 import { SchedulerDb } from "./db.js";
 import type { Schedule, CreateScheduleParams, UpdateScheduleParams, SchedulerConfig, ScheduleRun } from "./types.js";
+import type { Logger } from "../logger.js";
 
 /**
  * Reject unknown timezones. Uses `Intl.DateTimeFormat`, which throws RangeError
@@ -35,6 +36,7 @@ export class Scheduler {
     onTrigger: (schedule: Schedule) => void | Promise<void>,
     config: SchedulerConfig,
     isValidInstance: (name: string) => boolean,
+    private logger?: Logger,
   ) {
     this.db = new SchedulerDb(dbPath);
     this.onTrigger = onTrigger;
@@ -73,6 +75,15 @@ export class Scheduler {
         if (nextMs > now) continue;       // not yet due
         if (nextMs < cutoff) continue;    // too old, don't spam
         if (this.executing.has(schedule.id)) continue;
+        // Distinguish catch-up fires from regular cron fires in the log so
+        // a "why did I just get a 9am standup at 3pm?" question is answerable.
+        this.logger?.info({
+          id: schedule.id,
+          label: schedule.label,
+          cron: schedule.cron,
+          missedAt: new Date(nextMs).toISOString(),
+          delayMs: now - nextMs,
+        }, "Scheduler catch-up: firing missed run");
         this.runWithLock(schedule);
       } catch {
         // Bad cron expression or croner edge case — skip rather than crash init

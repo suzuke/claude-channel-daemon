@@ -5,6 +5,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import Database from "better-sqlite3";
 import { Scheduler } from "../src/scheduler/scheduler.js";
 import { DEFAULT_SCHEDULER_CONFIG, type Schedule } from "../src/scheduler/types.js";
+import type { Logger } from "../src/logger.js";
 
 /**
  * Seed last_triggered_at directly via raw sqlite — Scheduler/SchedulerDb
@@ -34,12 +35,14 @@ describe("Scheduler — catch-up on init", () => {
   let dbPath: string;
   let fired: Schedule[];
   let scheduler: Scheduler | null;
+  let infoLogs: Array<{ obj: Record<string, unknown>; msg: string }>;
 
   beforeEach(() => {
     tmpDir = join(tmpdir(), `sched-catchup-${Date.now()}-${Math.random()}`);
     mkdirSync(tmpDir, { recursive: true });
     dbPath = join(tmpDir, "scheduler.db");
     fired = [];
+    infoLogs = [];
     scheduler = null;
   });
 
@@ -49,11 +52,18 @@ describe("Scheduler — catch-up on init", () => {
   });
 
   function makeScheduler(): Scheduler {
+    const noop = () => {};
+    const logger = {
+      info: (obj: Record<string, unknown>, msg: string) => infoLogs.push({ obj, msg }),
+      warn: noop, error: noop, debug: noop, trace: noop, fatal: noop,
+      child: () => logger,
+    } as unknown as Logger;
     return new Scheduler(
       dbPath,
       (s) => { fired.push(s); },
       DEFAULT_SCHEDULER_CONFIG,
       () => true,
+      logger,
     );
   }
 
@@ -142,5 +152,21 @@ describe("Scheduler — catch-up on init", () => {
     scheduler.init();
 
     expect(fired).toHaveLength(1);
+  });
+
+  it("logs catch-up fires distinctly so they can be told apart from regular cron fires", () => {
+    const s = createSchedule("* * * * *");
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    setLastTriggered(dbPath, s.id, fiveMinAgo);
+
+    scheduler = makeScheduler();
+    scheduler.init();
+
+    const catchUpLog = infoLogs.find((l) => l.msg.includes("catch-up"));
+    expect(catchUpLog).toBeDefined();
+    expect(catchUpLog!.obj.id).toBe(s.id);
+    expect(catchUpLog!.obj.cron).toBe("* * * * *");
+    expect(typeof catchUpLog!.obj.missedAt).toBe("string");
+    expect(typeof catchUpLog!.obj.delayMs).toBe("number");
   });
 });
