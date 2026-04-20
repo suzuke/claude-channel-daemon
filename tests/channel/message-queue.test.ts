@@ -129,6 +129,58 @@ describe("MessageQueue", () => {
     expect(callCount).toBeGreaterThanOrEqual(2);
   });
 
+  it("flood control drop also resets backoff (P3.8)", async () => {
+    // Reproduces the P3.8 bug: under sustained 429s, backoff grew past 10s,
+    // status_updates were dropped, but backoff stayed high — so even after
+    // shedding load the queue waited a full ~30s between retries.
+    let n429 = 0;
+    const sent: string[] = [];
+    const sendFn = vi.fn(async (_c: string, _t: string | undefined, text: string) => {
+      // Throw 429 enough times to push backoff past FLOOD_CONTROL_THRESHOLD_MS (10s).
+      // Backoff doubles 1→2→4→8→16: the 5th failure makes backoffMs = 16s.
+      if (n429 < 5) {
+        n429++;
+        const err = new Error("Too Many Requests") as Error & { status?: number };
+        err.status = 429;
+        throw err;
+      }
+      sent.push(text);
+      return { messageId: "m" };
+    });
+    const warnSpy = vi.fn();
+    const queue = new MessageQueue(
+      { send: sendFn, edit: vi.fn(), sendFile: vi.fn(async () => ({ messageId: "f" })) },
+      { warn: warnSpy },
+    );
+
+    queue.enqueue("c1", undefined, { type: "content", text: "important" });
+    for (let i = 0; i < 50; i++) {
+      queue.enqueue("c1", undefined, { type: "status_update", text: `status-${i}` });
+    }
+    queue.start();
+
+    // Allow time for: 5 failures (cumulative backoff ≈ 1+2+4+8 = 15s of waits if
+    // not reset). After flood drop resets backoff to 1s, a 6th attempt should
+    // succeed within ~1s. We give the queue a generous window but well under
+    // the unbounded-backoff worst case.
+    await new Promise(r => setTimeout(r, 20_000));
+    queue.stop();
+
+    // Flood control should have logged at least once.
+    const floodWarn = warnSpy.mock.calls.find(c =>
+      String((c[1] ?? c[0]?.msg ?? "")).includes("flood control")
+      || String(c[1] ?? "").includes("flood control"),
+    );
+    expect(floodWarn).toBeDefined();
+
+    // Surviving content should have been delivered.
+    expect(sent).toContain("important");
+
+    // The 50 status_updates should have been mostly dropped, not all delivered.
+    const statusSent = sent.filter(t => t.startsWith("status-")).length;
+    expect(statusSent).toBeLessThan(50);
+  }, 30_000);
+
   it("drops status_update items during flood control (backoff > 10s)", async () => {
     const sent: string[] = [];
     let callCount = 0;

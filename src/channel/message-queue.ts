@@ -122,7 +122,15 @@ export class MessageQueue {
         const before = state.items.length;
         state.items = state.items.filter(item => item.type !== "status_update");
         if (before !== state.items.length) {
-          // Items were dropped; reset backoff now that we've cleaned up
+          // Items were dropped; reset backoff so we retry the surviving
+          // (presumably more important) content sooner instead of waiting
+          // out the full exponential delay.
+          state.backoffMs = INITIAL_BACKOFF_MS;
+          state.backoffUntil = 0;
+          this.logger?.warn(
+            { chatId: state.key.chatId, dropped: before - state.items.length },
+            "MessageQueue flood control: dropped status_update items, backoff reset",
+          );
         }
       }
 
