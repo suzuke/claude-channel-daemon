@@ -37,7 +37,7 @@ import { InstanceLifecycle, type LifecycleContext } from "./instance-lifecycle.j
 import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
 import { StatuslineWatcher, type StatuslineWatcherContext } from "./statusline-watcher.js";
 import { outboundHandlers, type OutboundContext } from "./outbound-handlers.js";
-import { handleWebRequest } from "./web-api.js";
+import { handleWebRequest, broadcastSseEvent } from "./web-api.js";
 import { handleAgentRequest, type AgentEndpointContext } from "./agent-endpoint.js";
 
 import { getTmuxSession } from "./config.js";
@@ -1555,10 +1555,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   /** Push an SSE event to all connected Web UI clients. */
   emitSseEvent(event: string, data: unknown): void {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const client of this.sseClients) {
-      client.write(payload);
-    }
+    broadcastSseEvent(this.sseClients, event, data, (err) =>
+      this.logger.debug({ err }, "SSE client write failed; evicting"),
+    );
   }
 
   listClaimedTasks(assignee: string): Array<{ id: string; title: string }> {
