@@ -327,6 +327,16 @@ export class Daemon extends EventEmitter {
 
     const scheduleNext = () => {
       this.healthCheckTimer = setTimeout(async () => {
+        // Instance directory removed externally (e.g. `rm -rf ~/.agend/instances/<name>`).
+        // Stop the loop permanently — otherwise every tick triggers a respawn, whose
+        // writeRotationSnapshot fails with ENOENT and gets caught as "Failed to respawn",
+        // spamming errors every ~30s forever.
+        if (!existsSync(this.instanceDir)) {
+          this.logger.warn({ instanceDir: this.instanceDir }, "Instance directory missing — stopping health check");
+          this.healthCheckPaused = true;
+          this.healthCheckTimer = null;
+          return;
+        }
         if (!this.tmux || this.spawning || this.healthCheckPaused || Daemon.tmuxServerPaused) {
           scheduleNext();
           return;
