@@ -41,7 +41,6 @@ import { handleWebRequest, broadcastSseEvent } from "./web-api.js";
 import { handleAgentRequest, type AgentEndpointContext } from "./agent-endpoint.js";
 import { ensureGeneralInstructions } from "./fleet-instructions.js";
 import { rpcHandlers, summarizeToolCall, resolveDisplayName as rpcResolveDisplayName } from "./fleet-rpc-handlers.js";
-import { ACTIVITY_VIEWER_HTML } from "./fleet-dashboard-html.js";
 import { startHealthServer, getUiStatus as healthGetUiStatus } from "./fleet-health-server.js";
 
 import { getTmuxSession } from "./config.js";
