@@ -54,6 +54,16 @@ async function listDiscordGuilds(token: string): Promise<{ id: string; name: str
   } catch { return []; }
 }
 
+export async function listDiscordChannels(token: string, guildId: string): Promise<{ id: string; name: string; type: number }[]> {
+  try {
+    const res = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
+      headers: { Authorization: `Bot ${token}` },
+    });
+    if (!res.ok) return [];
+    return (await res.json()) as { id: string; name: string; type: number }[];
+  } catch { return []; }
+}
+
 // ── Telegram group + user detection ──────────────────────
 
 const DETECT_TIMEOUT = 3 * 60_000;
@@ -190,6 +200,9 @@ export async function runQuickstart(): Promise<void> {
     let groupId = "";
     let userId = "";
     let tokenEnvName = "";
+    let generalChannelId = "";
+    let categoryName = "";
+    let pluginInstalled = false;
 
     if (channel === "telegram") {
       // ── Telegram flow ──────────────────────────────────
@@ -226,8 +239,22 @@ export async function runQuickstart(): Promise<void> {
 
     } else {
       // ── Discord flow ───────────────────────────────────
+      const totalSteps = 5;
 
-      console.log(bold("Step 3/4: Discord Bot"));
+      // Plugin check
+      try {
+        execSync("npm list -g @suzuke/agend-plugin-discord --depth=0", { stdio: "pipe" });
+        pluginInstalled = true;
+      } catch { /* not installed */ }
+      if (!pluginInstalled) {
+        console.log(`  ${yellow("⚠")} Discord plugin not found. Install with:`);
+        console.log(`    ${bold("npm install -g @suzuke/agend-plugin-discord")}\n`);
+        const cont = await rl.question("  Continue setup anyway? [Y/n] ");
+        if (cont.toLowerCase() === "n") { rl.close(); return; }
+        console.log();
+      }
+
+      console.log(bold(`Step 3/${totalSteps}: Discord Bot`));
       console.log(`  1. Go to Discord Developer Portal: ${dim("https://discord.com/developers/applications")}`);
       console.log(`  2. New Application → Bot → Reset Token → Copy`);
       console.log(`  3. Enable ${bold("Message Content Intent")} under Bot → Privileged Gateway Intents\n`);
@@ -246,7 +273,7 @@ export async function runQuickstart(): Promise<void> {
         break;
       }
 
-      console.log(bold("Step 4/4: Guild & User ID"));
+      console.log(bold(`Step 4/${totalSteps}: Guild & User ID`));
 
       // Auto-detect guilds
       const guilds = await listDiscordGuilds(token);
@@ -273,6 +300,32 @@ export async function runQuickstart(): Promise<void> {
       console.log(`  Discord Settings → Advanced → ${bold("Developer Mode")} ON → Right-click yourself → Copy User ID\n`);
       userId = (await rl.question("  Paste your User ID: ")).trim();
       console.log(`  ${green("✓")} User: ${userId}\n`);
+
+      // ── General channel selection ──────────────────────
+      console.log(bold(`Step 5/${totalSteps}: General Channel`));
+
+      const channels = await listDiscordChannels(token, groupId);
+      const textChannels = channels.filter(c => c.type === 0).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 20);
+
+      if (textChannels.length > 0) {
+        console.log("  Text channels in your server:");
+        for (let i = 0; i < textChannels.length; i++) {
+          console.log(`    ${i + 1}. ${textChannels[i].name} ${dim(`(${textChannels[i].id})`)}`);
+        }
+        const cChoice = await rl.question(`  Choose general channel [1]: `);
+        const parsed = parseInt(cChoice || "1", 10);
+        const cIdx = isNaN(parsed) ? 0 : Math.max(0, Math.min(textChannels.length - 1, parsed - 1));
+        generalChannelId = textChannels[cIdx].id;
+        console.log(`  ${green("✓")} General channel: ${textChannels[cIdx].name} (${generalChannelId})`);
+      } else {
+        generalChannelId = (await rl.question("  Paste general channel ID: ")).trim();
+        if (generalChannelId) {
+          console.log(`  ${green("✓")} General channel: ${generalChannelId}`);
+        }
+      }
+
+      categoryName = (await rl.question(`\n  Category name for agent channels [AgEnD Agents]: `)).trim() || "AgEnD Agents";
+      console.log(`  ${green("✓")} Category: ${categoryName}\n`);
     }
 
     // ── Project roots ────────────────────────────────────
@@ -317,6 +370,13 @@ export async function runQuickstart(): Promise<void> {
     const qGid = groupId.length >= 16 ? `"${groupId}"` : groupId;
     const qUid = userId.length >= 16 ? `"${userId}"` : userId;
 
+    // Build Discord options block
+    const discordOptions: string[] = [];
+    if (channel === "discord") {
+      if (generalChannelId) discordOptions.push(`    general_channel_id: "${generalChannelId}"`);
+      if (categoryName && categoryName !== "AgEnD Agents") discordOptions.push(`    category_name: "${categoryName}"`);
+    }
+
     const fleetYaml = [
       "channel:",
       `  type: ${channel}`,
@@ -327,6 +387,7 @@ export async function runQuickstart(): Promise<void> {
       "    mode: locked",
       "    allowed_users:",
       `      - ${qUid}`,
+      ...(discordOptions.length > 0 ? ["  options:", ...discordOptions] : []),
       "",
       ...(projectRoots.length > 0
         ? ["project_roots:", ...projectRoots.map(p => `  - ${p}`), ""]
@@ -352,10 +413,16 @@ export async function runQuickstart(): Promise<void> {
     console.log(`\n${bold("═══ Setup Complete ═══")}\n`);
     if (channel === "discord") {
       console.log("  Next steps:");
-      console.log(`    1. ${bold("npm install -g @suzuke/agend-plugin-discord")}`);
-      console.log(`    2. ${dim("(Optional)")} Edit ~/.agend/fleet.yaml to customize`);
-      console.log(`    3. ${bold("agend fleet start")}`);
-      console.log(`    4. Talk to ${botUsername} in your Discord server\n`);
+      if (!pluginInstalled) {
+        console.log(`    1. ${bold("npm install -g @suzuke/agend-plugin-discord")}`);
+        console.log(`    2. ${dim("(Optional)")} Edit ~/.agend/fleet.yaml to customize`);
+        console.log(`    3. ${bold("agend fleet start")}`);
+        console.log(`    4. Talk to ${botUsername} in your Discord server\n`);
+      } else {
+        console.log(`    1. ${dim("(Optional)")} Edit ~/.agend/fleet.yaml to customize`);
+        console.log(`    2. ${bold("agend fleet start")}`);
+        console.log(`    3. Talk to ${botUsername} in your Discord server\n`);
+      }
     } else {
       console.log("  Next steps:");
       console.log(`    1. ${dim("(Optional)")} Edit ~/.agend/fleet.yaml to customize`);
