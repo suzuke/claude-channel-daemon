@@ -6,6 +6,11 @@
 
 ## [未發佈] (Unreleased)
 
+## [1.24.0] - 2026-04-21
+
+### 新增 (Added)
+- **Discord quickstart 體驗改進** (PR #48) — `agend quickstart` 在走 Discord 流程前會先檢查是否安裝 `@suzuke/agend-plugin-discord`，並自動呼叫 Discord API 列出文字頻道供使用者挑選 `options.general_channel_id`，同時詢問 `options.category_name`。若 plugin 未安裝會顯示安裝提示並允許選擇繼續。
+
 ## [1.23.1] - 2026-04-21
 
 ### 修復 (Fixed)
