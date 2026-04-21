@@ -54,7 +54,7 @@ async function listDiscordGuilds(token: string): Promise<{ id: string; name: str
   } catch { return []; }
 }
 
-async function listDiscordChannels(token: string, guildId: string): Promise<{ id: string; name: string; type: number }[]> {
+export async function listDiscordChannels(token: string, guildId: string): Promise<{ id: string; name: string; type: number }[]> {
   try {
     const res = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
       headers: { Authorization: `Bot ${token}` },
