@@ -10,6 +10,18 @@
   </p>
 </p>
 
+> [!WARNING]
+> **AgEnD 已進入維護模式。** 新功能開發已轉移到
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** — 用 Rust 重寫，
+> 原生 PTY 多工、跨平台支援（macOS / Linux / Windows）、內建多 pane TUI。所有新功能
+> 都會在那邊推出。
+>
+> 本套件仍會收到安全性修正和 backend CLI 相容性更新，但不再加新功能。既有的
+> `@suzuke/agend` 安裝不會壞。
+>
+> `agend-terminal` 目前是 pre-alpha — 建議等到 1.0 再遷移，或現在就試（請接受 API
+> 會變）。
+
 AgEnD（**Agent Engineering Daemon**）把你的 Telegram 或 Discord 變成 AI coding agent 的指揮中心。一個 bot，多種 CLI 後端，無限專案 — 每個都是獨立 session，crash 自動恢復，不用顧。
 
 <p align="center">

@@ -10,6 +10,19 @@
   </p>
 </p>
 
+> [!WARNING]
+> **AgEnD is in maintenance mode.** Active development has moved to
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** — a Rust rewrite with
+> native PTY multiplexing, cross-platform support (macOS / Linux / Windows), and a
+> built-in multi-pane TUI. All new features land there.
+>
+> This package continues to receive security fixes and backend CLI compatibility
+> updates, but no new features will be added. Existing `@suzuke/agend` installs keep
+> working.
+>
+> `agend-terminal` is currently pre-alpha — wait for 1.0 to migrate, or try it now if
+> you're comfortable with breaking changes.
+
 AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a command center for AI coding agents. One bot, multiple CLI backends, unlimited projects — each running as an independent session with crash recovery and zero babysitting.
 
 <p align="center">
