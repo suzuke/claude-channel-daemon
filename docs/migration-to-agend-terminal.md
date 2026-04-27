@@ -16,7 +16,48 @@
 
 ## Why migrate? {#why-migrate}
 
-*(Phase C — covers: motivation, agend-terminal feature delta over @suzuke/agend, when not to migrate, supported migration window.)*
+`@suzuke/agend` is in maintenance mode. New features land in `agend-terminal`. This section is the honest version of the value-prop and the cost — direct, not marketing.
+
+### What you gain
+
+- **Native PTY multiplexing.** The Rust daemon talks to PTYs directly via the cross-platform `portable-pty` crate (which uses `openpty` on Unix, `ConPTY` on Windows). `@suzuke/agend` shells out to `tmux new-window` for every backend launch and inherits every tmux gotcha (server crashes, stale window IDs, attach quirks). On Rust, the daemon's own TUI is the multiplexer.
+- **Cross-platform support.** macOS / Linux / Windows on Rust; macOS / Linux only on TS (`tmux` does not run natively on Windows). `which::which` honours `PATHEXT` so `claude.cmd` / `codex.ps1` resolve correctly on Windows.
+- **Type safety where it matters.** The migration items in [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff) — `group_id` precision, `topic_id` width, `outbound_capabilities` enum closure — are checked at config load on Rust. The TS daemon learned the same lessons through bug reports.
+- **Async daemon, no per-instance Node process.** Rust spawns each agent as a child process under one daemon binary. The TS daemon is a single Node process but the runtime overhead per instance is materially higher than a Rust task; heavy fleets (>5 simultaneous instances) feel this most.
+- **One source-of-truth backend table.** `BackendPreset` centralises every backend's spawn flags / resume mode / instructions delivery. On TS, the same surface is split across five `CliBackend` classes, and per-backend behaviour drifts. See [§4 Backend invocation diff](#backend-invocation-diff) for the side-by-side.
+- **A built-in TUI.** `agend-terminal app` gives you a multi-pane terminal app over the running daemon. `@suzuke/agend` has only the web UI (`agend web`); the TUI is a Rust-only feature.
+
+### Why `@suzuke/agend` is being deprecated
+
+- **JS `Number.MAX_SAFE_INTEGER`** (2^53 − 1) bites the moment you use Discord guild IDs without quoting; Telegram supergroup IDs sit safely below the threshold but the workaround discipline ("always quote large IDs") was inconsistent across the codebase. Rust's `i64` covers both with bare-int form — see [High-friction #2](#fleet-yaml-schema-diff).
+- **`tmux` as the multiplexer** locks the daemon out of Windows entirely and adds a layer where bugs hide ("the pane went dark; was it the agent, the tmux server, or the wrapper script?").
+- **Process management overhead.** Each spawned backend lives inside a tmux pane managed via signal-capturing wrapper scripts and PTY-output regex on TS. Rust drives the PTY directly.
+- **Implicit channel ACLs.** TS treats every outbound MCP call as universally available to every instance. Rust's PR #230 introduced an explicit `outbound_capabilities` allowlist — a security-relevant default that cannot be retrofitted to TS without breaking existing fleets.
+
+### Should you migrate now?
+
+Migrate **immediately** if any of the following applies:
+
+- You run more than ~5 instances simultaneously (fleet performance and daemon overhead).
+- Your operators are on Windows or you want them to be.
+- You depend on the TUI for fleet observability (web UI is enough on Rust too, but the TUI is a step up).
+- You hit the cost-guard pause flow regularly — Rust honours the per-target gate at every outbound surface, plus the explicit-allowlist context for [`outbound_capabilities`](#fleet-yaml-schema-diff).
+
+You can **defer** if:
+
+- You run a single Telegram-bound instance, with one or two operators, no Discord, no Windows users.
+- Your fleet config is stable and you do not need the new fields.
+- You have not hit the JS `Number` precision issues yet (small fleet, no Discord, no Windows precision-sensitive usage).
+
+### Pre-alpha caveat
+
+`agend-terminal` is currently **pre-alpha**. The schema and CLI surface are still in flux — Sprint 22 P0 (`outbound_capabilities` flipping from optional to required) is one example; the Sprint 23 hard-error behaviour for the same field is another. Before migrating:
+
+1. **Pin the version.** Use a specific Cargo install / GitHub release tag, not `main`.
+2. **Read each release's notes** before upgrading. The 2-stage transitions (warn-but-permit → hard error) move quickly between releases right now.
+3. **Keep your `@suzuke/agend` install and `fleet.yaml` backup.** See [§6 Migration steps](#migration-steps) for the rollback procedure.
+
+The maintenance-mode commitment for `@suzuke/agend` is security fixes and backend CLI compatibility updates only — it will not gain new features. The migration window is open as long as `agend-terminal` is pre-1.0 and `@suzuke/agend` continues to receive security fixes.
 
 ## CLI flag mapping {#cli-flag-mapping}
 
@@ -498,8 +539,157 @@ Rust does not currently expose tool-set profiles in `src/mcp/tools.rs` — every
 
 ## Migration steps {#migration-steps}
 
-*(Phase C — covers: pre-flight checklist, `agend-terminal migrate` invocation if available, dual-run period, rollback, post-migration validation.)*
+A 7-stage actionable plan. Sections 2 / 3 / 4 / 5 are the reference material; this section is the order of operations.
+
+### 1. Pre-migration audit (in TS)
+
+Inventory the state you depend on. Before touching `agend-terminal`, on the existing `@suzuke/agend` install:
+
+- `agend ls` — list every running instance plus its `working_directory` and `topic_id` if any. Save the output.
+- `agend topic list` — list every Telegram topic binding. Save the output.
+- `agend access list` — list every entry in `channel.access.allowed_users`. Save the output. Note whether your `access.mode` is `pairing` or `locked` — this matters for [Phase A High-friction #1](#fleet-yaml-schema-diff).
+- `agend schedule list` — list every active schedule. Save the output. Note: schedules don't have a Rust CLI equivalent; you'll re-create them via the MCP tool surface or the TUI overlay (see [§2 Schedule group](#cli-flag-mapping)).
+- Read `~/.agend/fleet.yaml` end-to-end. Know which fields you've populated; the [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff) will tell you which of them have a Rust home and which don't.
+- `agend fleet history` and `agend fleet activity` if you depend on either — note that neither has a Rust CLI equivalent (read log files directly under `$AGEND_HOME` on Rust).
+
+If you commit `AGENTS.md` / `GEMINI.md` to any repo your fleet touches, audit them now. Phase B documents the [OpenCode behaviour change to write `AGENTS.md`](#backend-invocation-diff); your `.gitignore` posture matters.
+
+### 2. Snapshot data
+
+Take three durable copies before you change anything:
+
+```bash
+# Copy fleet config
+cp ~/.agend/fleet.yaml ~/.agend/fleet.yaml.pre-migration.backup
+
+# Copy the entire $AGEND_HOME (decisions DB, instance state, daemon log, etc.)
+tar czf ~/agend-home-pre-migration-$(date +%Y%m%d).tar.gz -C "$HOME" .agend
+
+# Note your @suzuke/agend version
+agend --version > ~/agend-version-pre-migration.txt
+```
+
+The third file is the rollback target — write it down so you can re-install the exact same version if needed.
+
+### 3. Choose a migration mode
+
+- **Greenfield (fresh install)** — recommended unless you have meaningful historic state worth carrying. `agend-terminal init` from scratch with a hand-authored `fleet.yaml` derived from §3. Discard `@suzuke/agend` history except the backups in step 2. Faster, cleaner, surfaces schema differences early.
+- **In-place** — copy `~/.agend/fleet.yaml` to the Rust daemon's config location, then mutate it through §3's diff table until the daemon accepts the load. Slower, more debugging, more useful for fleets with non-trivial decision history or template usage. **Do not skip step 2 if you go this route.**
+
+If you're undecided, start greenfield in a sandbox VM, see how it goes, and only do in-place once you're comfortable with the Rust schema and CLI shape.
+
+### 4. Workflow change: git worktree per branch
+
+`agend-terminal` expects each instance to spawn in a **unique working directory** — for git repos this means one git worktree per branch the daemon is operating on. This is encoded in the Rust resume strategy (each backend's `ContinueInCwd { flag }` mode keys "most recent session" by cwd, so distinct cwds are how distinct sessions stay distinct). It is also a hard rule in the global `CLAUDE.md` operator policy.
+
+If your `@suzuke/agend` workflow had multiple instances editing the same checkout (different branches via `git checkout`), you must change two things on Rust:
+
+```bash
+# For each branch you want an instance to operate on:
+git worktree add ../my-repo.worktrees/<branch-name> <branch-name>
+
+# Then point the instance's working_directory at the worktree path:
+# instances:
+#   worker-a:
+#     working_directory: /path/to/my-repo.worktrees/feat-x
+```
+
+This avoids checkout races between concurrent agents and lines up with the Rust daemon's session-per-cwd model.
+
+### 5. Cross-link integrate (apply the section diffs)
+
+This is the place where §2 / §3 / §4 / §5 actually get used. For each section, apply the mapping to your migrated `fleet.yaml`, prompts, and runbooks:
+
+- **CLI flag substitution** → re-read [§2 CLI flag mapping](#cli-flag-mapping). For every `agend …` invocation in your scripts, cron, or CI, replace it with the `agend-terminal` equivalent. If a row says **Removed**, follow the operator migration action listed in that row (read log files / edit `fleet.yaml` / use MCP tools / rely on OS-native services).
+- **`fleet.yaml` field-by-field** → re-read [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff). High-friction items #1 (`user_allowlist` fail-closed), #2 (`group_id` strict `i64`, un-quote on port), and #3 (`outbound_capabilities` Rust-only required field) are blocking — the daemon will refuse to load until they're addressed. The 14 removed `InstanceConfig` fields each have a documented Rust alternative (env var / backend preset / per-backend instruction file); apply them where relevant.
+- **Backend invocation patterns** → re-read [§4 Backend invocation diff](#backend-invocation-diff). If you script CLI invocations directly (not just via the daemon), only Codex changed shape (resume is now the subcommand). Verify the three behaviour-change flags: OpenCode now writes `AGENTS.md`, Kiro switched to per-workdir naming, Kiro instructions are typed in as the first user message on Ready.
+- **MCP tool API** → re-read [§5 MCP tool API diff](#mcp-tool-api-diff). The five prompt changes are listed in §5 ("Stop assuming push delivery is enough" through "Migrate `request_kind: 'report'` flows to use `reviewed_head`"). Update agent prompts and runbooks.
+
+### 6. Post-migration smoke test checklist
+
+Run these before declaring the migration done. Each tests one independent surface:
+
+- [ ] **Daemon starts.** `agend-terminal start --detached` (or your preferred launch path). `agend-terminal status` reports the daemon as alive and lists every configured instance.
+- [ ] **Bot answers basic message.** From an allowlisted Telegram account, send any message. The bound instance receives it (`agend-terminal logs <instance>` or pane scrollback shows the inbound), and replies — meaning `outbound_capabilities` is correctly configured (especially `reply`).
+- [ ] **Inbound user-allowlist gate.** From a non-allowlisted Telegram account, send a message. Confirm the daemon log shows the inbound being rejected with the user_id stamped (`grep "outbound notify dropped" $AGEND_HOME/daemon.log` — remember `RUST_LOG=debug` if you don't see it). Bot does not reply.
+- [ ] **Cross-instance dispatch.** Send `delegate_task` from one agent to another. The recipient sees the `[AGEND-MSG]` system reminder and can drain via `inbox`. `describe_message(message_id=…)` confirms the recipient picked up. Ensure both agents are idle when running this test, or pass `force: true` if you want to exercise the busy-override path — `delegate_task` against a mid-LLM-turn receiver returns BUSY by default (Rust PR #149 added the busy gate in Sprint 8; PR #161 renamed `interrupt`/`reason` to `force`/`force_reason` in Sprint 10).
+- [ ] **`set_waiting_on` round-trip.** Have one agent declare `set_waiting_on(condition=…)` and have a second agent `describe_instance(<first>)` to verify the field surfaces.
+- [ ] **Cost-guard pre-check.** If you run with a `cost_guard` configured, deliberately push the target over its daily limit (or stub the `isLimited` value in a test) and confirm the sender gets the cost-guard error string, not silent drop.
+- [ ] **CI watch loop** (only if you used `gh pr checks --watch` style polling). Issue `watch_ci(repo, branch)` and confirm a CI completion injects an inbox event without the agent polling.
+- [ ] **Config reload.** Edit `fleet.yaml`, `agend-terminal stop`, `agend-terminal start`, confirm changes are picked up (Rust does not have a hot `reload` command — see [§2](#cli-flag-mapping)).
+
+If any item fails, do not proceed to step 7. Roll back if the failure blocks operators; debug and re-run otherwise.
+
+### 7. Rollback path
+
+If `agend-terminal` is taking on water and you need to back out:
+
+1. **Stop `agend-terminal`** (`agend-terminal stop`).
+2. **Restore the pre-migration `$AGEND_HOME`** from the `.tar.gz` backup created in step 2.
+3. **Re-install the previously-running `@suzuke/agend` version** (use the version string saved in step 2).
+4. `agend start` and verify with the pre-migration smoke tests you did in step 1.
+5. **File a `agend-terminal` issue** with the failure mode, including:
+   - The relevant lines from `daemon.log` (with `RUST_LOG=debug` if a fail-closed gate was hit).
+   - Your `fleet.yaml` with secrets redacted.
+   - The Rust binary version (`agend-terminal --version`).
+
+Keep the pre-migration backup for **at least 30 days** after a successful migration. Schema flux during pre-alpha may surface issues days after the cutover.
 
 ## Known incompatibilities and deferred parity {#known-incompatibilities}
 
-*(Phase C — covers: features intentionally not ported, parity items deferred to a later Rust release, items still in design.)*
+This is the explicit risk register. Every item here is something an operator should know **before** committing to migration, not discover after.
+
+### TS-only commands removed in `agend-terminal`
+
+Per [§2 CLI flag mapping](#cli-flag-mapping), these `agend …` invocations have no Rust CLI equivalent. Each row in §2 documents the operator workaround; the recap here is for risk surfacing:
+
+- `agend init` — replaced by `agend-terminal quickstart` (different prompt set).
+- `agend restart` / `fleet restart` — use `stop` + `start`.
+- `agend reload` — no hot reload; restart the daemon.
+- `agend logs <instance>` / `fleet logs` — read log files directly under `$AGEND_HOME`.
+- `agend fleet history` / `fleet activity` / `fleet cleanup` — no equivalent. Stale instance dirs are not auto-cleaned; remove manually.
+- `agend backend trust <dir>` — manage backend trust by running the backend CLI once.
+- `agend topic *` (list/bind/unbind) — declarative-only via `instances.<name>.topic_id` in `fleet.yaml`.
+- `agend access *` (lock/unlock/list/remove/pair) — declarative via `channel.user_allowlist`. `pairing` mode has no equivalent (see below).
+- `agend schedule *` — moved to MCP tools (`create_schedule` / `list_schedules` / etc.) and the TUI overlay.
+- `agend update` — partial via `agend-terminal upgrade` (Unix only).
+- `agend install` / `uninstall` — service registration delegated to `systemd` / `launchd`.
+- `agend web` — replaced by the TUI (`agend-terminal app`).
+- `agend export` / `import` / `export-chat` — no archive format. Copy `$AGEND_HOME` directly if you need state.
+- `agend health` — folded into `agend-terminal doctor`.
+
+### TS-only fleet.yaml fields removed
+
+Per [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff), 14 `InstanceConfig` fields plus 4 top-level keys have no Rust home. Each has a documented Rust alternative:
+
+- **Per-instance**: `tags`, `general_topic`, `restart_policy`, `context_guardian`, `log_level`, `tool_set`, `lightweight`, `systemPrompt`, `skipPermissions`, `model_failover`, `cost_guard`, `workflow`, `startup_timeout_ms`, `agent_mode`.
+- **Top-level**: `project_roots`, `profiles`, `health_port`, `stt`.
+
+Drop the field; apply the Rust alternative if you depended on it (env var / backend preset / per-backend instruction file). The §3 table is the authoritative per-row guidance.
+
+### TS-only access semantics with no Rust analogue
+
+- **Pairing mode.** TS `AccessConfig.mode: "pairing"` (codes issued via `agend access pair`, redeemed by users to land their IDs in `channel.access.allowed_users`) has no Rust equivalent. On Rust, every authorised user must be enumerated explicitly in `channel.user_allowlist`. If your TS install used pairing mode, run `agend access list` before migrating and copy the resulting IDs into the Rust allowlist (also documented in [Phase A High-friction #1](#fleet-yaml-schema-diff)).
+
+### Pending parity (Rust roadmap)
+
+These are not removals — they are items where Rust currently lacks a TS feature, with a known plan to add it (or to harden the current behaviour). Do not depend on the *current* state past the milestone listed:
+
+- **`outbound_capabilities` 2-stage transition.** Sprint 22 P0 grants a "warn-but-permit one daemon cycle" grace; **Sprint 23 promotes the absent state to a hard parse error**. After Sprint 23 ships, every operator-defined instance must declare `outbound_capabilities` explicitly in `fleet.yaml` or the daemon will refuse to load it. Built-in coordinators (`general` and any future auto-created coordinator) auto-inject `[reply, react, edit, inject_provenance]`; user-authored entries do not. Detail in [Phase A High-friction #3](#fleet-yaml-schema-diff).
+- **PTY transport / signal capability matrix.** [§4 Signal and ESC byte semantics](#backend-invocation-diff) marks four backends with `pending` for `interrupt` / `tool_kill` semantics. Real-CLI verification is currently tracked as a backlog item filed in Sprint 11 (`t-20260425040356199333-6`); no committed sprint for completion in the Sprint 22-25 roadmap, and the operator has the work itself under "is this still worth doing?" review. Treat semantic claims about `interrupt` and `tool_kill` against the pending cells as unverified.
+- **`AGEND_TOOL_SET` profiles.** TS exposes `standard` (12-tool) and `minimal` (4-tool) tool profiles via `AGEND_TOOL_SET` (`src/channel/mcp-tools.ts:120-126`). Rust currently exposes the full set (~45 tools) to every spawned agent. If you used `minimal` to reduce per-instance token overhead, expect higher token usage on Rust until a profile mechanism lands. Tracked as a follow-up; no committed Rust release.
+- **Cross-channel architecture.** The `channel.user_allowlist` and `outbound_capabilities` gates are Telegram-first. Discord/Slack adapters will inherit the same gates via `auth.rs::gate_outbound_for_agent` once those channels reach feature parity; until then, expect channel-specific behaviour gaps. The `agend-terminal` `docs/MIGRATION-OUTBOUND-CAPS.md` operator deeper-dive has the cross-channel architecture note.
+- **`list_instances` `tags` filter** (TS-only). [Phase B §5.2](#mcp-tool-api-diff) flags this as an open question — TS `list_instances` accepts a `tags` filter; current Rust takes no parameters. If you depended on tag-filtered instance listing, plan to enumerate manually until parity lands.
+
+### Functional limitations during transition
+
+- **`cost_guard`.** TS supports per-instance cost guard (overrides fleet defaults) plus the post-#57 outbound dispatch pre-check. Rust does not have a `cost_guard` field on `InstanceConfig` today. If you relied on per-instance cost limits, plan for a fleet-wide single-policy world on Rust until parity lands.
+- **`channel.user_allowlist` requires explicit enumeration.** Pairing-mode users on TS must be enumerated to the Rust `channel.user_allowlist`. There is no flow on Rust that lets users "redeem" a code into the allowlist; operator action is required.
+- **Discord guild ID must be un-quoted.** TS canonical was bare int for Telegram supergroup IDs and quoted strings for Discord guild IDs (to dodge JS `Number` precision loss). Rust accepts only bare int form for both. Un-quote any quoted `group_id` in the migrated `fleet.yaml`. Detail in [Phase A High-friction #2](#fleet-yaml-schema-diff).
+
+### Operator caveats
+
+- **`user_allowlist` drop log is at `DEBUG`, not `WARN`.** With default `RUST_LOG=info`, the `outbound notify dropped — channel not authorised` line is invisible — `grep` returns nothing and the natural conclusion ("config OK") is the wrong one. Set `RUST_LOG=debug` (or `RUST_LOG=agend_terminal=debug`) before reproducing access-gate failures. The `agend-terminal` Sprint 22 P1 backlog has an item to raise this to `WARN` for security-gate visibility; until then, the operator-facing caveat applies.
+- **Pre-alpha schema instability.** As emphasised in [§1 Pre-alpha caveat](#why-migrate), pin the version, read each release's notes before upgrading, and keep your pre-migration backup for at least 30 days after the cutover. The 2-stage transitions (warn-but-permit → hard error) move quickly between releases right now.
+- **No `agend-terminal` archive format yet.** Migrating fleet config across machines is a `tar` of `$AGEND_HOME` (or hand-copying `fleet.yaml`), not an `agend export` / `import` round trip.
+- **`tmux` is not used on Rust.** If your operator habits include `tmux attach -t agend` or similar shortcuts, they will not work post-migration. Use `agend-terminal attach <instance>` for direct PTY access and `agend-terminal app` for the multi-pane TUI.

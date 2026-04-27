@@ -14,7 +14,48 @@
 
 ## 為什麼要遷移? {#why-migrate}
 
-*(Phase C —— 涵蓋:遷移動機、agend-terminal 相對 @suzuke/agend 的功能差異、何時不要遷移、支援的遷移期間。)*
+`@suzuke/agend` 已進入 maintenance mode,新功能都在 `agend-terminal` 落地。本節是價值與成本的誠實版本 —— 直接,不行銷話術。
+
+### 你會得到什麼
+
+- **原生 PTY multiplexing。** Rust daemon 透過跨平台的 `portable-pty` crate 直接和 PTY 對話 (該 crate 在 Unix 用 `openpty`,在 Windows 用 `ConPTY`)。`@suzuke/agend` 每次啟 backend 都 shell out 給 `tmux new-window`,把 tmux 的所有問題都繼承下來 (server 崩、stale window IDs、attach 怪行為)。Rust 上,daemon 自己的 TUI 就是 multiplexer。
+- **跨平台支援。** Rust 跑 macOS / Linux / Windows;TS 只有 macOS / Linux (`tmux` 在 Windows 跑不起來)。`which::which` 會看 `PATHEXT`,所以 Windows 上的 `claude.cmd` / `codex.ps1` 可正確解析。
+- **Type safety 落在重要的地方。** [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff) 中的遷移項目 —— `group_id` 精度、`topic_id` 寬度、`outbound_capabilities` enum 收斂 —— Rust 在 config 載入時就檢查。TS daemon 是透過 bug report 學到同一組教訓。
+- **Async daemon,沒有 per-instance Node process。** Rust 把每個 agent 以子程序形式起在單一 daemon binary 之下。TS daemon 是單一 Node process,但每實例的 runtime overhead 比 Rust task 高很多;重 fleet (>5 instance 同時跑) 感受最深。
+- **單一真相來源的 backend 表。** `BackendPreset` 集中每個 backend 的 spawn flags / resume mode / instructions delivery。TS 上同一個面向被切到五個 `CliBackend` class,per-backend 行為會漂移。詳見 [§4 Backend invocation diff](#backend-invocation-diff)。
+- **內建 TUI。** `agend-terminal app` 在運行中的 daemon 之上提供多 pane 終端機介面。`@suzuke/agend` 只有 web UI (`agend web`);TUI 是 Rust 獨有功能。
+
+### 為什麼 `@suzuke/agend` 進入 deprecation
+
+- **JS `Number.MAX_SAFE_INTEGER`** (2^53 − 1) 在你用 Discord guild ID 但沒 quote 時就咬人;Telegram supergroup ID 安然在 threshold 之下,但「永遠 quote 大型 ID」的紀律在 codebase 各處執行得不一致。Rust 用 `i64` 兩種都用裸 int 形式涵蓋 —— 詳見 [High-friction #2](#fleet-yaml-schema-diff)。
+- **`tmux` 作為 multiplexer** 把 daemon 完全鎖出 Windows,並且多了一層 bug 容易藏的地方 (「pane 黑掉了;是 agent、tmux server、還是 wrapper script 出問題?」)。
+- **Process management overhead。** TS 上每個 spawn 出來的 backend 住在 tmux pane 裡,daemon 用「signal-capturing wrapper script + PTY-output regex」管理。Rust 直接驅動 PTY。
+- **Implicit channel ACLs。** TS 把所有 outbound MCP 呼叫視為「任何 instance 都能用」。Rust PR #230 引入明確的 `outbound_capabilities` allowlist —— 一個 security-relevant 的預設,沒辦法在不破壞既有 fleet 的前提下回填到 TS。
+
+### 應該現在遷移嗎?
+
+**立刻遷移**,如果你符合任何下列情況:
+
+- 你同時跑超過 ~5 個 instance (fleet 效能與 daemon overhead)。
+- 你的 operator 在 Windows,或你希望他們可以在 Windows。
+- 你依賴 TUI 做 fleet 觀測 (Rust 的 web UI 也 OK,但 TUI 是更上一階)。
+- 你常踩到 cost-guard pause 流程 —— Rust 在每個 outbound 介面都 honor per-target gate,並有 [`outbound_capabilities`](#fleet-yaml-schema-diff) 的明確 allowlist 配套。
+
+**可以延後**,如果:
+
+- 你只跑一個 Telegram-bound instance、一兩個 operator、沒 Discord、沒 Windows 使用者。
+- 你的 fleet config 穩定,不需要新欄位。
+- 你還沒踩過 JS `Number` 精度問題 (小 fleet、無 Discord、無 Windows 精度敏感場景)。
+
+### Pre-alpha 注意事項
+
+`agend-terminal` 目前是 **pre-alpha**。Schema 與 CLI 介面仍在變動 —— Sprint 22 P0 (`outbound_capabilities` 從 optional 翻成 required) 是一個例子;Sprint 23 同欄位將 absent 升為 hard parse error 是另一個。遷移前:
+
+1. **鎖版本。** 用特定 Cargo install / GitHub release tag,不是 `main`。
+2. **每次升級前讀 release notes。** 兩階段轉變 (warn-but-permit → hard error) 在這時期 release 之間移動很快。
+3. **保留 `@suzuke/agend` 安裝與 `fleet.yaml` 備份。** Rollback 流程見 [§6 Migration steps](#migration-steps)。
+
+`@suzuke/agend` 的 maintenance-mode 承諾僅限 security 修補與 backend CLI 相容性更新 —— 不再加新功能。遷移窗口在 `agend-terminal` 仍 pre-1.0、且 `@suzuke/agend` 持續收 security fix 之間都開著。
 
 ## CLI flag mapping {#cli-flag-mapping}
 
@@ -496,8 +537,157 @@ Rust 目前在 `src/mcp/tools.rs` 沒有暴露 tool-set profile —— 每個 sp
 
 ## Migration steps {#migration-steps}
 
-*(Phase C —— 涵蓋:pre-flight 檢查清單、`agend-terminal migrate` (若提供) 呼叫、雙跑期間、rollback、post-migration 驗證。)*
+7 階段 actionable plan。第 2 / 3 / 4 / 5 節是參考材料,本節是執行順序。
+
+### 1. 遷移前 audit (在 TS 上)
+
+清點你依賴的狀態。動 `agend-terminal` 之前,在既有 `@suzuke/agend` 安裝上執行:
+
+- `agend ls` —— 列出每個運行中的 instance、其 `working_directory` 與 `topic_id`。存下輸出。
+- `agend topic list` —— 列出每個 Telegram topic binding。存下輸出。
+- `agend access list` —— 列出 `channel.access.allowed_users` 的每個條目。存下輸出。記下你的 `access.mode` 是 `pairing` 還是 `locked` —— 這對 [Phase A High-friction #1](#fleet-yaml-schema-diff) 很重要。
+- `agend schedule list` —— 列出每個 active 排程。存下輸出。注意:Rust 沒有 schedule CLI 對等,要透過 MCP tool 或 TUI overlay 重建 (見 [§2 Schedule group](#cli-flag-mapping))。
+- 從頭到尾讀過 `~/.agend/fleet.yaml`。確認你填了哪些欄位;[§3 fleet.yaml schema diff](#fleet-yaml-schema-diff) 會告訴你哪些有 Rust 對等、哪些沒有。
+- `agend fleet history` 與 `agend fleet activity` (若有依賴) —— 注意兩者 Rust 端都沒 CLI 對等 (Rust 上直接讀 `$AGEND_HOME` 下的 log 檔)。
+
+如果 fleet 操作的 repo 有 commit `AGENTS.md` / `GEMINI.md`,現在就 audit。Phase B 已記載 [OpenCode 改寫 `AGENTS.md` 的行為變化](#backend-invocation-diff);你的 `.gitignore` 姿態會有影響。
+
+### 2. Snapshot 資料
+
+動任何東西之前,做三份耐久備份:
+
+```bash
+# 複製 fleet config
+cp ~/.agend/fleet.yaml ~/.agend/fleet.yaml.pre-migration.backup
+
+# 整個 $AGEND_HOME 打包 (decisions DB、instance state、daemon log 等)
+tar czf ~/agend-home-pre-migration-$(date +%Y%m%d).tar.gz -C "$HOME" .agend
+
+# 記下 @suzuke/agend 版本
+agend --version > ~/agend-version-pre-migration.txt
+```
+
+第三個檔案是 rollback 目標 —— 寫下來,需要時可以裝同一個版本。
+
+### 3. 選遷移模式
+
+- **Greenfield (全新安裝)** —— 推薦,除非你有值得帶過去的歷史狀態。`agend-terminal init` 從頭跑,手寫一份依 §3 推導的 `fleet.yaml`。除了步驟 2 的備份,捨棄 `@suzuke/agend` 歷史。較快、較乾淨、schema 差異會早點浮現。
+- **In-place** —— 把 `~/.agend/fleet.yaml` 複製到 Rust daemon 的 config 位置,然後依 §3 的 diff 表逐項調整,直到 daemon 願意載入。較慢、較多 debug,適合有非平凡 decision 歷史或 template 用法的 fleet。**這條路千萬不要省掉步驟 2**。
+
+如果不確定怎麼選,先在 sandbox VM 跑一次 greenfield、看順不順,再回來做 in-place。
+
+### 4. Workflow 改變:每 branch 一個 git worktree
+
+`agend-terminal` 期待每個 instance 跑在 **獨立的 working directory** —— 對 git repo 來說,代表 daemon 操作的每個 branch 都要一個 worktree。這是 Rust resume 策略隱含的 (各 backend 的 `ContinueInCwd { flag }` 模式以 cwd 為 key 找「最近 session」,所以不同 cwd 才會對應到不同 session)。也是全域 `CLAUDE.md` operator policy 的硬規則。
+
+如果你的 `@suzuke/agend` workflow 是多個 instance 在同一個 checkout 上 (用 `git checkout` 切 branch) 編輯,Rust 上你需要改兩件事:
+
+```bash
+# 對你想讓 instance 操作的每個 branch:
+git worktree add ../my-repo.worktrees/<branch-name> <branch-name>
+
+# 然後讓 instance 的 working_directory 指到 worktree 路徑:
+# instances:
+#   worker-a:
+#     working_directory: /path/to/my-repo.worktrees/feat-x
+```
+
+這避免並行 agent 之間的 checkout race,並且和 Rust daemon 的 session-per-cwd 模型對齊。
+
+### 5. Cross-link integrate (套用各節 diff)
+
+這是真正動用 §2 / §3 / §4 / §5 的時刻。逐節把 mapping 套用到你 migrate 後的 `fleet.yaml`、prompts、runbook:
+
+- **CLI flag substitution** → 重讀 [§2 CLI flag mapping](#cli-flag-mapping)。每個你 script、cron、CI 中的 `agend …` 呼叫,換成 `agend-terminal` 的對等。如果該 row 寫 **Removed**,就走那 row 列出的 operator migration action (讀 log 檔 / 改 `fleet.yaml` / 用 MCP tool / 依賴 OS-native service)。
+- **`fleet.yaml` 逐欄位** → 重讀 [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff)。三個 high-friction 項 #1 (`user_allowlist` fail-closed)、#2 (`group_id` 嚴格 `i64`,port 時 un-quote)、#3 (`outbound_capabilities` Rust-only required) 都是阻擋級的 —— 沒處理 daemon 不會載入。14 個被移除的 `InstanceConfig` 欄位都有 Rust 替代位置 (env var / backend preset / per-backend instruction file),按需要套用。
+- **Backend invocation 模式** → 重讀 [§4 Backend invocation diff](#backend-invocation-diff)。如果你直接 script CLI invocation (不是只透過 daemon),只有 Codex 形狀變了 (resume 回到子命令)。確認三個 behavior change flag:OpenCode 改寫 `AGENTS.md`、Kiro 改 per-workdir 命名、Kiro 改在 Ready 後當 user message 注入。
+- **MCP tool API** → 重讀 [§5 MCP tool API diff](#mcp-tool-api-diff)。§5 列出五項 prompt 改動 (從「不要再假設 push delivery 夠」一直到「`request_kind: 'report'` 改用 `reviewed_head`」)。更新 agent prompts 與 runbook。
+
+### 6. 遷移後 smoke test 清單
+
+在宣告遷移完成前跑這些。每項測一個獨立面向:
+
+- [ ] **Daemon 啟動。** `agend-terminal start --detached` (或你慣用的啟動路徑)。`agend-terminal status` 回報 daemon alive 並列出每個 configured instance。
+- [ ] **Bot 回基本訊息。** 從 allowlisted 的 Telegram 帳號發任何訊息。綁定 instance 收到 (`agend-terminal logs <instance>` 或 pane scrollback 顯示 inbound) 並回覆 —— 代表 `outbound_capabilities` (尤其 `reply`) 設定正確。
+- [ ] **Inbound user-allowlist gate。** 從非 allowlisted 帳號發訊息。確認 daemon log 有對應 user_id 的 inbound 拒絕記錄 (`grep "outbound notify dropped" $AGEND_HOME/daemon.log` —— 沒看到記得 `RUST_LOG=debug`)。Bot 不回覆。
+- [ ] **跨實例 dispatch。** 從一個 agent 對另一個發 `delegate_task`。收件方看到 `[AGEND-MSG]` system reminder,可透過 `inbox` drain。`describe_message(message_id=…)` 確認 pickup。請確保兩個 agent 都 idle 時跑這個測試,或若想驗證 busy-override 路徑就傳 `force: true` —— 對 mid-LLM-turn 收件方發 `delegate_task` 預設會回 BUSY (Rust PR #149 在 Sprint 8 加入 busy gate;PR #161 在 Sprint 10 把 `interrupt`/`reason` 改名為 `force`/`force_reason`)。
+- [ ] **`set_waiting_on` round-trip。** 一個 agent 宣告 `set_waiting_on(condition=…)`,第二個 agent `describe_instance(<first>)` 確認欄位浮現。
+- [ ] **Cost-guard 預檢。** 若有設 `cost_guard`,刻意把 target 推過日預算 (或在測試中 stub `isLimited`),確認 sender 拿到 cost-guard error 字串而非靜默 drop。
+- [ ] **CI watch loop** (僅在你之前用 `gh pr checks --watch` 輪詢時相關)。發 `watch_ci(repo, branch)`,確認 CI 結束時自動注 inbox event,不需 agent 自己輪詢。
+- [ ] **Config 重載。** 改 `fleet.yaml`、`agend-terminal stop`、`agend-terminal start`,確認改動生效 (Rust 沒有熱 `reload` —— 見 [§2](#cli-flag-mapping))。
+
+任何一項失敗,**不要** 進到步驟 7。失敗阻擋 operator 就 rollback;否則就 debug 後重跑。
+
+### 7. Rollback 路徑
+
+如果 `agend-terminal` 進水你需要退回:
+
+1. **停 `agend-terminal`** (`agend-terminal stop`)。
+2. **從步驟 2 的 `.tar.gz` 還原 pre-migration 的 `$AGEND_HOME`**。
+3. **重新安裝先前運行的 `@suzuke/agend` 版本** (用步驟 2 存的版本字串)。
+4. `agend start`,並用步驟 1 做的遷移前 smoke test 驗證。
+5. **送一個 `agend-terminal` issue**,內容包含:
+   - `daemon.log` 裡相關行 (若踩到 fail-closed gate,記得帶 `RUST_LOG=debug` 重現再貼)。
+   - 你的 `fleet.yaml`,secrets 已 redact。
+   - Rust binary 版本 (`agend-terminal --version`)。
+
+成功遷移後請 **保留 pre-migration 備份至少 30 天**。Pre-alpha 期間 schema 變動,可能在 cutover 後幾天才浮現問題。
 
 ## Known incompatibilities and deferred parity {#known-incompatibilities}
 
-*(Phase C —— 涵蓋:意圖不 port 的功能、被延後到後續 Rust release 的 parity 項目、仍在設計中的項目。)*
+這節是明確的 risk register。每一項都是 operator 應該在 **承諾遷移前** 就知道、而不是事後才發現。
+
+### `agend-terminal` 移除的 TS-only 指令
+
+依 [§2 CLI flag mapping](#cli-flag-mapping),下列 `agend …` 呼叫 Rust 沒有 CLI 對等。每一項在 §2 都記載 operator 解法;這裡 recap 為了把 risk 攤開:
+
+- `agend init` —— 由 `agend-terminal quickstart` 取代 (問題集合不同)。
+- `agend restart` / `fleet restart` —— 用 `stop` + `start`。
+- `agend reload` —— 沒有熱重載;改 daemon 需要 stop/start。
+- `agend logs <instance>` / `fleet logs` —— 直接讀 `$AGEND_HOME` 下的 log 檔。
+- `agend fleet history` / `fleet activity` / `fleet cleanup` —— 無對等。Stale instance 資料夾不自動清,需要時手動刪。
+- `agend backend trust <dir>` —— 改成手動跑一次 backend CLI 接受其 trust 對話框。
+- `agend topic *` (list/bind/unbind) —— 改宣告式,只透過 `instances.<name>.topic_id` 在 `fleet.yaml` 設定。
+- `agend access *` (lock/unlock/list/remove/pair) —— 改宣告式,透過 `channel.user_allowlist`。`pairing` 模式無對等 (見下)。
+- `agend schedule *` —— 搬到 MCP tool (`create_schedule` / `list_schedules` 等) 與 TUI overlay。
+- `agend update` —— 部分由 `agend-terminal upgrade` 涵蓋 (僅 Unix)。
+- `agend install` / `uninstall` —— Service 註冊改交 `systemd` / `launchd`。
+- `agend web` —— 由 TUI (`agend-terminal app`) 取代。
+- `agend export` / `import` / `export-chat` —— 沒有 archive 格式。需要備份就直接複製 `$AGEND_HOME`。
+- `agend health` —— 折進 `agend-terminal doctor`。
+
+### 移除的 TS-only fleet.yaml 欄位
+
+依 [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff),14 個 `InstanceConfig` 欄位 + 4 個 top-level 鍵 Rust 沒有對應位置。每個都有 Rust 替代方案:
+
+- **Per-instance**:`tags`、`general_topic`、`restart_policy`、`context_guardian`、`log_level`、`tool_set`、`lightweight`、`systemPrompt`、`skipPermissions`、`model_failover`、`cost_guard`、`workflow`、`startup_timeout_ms`、`agent_mode`。
+- **Top-level**:`project_roots`、`profiles`、`health_port`、`stt`。
+
+砍掉欄位;有依賴的話套用 Rust 替代 (env var / backend preset / per-backend instruction file)。§3 的表是逐 row 的權威指引。
+
+### TS-only 存取語意 Rust 沒有對應
+
+- **Pairing mode。** TS `AccessConfig.mode: "pairing"` (透過 `agend access pair` 發碼,使用者兌換後 ID 進到 `channel.access.allowed_users`) Rust 無對等。Rust 上每個授權使用者必須明確列在 `channel.user_allowlist`。如果你的 TS 安裝是 pairing mode,遷移前先 `agend access list`,把結果列進 Rust allowlist (也記載在 [Phase A High-friction #1](#fleet-yaml-schema-diff))。
+
+### 待補的 parity (Rust roadmap)
+
+這些不是「移除」—— 是 Rust 目前缺 TS 功能、且有計畫補 (或硬化現有行為) 的項目。**不要** 依賴 *目前* 行為跨過下面所列的里程碑:
+
+- **`outbound_capabilities` 兩階段 transition。** Sprint 22 P0 給「warn-but-permit one daemon cycle」grace;**Sprint 23 把 absent 升為 hard parse error**。Sprint 23 ship 後,operator 自寫的每個 instance 必須在 `fleet.yaml` 明確宣告 `outbound_capabilities`,不然 daemon 拒絕載入。Built-in coordinator (`general` 與未來自動建立的 coordinator) 自動注入 `[reply, react, edit, inject_provenance]`;user-authored entry 不會自動注入。詳見 [Phase A High-friction #3](#fleet-yaml-schema-diff)。
+- **PTY transport / signal capability matrix。** [§4 信號與 ESC byte 語意](#backend-invocation-diff) 把四個 backend 的 `interrupt` / `tool_kill` 語意標 `pending`。Real-CLI 驗證目前以 backlog item 形式追蹤,filed in Sprint 11 (`t-20260425040356199333-6`);Sprint 22-25 roadmap 沒 commit 完成這項工作的特定 sprint window,且 operator 對「這項工作是否還值得做」本身在 review。對應 cell 上的 semantic 主張請當作未驗證。
+- **`AGEND_TOOL_SET` profile。** TS 透過 `AGEND_TOOL_SET` 開放 `standard` (12-tool) 與 `minimal` (4-tool) tool profile (`src/channel/mcp-tools.ts:120-126`)。Rust 目前對所有 spawn 出來的 agent 都暴露完整 set (約 45 個工具)。如果你之前用 `minimal` 降低 per-instance token overhead,Rust 上 token 用量會比較高,直到 profile 機制實作。Tracked as follow-up;沒有 committed 的 Rust release。
+- **跨 channel 架構。** `channel.user_allowlist` 與 `outbound_capabilities` 兩個 gate 目前以 Telegram 為主。Discord/Slack adapter 在 channel parity 完成後會透過 `auth.rs::gate_outbound_for_agent` 繼承同一組 gate;在那之前,各 channel 行為可能仍有落差。`agend-terminal` 的 `docs/MIGRATION-OUTBOUND-CAPS.md` operator 完整參考有跨 channel 架構備註。
+- **`list_instances` 的 `tags` filter** (TS-only)。[Phase B §5.2](#mcp-tool-api-diff) 標記為 open question —— TS `list_instances` 接 `tags` filter,Rust 目前不接參數。如果你依賴 tag-filter 的 instance 列舉,在 parity 補上前請改手動列。
+
+### 過渡期的功能限制
+
+- **`cost_guard`。** TS 支援 per-instance cost guard (覆寫 fleet 預設) 加上 #57 後的 outbound dispatch pre-check。Rust 目前 `InstanceConfig` 沒 `cost_guard` 欄位。如果你依賴 per-instance 成本上限,計畫好 Rust 上是 fleet-wide 單一政策的世界,直到 parity 補上。
+- **`channel.user_allowlist` 必須明確列舉。** TS 上的 pairing-mode 使用者必須列進 Rust 的 `channel.user_allowlist`。Rust 上沒有讓使用者「兌換 code 進 allowlist」的流程;需要 operator 動作。
+- **Discord guild ID 必須 un-quote。** TS canonical 對 Telegram supergroup ID 用裸 int、對 Discord guild ID 用 quoted string (避開 JS `Number` 精度)。Rust 兩種都只接受裸 int。Migrate 後的 `fleet.yaml` 中,任何 quoted `group_id` 都要 un-quote。詳見 [Phase A High-friction #2](#fleet-yaml-schema-diff)。
+
+### Operator 注意事項
+
+- **`user_allowlist` drop log 是 `DEBUG`,不是 `WARN`。** 在預設 `RUST_LOG=info` 下,`outbound notify dropped — channel not authorised` 那行看不到 —— `grep` 找不到,自然結論「config OK」是錯的。重現存取 gate 失敗時請先設 `RUST_LOG=debug` (或 `RUST_LOG=agend_terminal=debug`)。`agend-terminal` Sprint 22 P1 backlog 有把這行升為 `WARN` 的項目;在那之前 operator-facing caveat 仍然成立。
+- **Pre-alpha schema 不穩定。** 如 [§1 Pre-alpha 注意事項](#why-migrate) 強調,鎖版本、每次升級前讀 release notes、cutover 後保留 pre-migration 備份至少 30 天。兩階段 transition (warn-but-permit → hard error) 在這時期 release 之間移動很快。
+- **目前沒有 `agend-terminal` archive 格式。** 跨機器搬 fleet config 是 `tar` 整個 `$AGEND_HOME` (或手動 copy `fleet.yaml`),不是 `agend export` / `import` round trip。
+- **Rust 不用 `tmux`。** 如果你的 operator 習慣含 `tmux attach -t agend` 之類捷徑,遷移後不適用。改用 `agend-terminal attach <instance>` 直接接 PTY,或 `agend-terminal app` 進多 pane TUI。
