@@ -9,6 +9,7 @@ const CODEX_PROJECT_DOC_MAX_BYTES = 32_768;
 
 export class CodexBackend implements CliBackend {
   readonly binaryName = "codex";
+  readonly nativeInstructionsMechanism = "project-doc" as const;
   private binaryPath: string;
 
   constructor(private instanceDir: string) {
