@@ -610,7 +610,7 @@ git worktree add ../my-repo.worktrees/<branch-name> <branch-name>
 - [ ] **Daemon 啟動。** `agend-terminal start --detached` (或你慣用的啟動路徑)。`agend-terminal status` 回報 daemon alive 並列出每個 configured instance。
 - [ ] **Bot 回基本訊息。** 從 allowlisted 的 Telegram 帳號發任何訊息。綁定 instance 收到 (`agend-terminal logs <instance>` 或 pane scrollback 顯示 inbound) 並回覆 —— 代表 `outbound_capabilities` (尤其 `reply`) 設定正確。
 - [ ] **Inbound user-allowlist gate。** 從非 allowlisted 帳號發訊息。確認 daemon log 有對應 user_id 的 inbound 拒絕記錄 (`grep "outbound notify dropped" $AGEND_HOME/daemon.log` —— 沒看到記得 `RUST_LOG=debug`)。Bot 不回覆。
-- [ ] **跨實例 dispatch。** 從一個 agent 對另一個發 `delegate_task`。收件方看到 `[AGEND-MSG]` system reminder,可透過 `inbox` drain。`describe_message(message_id=…)` 確認 pickup。請確保兩個 agent 都 idle 時跑這個測試,或若想驗證 busy-override 路徑就傳 `force: true` —— 對 mid-LLM-turn 收件方發 `delegate_task` 預設會回 BUSY (Rust 端 post-PR #197/#199)。
+- [ ] **跨實例 dispatch。** 從一個 agent 對另一個發 `delegate_task`。收件方看到 `[AGEND-MSG]` system reminder,可透過 `inbox` drain。`describe_message(message_id=…)` 確認 pickup。請確保兩個 agent 都 idle 時跑這個測試,或若想驗證 busy-override 路徑就傳 `force: true` —— 對 mid-LLM-turn 收件方發 `delegate_task` 預設會回 BUSY (Rust PR #149 在 Sprint 8 加入 busy gate;PR #161 在 Sprint 10 把 `interrupt`/`reason` 改名為 `force`/`force_reason`)。
 - [ ] **`set_waiting_on` round-trip。** 一個 agent 宣告 `set_waiting_on(condition=…)`,第二個 agent `describe_instance(<first>)` 確認欄位浮現。
 - [ ] **Cost-guard 預檢。** 若有設 `cost_guard`,刻意把 target 推過日預算 (或在測試中 stub `isLimited`),確認 sender 拿到 cost-guard error 字串而非靜默 drop。
 - [ ] **CI watch loop** (僅在你之前用 `gh pr checks --watch` 輪詢時相關)。發 `watch_ci(repo, branch)`,確認 CI 結束時自動注 inbox event,不需 agent 自己輪詢。
