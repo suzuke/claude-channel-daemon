@@ -229,11 +229,231 @@ channel:
 
 ## Backend invocation diff {#backend-invocation-diff}
 
-*(Phase B —— 涵蓋:`--mcp-config` 對應到 Rust 等價物、`--append-system-prompt-file` 流程、per-backend env-var 注入、MCP server respawn 語意、fleet-instructions 傳遞通道 —— TS 端 post-#55 模型也可參考 `docs/fleet-instructions-injection.md`。)*
+遷移上線第一天最容易踩到的雷，是兩個 daemon 拉起 backend CLI、餵 instructions、發訊號的方式有實質差異。本節給出完整 diff，讓在 TS 版能跑的 fleet，在 Rust 版也能繼續跑。
+
+### 兩種 invocation 模型
+
+| 面向 | `@suzuke/agend` (TS) | `agend-terminal` (Rust) |
+|---|---|---|
+| Spawn 介面 | 每個 backend 透過 `tmux new-window <shell-string>`，shell 引用邏輯散落在 `src/backend/<name>.ts` | 每個 pane 直接走 PTY (Unix 用 `openpty`，Windows 用 ConPTY)，command 與 args 從靜態 `BackendPreset` 解析 |
+| Backend 抽象 | 每個 backend 一個 TypeScript class，實作 `CliBackend`（`buildCommand`、`writeConfig`、`getReadyPattern`、`getStartupDialogs`…） | 一個 enum variant 配一個 `BackendPreset` struct，集中在 `src/backend.rs` |
+| Renderer | 沒有 — pane 內容就是 tmux 顯示的 | daemon TUI 內建 vterm/Ratatui pane；agent 看到的就是這個 byte stream |
+| 跨平台目標 | 只支援 macOS / Linux（依賴 tmux） | macOS / Linux / Windows（ConPTY）；`which::which` 會看 `PATHEXT`，所以 Windows 上的 `claude.cmd` / `codex.ps1` 可正確解析 |
+| Backend 種類 | 五種固定:`claude-code`、`opencode`、`gemini-cli`、`codex`、`kiro`，加上 `mock`（僅 E2E 用） | 同樣五種，外加 `Backend::Shell`（通用 `$SHELL`）與 `Backend::Raw(path)`（任意執行檔）—— 兩者都沒有 preset 配線 |
+
+TS daemon 把幾乎所有事都委派給 per-backend class；Rust daemon 把所有事集中到一張 preset 表，每條 spawn path 都讀同一張表。實務上這意味著:在 TS 上，調整某個 backend 的行為是動 `src/backend/<name>.ts`；在 Rust 上，是改 `BackendPreset` 的某個欄位，然後所有 call site 自動跟著變。
+
+### Per-backend invocation 對照表
+
+每個 backend 的 command line 形狀大致保留下來，外部包裝改變了。
+
+| Backend | TS invocation 摘要 | Rust invocation 摘要 |
+|---|---|---|
+| **Claude Code** | `claude --settings <path> --mcp-config <path> --dangerously-skip-permissions [--resume <session-id>] [--model <m>] [--append-system-prompt-file <path>]`，邏輯在 `src/backend/claude-code.ts:17-45`。Spawn 前會把 `ANTHROPIC_API_KEY` 預先核可寫入 `~/.claude.json`。 | `claude --dangerously-skip-permissions [--continue]`，再透過 `Backend::spawn_flags`（`src/backend.rs:401-426`）在對應檔案存在時注入 `--append-system-prompt-file` 與 `--mcp-config`。Resume 策略:`ResumeMode::ContinueInCwd { flag: "--continue" }`。 |
+| **OpenCode** | `opencode [--session <sid>] [--continue] [--model <m>]`。MCP 透過 working directory 內的 `opencode.json:mcp.<key>` 配置；instructions 走 `opencode.json:instructions` 陣列指向 `<instance_dir>/fleet-instructions.md`（`src/backend/opencode.ts:14-73`）。 | `opencode [--continue]`。Resume:`ContinueInCwd { flag: "--continue" }`。**行為變更:** instructions 現在透過 marker-merge 寫入 workspace 的 `AGENTS.md`，**不再**走每實例獨立、由 `opencode.json` 引用的檔案。詳見下方的「Instructions 注入」小節。 |
+| **Codex** | `codex resume --last [--dangerously-bypass-approvals-and-sandbox \| --full-auto] [-c model="<m>"]`。MCP 透過全域 `~/.codex/config.toml`（呼叫 `codex mcp add <name>`）註冊；信任授權則 append `[projects."<workdir>"]` 至同檔。 | Resume 時 `codex resume --last --dangerously-bypass-approvals-and-sandbox`；fresh start 時 `codex --dangerously-bypass-approvals-and-sandbox`（透過 `fresh_args` 欄位拿掉 `resume --last`）。Resume:`ResumeMode::NotSupported`（Codex 的 resume 是子命令而非 flag，所以塞在 `args` 裡）。 |
+| **Gemini CLI** | `gemini --yolo [--resume latest] [--model <m>]`。MCP 註冊在 `<workdir>/.gemini/settings.json:mcpServers.<key>`；信任透過 `~/.gemini/trustedFolders.json`。 | `gemini --yolo`，搭配 `ResumeMode::Fixed { args: &["--resume", "latest"] }` 補上 resume flags。 |
+| **Kiro CLI** | `kiro-cli chat --trust-all-tools [--resume] [--model <m>] --require-mcp-startup`。MCP 透過每 server 一支 **wrapper script**（`<instance_dir>/mcp-wrapper-<name>.sh`，mode `0o700`）—— 這個 wrapper 先 export env，再 exec 實際的 MCP binary，繞過 Kiro 忽略 `mcp.json` 的 `env` block。 | `kiro-cli chat --trust-all-tools [--resume]`。Resume:`ContinueInCwd { flag: "--resume" }`。Rust 拿掉了 wrapper script 的 workaround，因為 `mcp_config.rs` 直接以 Kiro 認得的形式把 env 寫到磁碟。 |
+
+### Resume 策略 diff
+
+TS 版每個 instance 維護自己的 session id，靠 `--resume <id>`、`--session <id>` 重新接上。Rust 版不追蹤 session id —— 用每個 backend 自己的「resume cwd 內最近一次 session」語意，三種 variant:
+
+- `ResumeMode::ContinueInCwd { flag }` —— Claude (`--continue`)、OpenCode (`--continue`)、Kiro (`--resume`)。
+- `ResumeMode::Fixed { args: &[..] }` —— Gemini (`--resume latest`)。
+- `ResumeMode::NotSupported` —— Codex（resume 是 `resume` 子命令，已經塞在 `args`）。
+
+這個策略可行的前提是:Rust 版每個 agent 永遠 spawn 在獨立的 working directory（git repo 自動建 worktree），所以「cwd 最近 session」剛好就 1:1 對應到該實例自己的 session。
+
+唯一一個邊界:Claude pane 開了但完全沒用過時，`claude --continue` 會錯誤退出（"No conversation found to continue"）。雖然 daemon 的 crash-respawn 路徑會接住，但失敗訊息會閃進 pane 後才被覆蓋，看起來像壞掉。`Backend::has_resumable_session(working_dir)`（僅 Claude，位於 `src/backend.rs`）會掃描 `~/.claude/projects/<encoded-cwd>/*.jsonl`，偵測到「只有 metadata」的 session 時把 `Resume` 預先降級為 `Fresh`，使用者就看不到那個 flash。其他 backend 樂觀回傳 `true`，倚賴 crash-respawn safety net。
+
+### Instructions 注入 — `nativeInstructionsMechanism` 對應
+
+Bug #55（PR #56）在 TS 端引入 `CliBackend` interface 上的三值欄位 `nativeInstructionsMechanism`。Rust 沒有同名欄位；對應的機制由 `BackendPreset` 的三個欄位編碼:`instructions_path`、`instructions_shared`、`inject_instructions_on_ready`。對應如下:
+
+| Backend | TS `nativeInstructionsMechanism`（PR #56 後） | Rust 對應 | TS 檔案位置 | Rust 檔案位置 |
+|---|---|---|---|---|
+| `claude-code` | `append-flag`（`--append-system-prompt-file`） | `instructions_path = ".claude/agend.md"`、`shared = false`、`inject_on_ready = false`。Flag 由 `Backend::spawn_flags` 注入。 | `<instance_dir>/fleet-instructions.md` | `<workdir>/.claude/agend.md`（在 `.claude/` 下但**刻意不放** `.claude/rules/`，避免 Claude 重複載入） |
+| `opencode` | `append-flag`（`opencode.json:instructions`） | `instructions_path = "AGENTS.md"`、`shared = true`、`inject_on_ready = false`。對 workspace 的 `AGENTS.md` 做 marker-merge。 | `<instance_dir>/fleet-instructions.md`（由 workspace `opencode.json` 引用） | `<workdir>/AGENTS.md`（workspace project doc） |
+| `gemini-cli` | `project-doc`（`GEMINI.md`） | `instructions_path = "GEMINI.md"`、`shared = true`、`inject_on_ready = false`。Marker-merge。 | `<workdir>/GEMINI.md` | `<workdir>/GEMINI.md` |
+| `codex` | `project-doc`（`AGENTS.md`） | `instructions_path = "AGENTS.md"`、`shared = true`、`inject_on_ready = false`。Marker-merge，Codex 的 32 KiB 上限保留。 | `<workdir>/AGENTS.md` | `<workdir>/AGENTS.md` |
+| `kiro` | `project-doc`（`.kiro/steering/agend-<instance>.md`） | `instructions_path = ".kiro/steering/agend.md"`、`shared = false`、`inject_on_ready = true`。Rust 不再仰賴 `.kiro/steering/*.md` 自動載入，而是在 Ready 觸發後**把檔案內容當作第一則 user message 打進 pane**。 | `<workdir>/.kiro/steering/agend-<instance>.md`（每實例獨立檔案） | `<workdir>/.kiro/steering/agend.md`（每 workdir 一個檔案）**並**在 Ready 時注入 |
+| `mock` | `none`（fallback 至 MCP `instructions` capability） | n/a — Rust 沒有 mock backend；E2E 改用 `Backend::Shell`。 | n/a | n/a |
+
+遷移時三個值得特別留意的行為變化:
+
+1. **OpenCode 現在會寫 workspace project doc（`AGENTS.md`）**。TS 把 fleet instructions 留在 `<instance_dir>/fleet-instructions.md`，使用者根本看不到。Rust 把 OpenCode 比照 Codex 處理。如果你的 repo 有 commit `AGENTS.md`，遷移後會看到 marker block 出現在 diff 中；如果 `.gitignore` 已把 `AGENTS.md` 排除，無行為變化。
+2. **Kiro 從每實例命名改為每 workdir 命名**。TS 寫 `.kiro/steering/agend-<instance>.md`，Rust 寫 `.kiro/steering/agend.md`。在 TS 下若兩個 Kiro instance 共用同一 working directory，各自會有自己的檔案；在 Rust 下會共用一個 —— 而 Rust 通常用獨立 worktree 避免這種共用。
+3. **Kiro 的 instructions 改以 user message 注入**。因為 Kiro CLI 不會自動載入 `.kiro/steering/*.md`（那條路徑只有 IDE 會用），Rust 改由 daemon 在 Ready 後把檔案內容貼進 pane。這代表 instructions 占的是 chat history，不是 system prompt slot；冗長的 customPrompt 在啟動時就會吃 context tokens。PR #55 已經把 MCP 端的重複注入風險排除，所以這裡沒有雙重消耗。
+
+Bug #55 在 daemon 端的 gate（當 `nativeInstructionsMechanism !== 'none'` 時，丟掉五個 fleet-context env vars 並設 `AGEND_DISABLE_MCP_INSTRUCTIONS=1`）位於 `src/daemon.ts:1022-1039`。Rust 沒在同一層複製這個 gate；它在更早的階段就 gate —— backend preset 寫了檔案就不再構建 MCP `instructions` capability response。可觀察的不變式 ——「模型永遠不會看到兩遍 fleet context」—— 在兩個 daemon 上都成立。
+
+### 信號與 ESC byte 語意
+
+**Transport**（按鍵或 byte 能不能從 daemon 送進 agent 的 PTY）—— 下表四個 backend 已驗證。**Semantics**（agent 收到 ESC 或 SIGINT 後，會不會做正確的事）—— 在 `src/backend_harness.rs` 內以 per-backend capability matrix 獨立追蹤。Rust 專案 Sprint 11 會做 real-CLI 驗證；在那之前，下表用 §3.5.8 規定的 **`pending`** 標記。
+
+| Backend | PTY byte transport（ESC `0x1b`、Ctrl-C `0x03`） | `interrupt` MCP tool 語意（ESC 中斷 LLM turn） | `tool_kill` MCP tool 語意（SIGINT 給 fg pgid） |
+|---|---|---|---|
+| `kiro-cli` | `True`（由 `verify_byte_delivery` 驗證） | `pending`（Sprint 11） | `pending`（Sprint 11） |
+| `codex` | `True` | `pending` | `pending` |
+| `claude` | `False` —— 「LLM context not tied to PTY buffer (known gap)」—— 見 `BackendCapability::transport_verified` 在 `src/backend_harness.rs:51` 的初始值 | `pending` | `pending` |
+| `gemini` | `True` | `pending` | `pending` |
+| `opencode` | 尚未進 harness matrix（`Backend::all()` 會回傳它，但 matrix 初始化只 seed 上面四個）—— `pending` | `pending` | `pending` |
+
+Rust 端今天**確實保證**的事情:
+
+- **Process tree termination**。`process::kill_process_tree(pid)`（`src/process.rs`）對 process group 發 `SIGTERM`，sleep 500 ms，然後無條件補 `SIGKILL`。Windows 退而求其次用 `TerminateProcess`。這條路徑用於 instance shutdown、replace、crash recovery —— 不負責中斷正在進行中的 LLM turn。
+- **ESC byte 注入**。`interrupt` MCP tool（`src/mcp/handlers.rs:969-991`）透過 daemon API 把 `0x1b` 寫進目標 agent 的 PTY。對端模型是否會把 ESC 解讀為「停止生成」是上面表格中的 `pending`。
+- **SIGINT 給 foreground process group**。`tool_kill` MCP tool（`src/mcp/handlers.rs:994-1031`）透過 `tcgetpgrp` 找出 pane 的 foreground pgid，然後對它發 `SIGINT`。Unix 才支援 —— Windows 上會回傳 `{"error": "tool_kill is only supported on Unix (Linux/macOS)"}`，而非靜默 no-op。
+
+TS daemon 完全沒有 `interrupt`、`tool_kill`、`kill_process_tree` 這類 group kill、capability matrix —— 這些都不存在。TS 上的「取消」只能仰賴 backend 自己的 quit command（`/exit`、`/quit`、`exit`）或 OS 層級殺掉 tmux pane。
+
+### 對遷移的實質影響
+
+- 如果你直接 script CLI invocation（在 daemon 之外自己 spawn binary），只有 Codex 形狀變了（resume 回到原本就是子命令的形式，TS 拿來包裝 `--resume <id>` 的 wrapper 不見了）。
+- 如果你的 repo 有 commit `AGENTS.md` 或 `GEMINI.md`，遷移後會看到 marker block。`.gitignore` 不需要新加 `<!-- agend:<instance> -->` 之類 glob —— marker block 是檔案內容，不是另一個檔案。
+- 如果你有 Kiro 工具讀 `.kiro/steering/agend-<instance>.md`，改成讀 `.kiro/steering/agend.md`。
+- 如果你以前依賴 TS MCP `instructions` capability fallback 來測 mock backend，請把 E2E 切到 `Backend::Shell` 並改用 `task` MCP tool flow 注入 instructions。
 
 ## MCP tool API diff {#mcp-tool-api-diff}
 
-*(Phase B —— 涵蓋:MCP tools 完整清單 (TS full set 約 20 個)、name rename、argument 形狀變更、return 值差異、broadcast `cost_limited` 欄位接續、deferred 或移除的 tools。)*
+按 Sprint 0 review 與 dev-lead 的 HIGH-FRICTION 標記，這是**整份遷移指南最重的主題**。差異不是改名 —— Rust 把 TS 視為單一 communication surface 的東西**拆成三軌 coordination tracks**，並另外加了一批沒有 TS 對應的工具。
+
+### 三軌 coordination 模型
+
+```
+                ┌───────────────── 1. work ─────────────────┐
+                │       task       (work board: create / claim / in_progress / verified / done)
+agent ──────────┤
+                │  send_to_instance, broadcast, delegate_task, request_information, report_result
+                ├──────── 2. comms (push/pull) ─────────────┤
+                │   inbox, describe_message, describe_thread (pull side, Rust 獨有)
+                │   set_waiting_on, clear_blocked_reason     (presence side, Rust 獨有)
+                │
+                └─────── 3. scope freeze ───────────────────┘
+                          post_decision, list_decisions, update_decision
+```
+
+為什麼是三軌？TS 上 agent 的 MCP 工具箱把「做工作」、「告訴另一個 agent」、「決定政策」當成同一件事 —— 在 `src/outbound-handlers.ts` 的 `outboundHandlers` 內由不同訊息 shape route。Rust daemon 強制更明確的分層，原因和 `git` 把 index、working tree、object store 拆開一樣:負責「凍結一個 scope decision」的工具和負責「投遞一條訊息」或「claim 一個 task」的工具有不同的 correctness invariants，混在一起就無法推理 ordering 或 recovery（協定層的論述見 `FLEET-DEV-PROTOCOL-v1.md` §1、§2）。
+
+對 agent 而言，實務影響是:
+
+- **Work board（`task`）** 是「這件事做完沒」的唯一真相來源。狀態轉移 `claimed → in_progress → verified → done` 不能跳關，跳了會被拒絕。
+- **Comms** 仍然用 `send_to_instance` / `broadcast` 做 push，但加入 **pull**（`inbox`）與 **presence**（`set_waiting_on`），讓 agent 重啟後能補回未讀訊息。
+- **Decisions（`post_decision`）** 是唯一「凍結未來 scope」的機制。reviewer 找到 scope violation 時引用 decision id；違反者不能事後辯說「我們從沒決議過」。
+
+### 兩端都存在的工具
+
+下列工具兩個 daemon 都有，名稱與形狀大致相同；diff 在 input/output schema 與週邊 lifecycle。先掃過表格找「schema diff」，只在你實際用該工具時才細看 sub-section。
+
+| 工具 | TS schema 位置 | Rust schema 位置 | Schema diff |
+|---|---|---|---|
+| `reply` | `src/outbound-schemas.ts:ReplyArgs` | `src/mcp/tools.rs:channel_tools` | 無 |
+| `react` | `ReactArgs` | `channel_tools` | 無 |
+| `edit_message` | `EditMessageArgs` | `channel_tools` | 無 |
+| `download_attachment` | `DownloadAttachmentArgs` | `channel_tools` | 無 |
+| `send_to_instance` | `SendToInstanceArgs` | `comm_tools` | Rust 加上選填的 `thread_id`、`parent_id` 用於 thread 追蹤。雙方都接受 `request_kind ∈ {query, task, report, update}`。 |
+| `delegate_task` | `DelegateTaskArgs` | `comm_tools` | Rust 加上 `task_id`、`thread_id`、`parent_id`、`force` + `force_reason`（取代已棄用的 `interrupt` + `reason`）、`second_reviewer` + `second_reviewer_reason`，後者支援協定 §3.5 dual-review。 |
+| `report_result` | `ReportResultArgs` | `comm_tools` | Rust 加上 `reviewed_head`（review 當下的 git SHA，會出現在 metadata）、`thread_id`、`parent_id`。 |
+| `request_information` | `RequestInformationArgs` | `comm_tools` | 無 |
+| `broadcast` | `BroadcastArgs` | `comm_tools` | 無。雙方都把 `report` 從 `request_kind` 排除 —— broadcast 不能攜帶 per-correlation report。 |
+| `list_instances` | `ListInstancesArgs` | `instance_tools` | TS 支援 `tags` 過濾；Rust 目前不接參數（如果你依賴 tag filter，請向 dev-impl-1/2 確認）。 |
+| `create_instance` | `CreateInstanceArgs` | `instance_tools` | Rust 加上 `team` + `count`（同質 team）、`backends`（異質 team）、`layout` ∈ `{tab, split-right, split-below}`、`target_pane`、`task`（spawn 後注入的初始任務）。`layout` 與 `target_pane` 屬於 TUI 感知欄位，TS 沒有對應。 |
+| `delete_instance` | `DeleteInstanceArgs` | `instance_tools` | 無 |
+| `replace_instance` | `ReplaceInstanceArgs` | `instance_tools` | 無 |
+| `start_instance` | `StartInstanceArgs` | `instance_tools` | 無 |
+| `describe_instance` | `DescribeInstanceArgs` | `instance_tools` | Rust 多回傳 `waiting_on`、`waiting_on_since`、最後 heartbeat、last_polled_at、dispatch tracking —— 與下面 `set_waiting_on` / `report_health` 流程搭配。 |
+| `set_display_name` | `SetDisplayNameArgs` | `instance_tools` | 無 |
+| `set_description` | `SetDescriptionArgs` | `instance_tools` | 無 |
+| `post_decision` | `PostDecisionArgs` | `decision_tools` | 無 |
+| `list_decisions` | `ListDecisionsArgs` | `decision_tools` | 無 |
+| `update_decision` | `UpdateDecisionArgs` | `decision_tools` | 無 |
+| `task` | `TaskBoardArgs` | `task_tools` | **status enum 擴充。** TS:`open / claimed / done / blocked / cancelled`。Rust:`open / claimed / in_progress / blocked / verified / done / cancelled`。新增 `due_at`、`duration` 表達期限。新加的 `in_progress` 與 `verified` 兩個狀態對應協定 §10.3 的 three-state completion（`in_progress` → `verified` → `done`）。 |
+| `create_team` | `CreateTeamArgs` | `team_tools` | Rust 加上 `orchestrator`（必須是 member；接收 team-level routing）。 |
+| `update_team` | `UpdateTeamArgs` | `team_tools` | Rust 加上 `orchestrator`（重新指派 orchestrator）。 |
+| `list_teams` / `delete_team` | 同上 | `team_tools` | 無 |
+| `create_schedule` | `CreateScheduleArgs` | `schedule_tools` | **trigger 拆分。** TS:只接受 cron expression。Rust:可選 `cron`（recurring）**或** `run_at`（ISO 8601 one-shot）—— 兩者互斥。One-shot 觸發後或被偵測為 missed 後自動 disable。 |
+| `list_schedules` / `update_schedule` / `delete_schedule` | 同上 | `schedule_tools` | `update_schedule` 兩個 trigger 欄位都接受；補哪個就替換 trigger kind。 |
+| `deploy_template` / `teardown_deployment` / `list_deployments` | `*Args` | `deploy_tools` | 無 |
+| `checkout_repo` / `release_repo` | `*Args` | `repo_tools` | 無 |
+
+### Rust 新增的工具（TS 沒有對應）
+
+下面這 11 個工具，是把現有 `@suzuke/agend` agent prompt 移植過來時最該關注的。按所屬軌列出。
+
+#### Comms — pull side
+
+| 工具 | 用途 | 為什麼遷移時重要 |
+|---|---|---|
+| `inbox` | Drain 寄到本實例的待收訊息。回傳 `{messages: [...]}`，並對 Telegram 已綁定的 binding emit `AgentPickedUp` event（每筆 pickup 對應一個 ✅ 反應）。 | TS 上每一則跨實例訊息都會直接打進 pane（透過 tmux）；agent 重啟意味著 in-flight 的訊息會丟。Rust 的 inbox 會持久化，crash 在任務中途的 agent 在 resume 時可呼叫 `inbox` 補回未讀。 |
+| `describe_message` | 用 ID 查 inbox 訊息狀態 —— 回傳 `ReadAt`（含 timestamp）、`UnreadExpired` 或 `NotFound`。選填 `instance` 把 lookup 限定到該實例的 inbox。 | 寄送方可在 retry 前確認對方有沒有 pick up 這條訊息。TS 沒有對應 —— 只能從沉默猜。 |
+| `describe_thread` | 取出 thread 內所有訊息，按 timestamp 排序。選填 `instance` 限定到某個收件人 inbox。 | 用來事後重建多 hop 協作 trace（impl → reviewer → impl …）。和 `send_to_instance` / `delegate_task` / `report_result` 新增的 `thread_id` / `parent_id` 欄位搭配使用。 |
+
+#### Comms — presence 與 process control
+
+| 工具 | 用途 | 為什麼遷移時重要 |
+|---|---|---|
+| `set_waiting_on` | 宣告本實例現在被誰擋住（`condition` 字串）。空字串清除。Daemon 自動衰減 stale 條目 —— 見 `set_waiting_on` handler 在 `src/mcp/handlers.rs:1033-1063`。 | 取代 TS 上 agent 把「我在等 reviewer」之類 prose 寫進訊息的做法。現在是 machine-readable；orchestrator 可以 `list_instances` 直接看誰被誰擋住。 |
+| `clear_blocked_reason` | 在不重寫 `waiting_on` 的情況下，強制清除 stale 阻塞原因。 | Orchestrator 在阻塞條件已解決但 blocked 實例尚未察覺時使用（例如 reviewer 已給 verdict，implementer 還在等）。 |
+| `report_health` | 回報自己的 liveness / state 給 daemon，配合 heartbeat path。 | 取代 TS 那種「MCP server 還連著就算活著」的隱式訊號 —— 現在改成顯式、結構化。 |
+| `interrupt` | 對目標 agent 的 PTY 注入 ESC byte（`0x1b`），中斷當下 LLM turn。選填 `reason` 會在 ESC 後當作後續 prompt 注入。Context 保留，agent 接受下一個 prompt。 | TS 完全沒有從外部中斷 LLM 一輪生成的方式 —— 只能等 timeout 或殺掉 pane。各 backend 是否真把 ESC 當「停止生成」是上面「信號與 ESC byte 語意」小節裡的 `pending`。 |
+| `tool_kill` | 對目標 agent 的 PTY foreground process group 發 `SIGINT`，取消活躍中的**工具子進程**而保留 agent session。Unix only。成功時回傳 `{ok: true, pgid}`。 | 在 agent 卡在長時間 shell 命令（`cargo build`、`pytest …`）但你想保留 agent chat history 時用。TS 沒有對應 —— 唯一脫困的方法是殺整個 pane 重來。 |
+
+#### TUI control
+
+| 工具 | 用途 | 為什麼遷移時重要 |
+|---|---|---|
+| `move_pane` | 把實例的 pane 移到 daemon TUI 內的另一個 tab。會 split 既有 tab 的 focused pane，或建立新 tab。Scrollback 與 PTY state 保留。 | TS 沒有 TUI 可移 pane。如果你 TS agent 是用 `delete_instance` + `create_instance` 來「視覺上搬位置」，請改用 `move_pane` —— 它保留 session、scrollback、worktree。 |
+
+#### CI watching
+
+| 工具 | 用途 | 為什麼遷移時重要 |
+|---|---|---|
+| `watch_ci` | 監看 GitHub Actions CI（指定 repo + branch）。CI 進入終端狀態（success / failure 或任何 terminal state）時，事件自動注入 watching agent 的 inbox。若 daemon env 有 `GITHUB_TOKEN` 走認證 polling；否則退化為非認證 polling（fleet 共享 60 req/hr），response 中會帶 `warning` 欄位。 | TS agent 用 `gh pr checks --watch` 從 shell 輪詢，會卡住 agent 並消耗 token。Rust 把 polling 移到 daemon，agent 只在終端狀態被通知。 |
+| `unwatch_ci` | 停止監看某 repo 的 CI。 | n/a —— 與 `watch_ci` 配對。 |
+
+### 跨實例 comms —— 整份遷移最深的 friction
+
+這是 dev-lead 點名要寫最深的區塊，所以下面端到端走一個具體遷移情境。
+
+**TS pattern（今天）:**
+```
+agent A: send_to_instance(target='B', message='please review PR #42', request_kind='task')
+  ↓ TS daemon 透過 outboundHandlers['send_to_instance'] 路由
+  ↓ Bug #57 cost-guard 預檢（B 超出預算就丟掉）
+  ↓ targetIpc.send({type: 'fleet_inbound', targetSession: 'B', content, meta: {...}})
+  ↓ B 的 MCP server 收到 fleet_inbound，把它打進 B 的 pane，前綴 [from:A]
+agent B（在工作）:在 chat 看到訊息，自行決定要不要中斷現任務回應。
+agent B（離線）:訊息消失 —— TS 不會把 `fleet_inbound` 持久化到 pane buffer 之外。
+```
+
+**Rust pattern（遷移後）:**
+```
+agent A: send_to_instance(target='B', message='please review PR #42', request_kind='task',
+                          thread_id='th-pr42', parent_id='m-…')
+  ↓ Rust daemon 透過 mcp/handlers.rs 的 send_to_instance 路由
+  ↓ 寫入 B 的 inbox 檔（<home>/inbox/<B>.json，持久化）
+  ↓ 若 B 已綁定 Telegram topic，Telegram sink 發 UX event
+agent B（在工作）:下一次 [AGEND-MSG] system reminder 會帶這條訊息 header，B 可呼叫 inbox drain。
+agent B（離線 / 重啟中）:inbox 檔仍在；下次啟動 B 透過 inbox 看到 pending 訊息。
+agent A:可隨後呼叫 describe_message(message_id=…) 或 describe_thread(thread_id='th-pr42') 確認 pickup。
+```
+
+遷移時 prompt 與 runbook 必須調整的事:
+
+1. **不要再假設 push delivery 就夠**。如果你的 agent 有可能漏掉訊息（重啟、crash、手動 stop），在啟動時加上 `inbox` check。Rust daemon 已經會在新訊息到達時用 `[AGEND-MSG]` system reminder 提醒，但要 drain backlog 與透過 `AgentPickedUp` 確認 pickup，仍需顯式 `inbox` 呼叫。
+2. **採用 `thread_id` 與 `parent_id`**。協定的協作模式（delegate → ack → report；review → finding → re-review）在 thread 鏈上是天然 traceable。TS 用 prose `correlation_id` 串相同模式；Rust 仍接受 `correlation_id`，但補上結構化的這對欄位。
+3. **用 `set_waiting_on` 取代 prose**。把「我在等 reviewer」打進 chat 機器讀不到；`set_waiting_on(condition='review from at-dev-4 on PR #63')` 可由 `describe_instance` 查詢，也可用 `list_instances` 全 fleet 列出。
+4. **把 TS 時代的「殺了重生」模式換成 `interrupt` 與 `tool_kill`**。如果你的 TS prompt 寫「agent 卡住就 replace」，改寫為「agent 卡在 LLM turn 中就 `interrupt(target=…)`；卡在 tool subprocess 中就 `tool_kill(target=…)`；replace 留給最後手段」。
+5. **`request_kind: 'report'` flow 要帶 `reviewed_head`**。reviewer 在 `report_result` 時附上 review 當下的 git SHA。Rust 的 merge gate（協定 §10.3 / §3 metadata fields）把這個欄位視為 staleness 判定的 load-bearing 訊號。
+
+### Tool-set 設定檔
+
+TS 透過 `AGEND_TOOL_SET`（`src/channel/mcp-tools.ts:120-126`）暴露兩個 profile:
+- `standard`:`reply, react, edit_message, send_to_instance, broadcast, list_instances, describe_instance, list_decisions, post_decision, task, set_display_name, set_description`
+- `minimal`:`reply, send_to_instance, list_decisions, download_attachment`
+
+Rust 目前在 `src/mcp/tools.rs` 沒有暴露 tool-set profile —— 每個 spawn 出來的 agent 看到全部 45 個工具。**`pending`** 確認:若 Sprint 11 在 Rust 端加 profile 機制，依賴 TS `minimal` 來壓 token cost 的 agent 可能要重調。在那之前，請把 Rust 的工具箱當 `full` 看待去 prompt-engineer。
 
 ## Migration steps {#migration-steps}
 
