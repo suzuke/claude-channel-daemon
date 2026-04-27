@@ -4,6 +4,7 @@ import { type CliBackend, type CliBackendConfig, type ErrorPattern, type Startup
 
 export class KiroBackend implements CliBackend {
   readonly binaryName = "kiro-cli";
+  readonly nativeInstructionsMechanism = "project-doc" as const;
   private binaryPath: string;
 
   constructor(private instanceDir: string) {

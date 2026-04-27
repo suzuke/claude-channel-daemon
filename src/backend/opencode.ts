@@ -4,6 +4,7 @@ import { type CliBackend, type CliBackendConfig, type ErrorPattern, type Startup
 
 export class OpenCodeBackend implements CliBackend {
   readonly binaryName = "opencode";
+  readonly nativeInstructionsMechanism = "append-flag" as const;
   private binaryPath: string;
 
   constructor(private instanceDir: string) {

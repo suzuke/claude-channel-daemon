@@ -20,6 +20,7 @@ const __dirname = dirname(__filename);
  */
 export class MockBackend implements CliBackend {
   readonly binaryName = "node";
+  readonly nativeInstructionsMechanism = "none" as const;
 
   constructor(private instanceDir: string) {}
 

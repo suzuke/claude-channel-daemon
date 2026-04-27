@@ -6,6 +6,7 @@ import { appendWithMarker, removeMarker } from "./marker-utils.js";
 
 export class GeminiCliBackend implements CliBackend {
   readonly binaryName = "gemini";
+  readonly nativeInstructionsMechanism = "project-doc" as const;
   private binaryPath: string;
 
   constructor(private instanceDir: string) {

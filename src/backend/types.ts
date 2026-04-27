@@ -87,6 +87,22 @@ export interface CliBackend {
   /** Whether this backend re-reads instruction files on --resume (e.g. Claude Code's --append-system-prompt-file). */
   readonly instructionsReloadedOnResume?: boolean;
 
+  /**
+   * How this backend natively injects fleet instructions into the CLI's prompt:
+   * - `'append-flag'`: dedicated CLI flag / config field pointing at a file outside
+   *   the workspace (e.g. Claude `--append-system-prompt-file`, OpenCode
+   *   `instructions: [path]`). Cleanest, no workspace-visible artefact.
+   * - `'project-doc'`: workspace markdown the CLI auto-loads (e.g. Gemini
+   *   `GEMINI.md`, Codex `AGENTS.md`, Kiro `.kiro/steering/`).
+   * - `'none'`: no native mechanism — daemon must rely on the MCP `instructions`
+   *   capability to deliver fleet context.
+   *
+   * Daemon uses this to gate the MCP `instructions` capability: backends that
+   * already inject natively must NOT also receive the same content via MCP, or
+   * the model sees it twice (Bug #55).
+   */
+  readonly nativeInstructionsMechanism: "append-flag" | "project-doc" | "none";
+
   /** Pre-approve a working directory to skip trust dialogs on startup. */
   preTrust?(workingDirectory: string): void;
 

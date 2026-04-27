@@ -1007,19 +1007,36 @@ export class Daemon extends EventEmitter {
       }
     }
 
-    // ── MCP server env (dual-track: still passes env vars for MCP instructions fallback) ──
+    // ── MCP server env ──
+    // Fleet-context env vars (display_name, description, workflow, custom
+    // prompt, decisions) feed mcp-server.ts:buildMcpInstructions(), which is
+    // exposed via the MCP `instructions` capability. Backends with their own
+    // native injection (Claude `--append-system-prompt-file`, Gemini
+    // `GEMINI.md`, Codex `AGENTS.md`, Kiro `.kiro/steering/`, OpenCode
+    // `opencode.json` instructions array) already deliver the same content
+    // into the model's context, so passing it through MCP would inject the
+    // identical text twice (Bug #55). Gate on the backend's
+    // `nativeInstructionsMechanism`: when the backend injects natively, we
+    // drop the env vars AND set AGEND_DISABLE_MCP_INSTRUCTIONS=1 so the MCP
+    // server omits its `instructions` capability entirely.
+    const nativeMech = this.backend?.nativeInstructionsMechanism ?? "none";
+    const mcpInstructionsActive = nativeMech === "none";
     const mcpEnv: Record<string, string> = {
       AGEND_SOCKET_PATH: sockPath,
       AGEND_INSTANCE_NAME: this.name,
       AGEND_WORKING_DIR: this.config.working_directory,
     };
     if (this.config.tool_set) mcpEnv.AGEND_TOOL_SET = this.config.tool_set;
-    if (this.config.display_name) mcpEnv.AGEND_DISPLAY_NAME = this.config.display_name;
-    if (this.config.description) mcpEnv.AGEND_DESCRIPTION = this.config.description;
-    if (resolvedWorkflow === false) mcpEnv.AGEND_WORKFLOW = "false";
-    else if (resolvedWorkflow) mcpEnv.AGEND_WORKFLOW = resolvedWorkflow;
-    if (resolvedCustomPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = resolvedCustomPrompt;
-    if (process.env.AGEND_DECISIONS) mcpEnv.AGEND_DECISIONS = process.env.AGEND_DECISIONS;
+    if (mcpInstructionsActive) {
+      if (this.config.display_name) mcpEnv.AGEND_DISPLAY_NAME = this.config.display_name;
+      if (this.config.description) mcpEnv.AGEND_DESCRIPTION = this.config.description;
+      if (resolvedWorkflow === false) mcpEnv.AGEND_WORKFLOW = "false";
+      else if (resolvedWorkflow) mcpEnv.AGEND_WORKFLOW = resolvedWorkflow;
+      if (resolvedCustomPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = resolvedCustomPrompt;
+      if (process.env.AGEND_DECISIONS) mcpEnv.AGEND_DECISIONS = process.env.AGEND_DECISIONS;
+    } else {
+      mcpEnv.AGEND_DISABLE_MCP_INSTRUCTIONS = "1";
+    }
 
     // ── Fleet instructions for additive system prompt injection ──
     let instructions: string;

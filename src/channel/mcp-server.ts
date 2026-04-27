@@ -182,9 +182,16 @@ function ipcRequest(
 
 // ---------------------------------------------------------------------------
 // MCP instructions — thin wrapper around shared buildFleetInstructions().
-// Phase 1 (dual track): MCP instructions kept as fallback for backends that
-// read the MCP instructions field. Content delegates to the shared module
-// to avoid drift between MCP and additive system prompt paths.
+//
+// The daemon owns the policy: when the backend has a native injection
+// mechanism (CLI flag, project doc, etc.) the same content is delivered into
+// the model's prompt that way, so emitting it here as the MCP `instructions`
+// capability would duplicate it (Bug #55). The daemon signals that case by
+// setting `AGEND_DISABLE_MCP_INSTRUCTIONS=1` and omitting the fleet-context
+// env vars; we honour that by skipping the capability altogether. Backends
+// that opt into MCP instructions (e.g. future backends with no native
+// mechanism, or operators running this server standalone) leave that env var
+// unset and get the previous behaviour.
 // ---------------------------------------------------------------------------
 
 function buildMcpInstructions(): string {
@@ -209,13 +216,15 @@ function buildMcpInstructions(): string {
   });
 }
 
+const mcpInstructionsDisabled = process.env.AGEND_DISABLE_MCP_INSTRUCTIONS === "1";
+
 const mcp = new Server(
   { name: "agend", version: "0.3.0" },
   {
     capabilities: {
       tools: {},
     },
-    instructions: buildMcpInstructions(),
+    ...(mcpInstructionsDisabled ? {} : { instructions: buildMcpInstructions() }),
   },
 );
 
