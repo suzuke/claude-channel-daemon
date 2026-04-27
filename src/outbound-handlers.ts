@@ -7,6 +7,7 @@ import type { Logger } from "./logger.js";
 import type { RoutingEngine } from "./routing-engine.js";
 import type { InstanceLifecycle, LifecycleCreateArgs } from "./instance-lifecycle.js";
 import type { EventLog } from "./event-log.js";
+import type { CostGuard } from "./cost-guard.js";
 import type { z } from "zod";
 import {
   BroadcastArgs,
@@ -40,6 +41,14 @@ export interface OutboundContext {
   readonly lifecycle: InstanceLifecycle;
   readonly sessionRegistry: Map<string, string>;
   readonly eventLog: EventLog | null;
+  /**
+   * Optional fleet-wide cost guard. When set, outbound dispatch handlers
+   * short-circuit and surface a warning to the sender if the target is over
+   * its daily limit (Feature #24). FleetManager already wires this field; the
+   * interface declaration just exposes it to handler code. Null when cost
+   * guard is disabled in fleet config.
+   */
+  readonly costGuard: CostGuard | null;
   lastActivityMs(name: string): number;
   startInstance(name: string, config: InstanceConfig, topicMode: boolean): Promise<void>;
   connectIpcToInstance(name: string): Promise<void>;
@@ -81,6 +90,20 @@ const sendToInstance: Handler = (ctx, rawArgs, respond, meta) => {
   const v = validateArgs(SendToInstanceArgs, rawArgs, "send_to_instance");
   if (!v.ok) { respond(null, v.error); return; }
   const { instance_name: targetName, message, request_kind: reqKind, requires_reply, task_summary, working_directory, branch, correlation_id: parsedCorrelationId } = v.data;
+
+  // Feature #24: cost-guard pre-check. Surface the limit to the sender
+  // immediately rather than dispatch a message that the target instance
+  // cannot act on (the limit handler pauses the target). `report_result`
+  // funnels through this handler with `request_kind: "report"` and is
+  // exempt — terminal status updates must reach the orchestrator even when
+  // the target is paused, otherwise the merge gate stalls. Null-safe: if
+  // the fleet has no cost guard configured, isLimited is never called.
+  if (reqKind !== "report" && ctx.costGuard?.isLimited(targetName)) {
+    const limitUsd = (ctx.costGuard.getLimitCents() / 100).toFixed(2);
+    respond(null, `cost-guard: instance '${targetName}' has reached its daily cost limit ($${limitUsd}). Message not delivered — target is paused. Wait for daily reset or escalate to operator.`);
+    return;
+  }
+
   const senderLabel = meta.senderSessionName ?? meta.instanceName;
   const isExternalSender = meta.senderSessionName != null && meta.senderSessionName !== meta.instanceName;
 
