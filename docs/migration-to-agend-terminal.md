@@ -215,43 +215,47 @@ channel:
 
 **Other int-vs-string parity worth knowing:** `instances.<name>.topic_id` is also strictly `Option<i32>` on Rust (fleet.rs:160) — bare int only.
 
-### High-friction change #3: `outbound_capabilities` is a Rust-only required field
+### High-friction change #3: `outbound_capabilities` is a Rust-only field with a deliberately-different default than `user_allowlist`
 
-**Reference:** Sprint 22 P0 PR [#230](https://github.com/suzuke/agend-terminal/pull/230). Schema doc-comment at [`src/fleet.rs:173-208`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L173-L208); enforcement helper at [`src/channel/auth.rs::gate_outbound_for_agent`](https://github.com/suzuke/agend-terminal/blob/main/src/channel/auth.rs); enum at the same file's `ChannelOpKind`. Operator deeper-dive: [`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md).
+**Reference:** Sprint 22 P0 PR [#230](https://github.com/suzuke/agend-terminal/pull/230) introduced this field with a fail-closed default; Sprint 23 P1 PR [#242](https://github.com/suzuke/agend-terminal/pull/242) reversed the absent-state default to **default-open** per operator philosophy ("absent ≡ all permitted"). Schema doc-comment at [`src/fleet.rs:173-208`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L173-L208); enum at [`src/channel/auth.rs::ChannelOpKind`](https://github.com/suzuke/agend-terminal/blob/main/src/channel/auth.rs). Operator deeper-dive (the Sprint 23 P1 section reflects current default-open semantics): [`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md).
 
-`@suzuke/agend` has no equivalent — outbound channel ACLs were implicit ("any tool surface is callable by any instance"). `agend-terminal` introduces `instances.<name>.outbound_capabilities: Vec<ChannelOpKind>` to gate which agent-driven channel ops each instance may invoke. The four current variants (snake_case in YAML → `ChannelOpKind` variant): `reply` → `Reply`, `react` → `React`, `edit` → `Edit`, `inject_provenance` → `InjectProvenance`.
+`@suzuke/agend` has no equivalent — outbound channel ACLs were implicit ("any tool surface is callable by any instance"). `agend-terminal` introduces `instances.<name>.outbound_capabilities: Vec<ChannelOpKind>` so an operator who *wants* to restrict an instance's channel ops can do so. The four current variants (snake_case in YAML → `ChannelOpKind` variant): `reply` → `Reply`, `react` → `React`, `edit` → `Edit`, `inject_provenance` → `InjectProvenance`.
 
-**Tri-state semantics** (mirrors `channel.user_allowlist` from High-friction #1):
+**Decision matrix (post-PR #242 default-open):**
 
-| YAML | Sprint 22 P0 (current) | Sprint 23 (next) |
-|---|---|---|
-| `outbound_capabilities: [reply, react]` | listed ops permitted | same |
-| `outbound_capabilities: []` | fail-closed (explicit no agent outbound) | same |
-| key absent | FATAL warn-but-permit one daemon cycle | hard parse error |
+| YAML | Behaviour |
+|---|---|
+| key absent | all ops permitted (default-open) |
+| `outbound_capabilities: [reply, react]` | only listed ops permitted |
+| `outbound_capabilities: []` | all rejected (explicit opt-out, retained from Sprint 22 P0) |
 
-**Symptom when key is absent (Sprint 22 P0 grace window).** The daemon emits via `tracing::error!`:
+There is **no FATAL warn-but-permit grace cycle** and **no hard-parse-error promotion**. Sprint 22 P0's gradual-migration scaffolding was removed by Sprint 23 P1 along with the original fail-closed default. Built-in coordinators (`general` and any future auto-created coordinator) inherit the default-open behaviour like every other instance — there is no special auto-inject anymore.
 
-```
-ERROR FATAL (warn-but-permit one daemon cycle): instance '<name>' outbound_capabilities NOT SET. Sprint 22 P0 grants this <op> call under gradual-migration grace. ...
-```
+**Why is this default different from `user_allowlist`?** This is a deliberate threat-model distinction, not an inconsistency:
 
-The op proceeds — but the warning is fired once per instance per daemon process (mutex-guarded `HashSet`, rate-limited so no log spam). When Sprint 23 ships, the absent state becomes a hard parse error and the daemon refuses to load the config. Do not depend on the grace window past Sprint 22 P0.
+| Gate | Scope | Default | Threat model |
+|---|---|---|---|
+| `channel.user_allowlist` (High-friction #1) | per-channel, channel ingress | **fail-closed** | a channel-wide allowlist that defaults open is one credential leak away from any internet user being able to drive your fleet — silent operator regression possible. |
+| `outbound_capabilities` | per-instance, per-op outbound | **default-open** | a per-instance allowlist that defaults closed forces every operator-defined instance to declare every op, even though the operator is the one running every instance — over-specification without a corresponding cascade-attack risk. |
 
-**Built-in coordinators are auto-injected.** The `general` instance (and any future auto-created coordinator) gets `[reply, react, edit, inject_provenance]` injected automatically at startup by [`bootstrap::fleet_normalize::auto_create_general`](https://github.com/suzuke/agend-terminal/blob/main/src/bootstrap/fleet_normalize.rs#L23-L87) (the linked range covers both the `default_built_in_outbound_capabilities()` helper that defines the four-cap default and the `auto_create_general` fn that consumes it). **User-authored YAML entries do not get auto-inject** — every operator-defined instance must declare `outbound_capabilities` explicitly before Sprint 23.
+Both gates are correct for their threat model. When porting from `@suzuke/agend`, you must populate `channel.user_allowlist` (or the bot will silently fail to reply); you may leave `outbound_capabilities` unset on operator-defined instances unless you actually want to restrict an instance's channel ops.
 
-**Migration action.** When porting an existing `@suzuke/agend` `fleet.yaml`, add `outbound_capabilities` to every operator-authored instance:
+**Migration action.** When porting an existing `@suzuke/agend` `fleet.yaml`, `outbound_capabilities` is **optional** for operator-authored instances — leave it unset to preserve TS-equivalent permissive behaviour:
 
 ```yaml
 instances:
   worker-a:
     working_directory: /path/to/repo
-    outbound_capabilities: [reply, react]      # explicit; matches the channel ops the agent should use
+    # outbound_capabilities omitted — defaults to all ops permitted (TS-equivalent)
   worker-b:
     working_directory: /path/to/other-repo
-    outbound_capabilities: []                  # explicit lockdown — agent cannot call channel ops
+    outbound_capabilities: [reply, react]      # explicitly restrict to these ops only
+  worker-c:
+    working_directory: /path/to/audit-repo
+    outbound_capabilities: []                  # explicit lockdown — agent cannot call any channel op
 ```
 
-For the full `ChannelOpKind` enum reference, the rationale behind the 2-stage transition timeline, and cross-channel architecture notes (Telegram-vs-Discord shared gate behaviour), see the operator deeper-dive at [`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md).
+For the full `ChannelOpKind` enum reference, the Sprint 23 P1 reversal rationale, and cross-channel architecture notes (Telegram-vs-Discord shared gate behaviour), see the operator deeper-dive at [`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md).
 
 ### Top-level keys
 
@@ -301,7 +305,7 @@ For the full `ChannelOpKind` enum reference, the rationale behind the 2-stage tr
 
 | Rust field | Type | Purpose |
 |---|---|---|
-| `outbound_capabilities` | `Vec<ChannelOpKind>` | **Required for every operator-authored instance from Sprint 23.** Gates which agent-driven channel ops (`reply` / `react` / `edit` / `inject_provenance`) the instance may invoke. Tri-state semantics + 2-stage timeline + built-in auto-inject for `general` — see High-friction #3 above. |
+| `outbound_capabilities` | `Vec<ChannelOpKind>` | Per-instance gate over agent-driven channel ops (`reply` / `react` / `edit` / `inject_provenance`). **Default-open since Sprint 23 P1 (PR #242)** — leave unset to preserve TS-equivalent permissive behaviour, or list specific ops to restrict, or set `[]` for full lockdown. See High-friction #3 above for the threat-model rationale and decision matrix. |
 | `receive_fleet_updates` | `Option<bool>` | Default opt-in. Set `false` on instances that should not see fleet `<fleet-update>` injections. |
 | `cols`, `rows` | `Option<u16>` | Override PTY size for the instance's terminal. |
 | `env` | `HashMap<String, String>` | Per-instance env additions. Note: Rust filters credential-like keys per `agent.rs::SENSITIVE_ENV_KEYS` — secrets injected here may be redacted. |
