@@ -1,5 +1,13 @@
 # Security Considerations
 
+> [!WARNING]
+> **AgEnD is in maintenance mode.** Active development has moved to
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)**.
+>
+> Security reports for `@suzuke/agend` are still accepted — please file via the
+> process described in this document. New code reports should target
+> `agend-terminal`.
+
 Running Claude Code remotely via Telegram changes the trust model compared to sitting at a terminal. Be aware of the following:
 
 ## Telegram account = shell access

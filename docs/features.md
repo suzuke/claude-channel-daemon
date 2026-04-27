@@ -1,5 +1,14 @@
 # Features
 
+> [!WARNING]
+> **AgEnD is in maintenance mode.** Active development has moved to
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** — a Rust rewrite with
+> native PTY multiplexing, cross-platform support (macOS / Linux / Windows), and a
+> built-in multi-pane TUI. All new features land there.
+>
+> This document describes the feature surface of `@suzuke/agend`. New features in
+> `agend-terminal` may differ.
+
 ## Fleet mode — one bot, many projects
 
 Each Telegram Forum Topic maps to an independent Claude Code session. Create a topic, pick a project directory, and Claude starts working. Delete the topic, instance stops. Scale to as many projects as your machine can handle.

@@ -1,5 +1,12 @@
 # 安全考量 (Security Considerations)
 
+> [!WARNING]
+> **AgEnD 已進入 maintenance mode**。新功能開發已移至
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)**。
+>
+> `@suzuke/agend` 的安全回報仍然受理 —— 請依本文件描述的流程提交。針對新版程式碼的
+> 安全回報請改提交至 `agend-terminal`。
+
 透過 Telegram 遠端執行 Claude Code 與坐在終端機前相比，會改變信任模型。請注意以下事項：
 
 ## Telegram 帳號 = Shell 存取權限

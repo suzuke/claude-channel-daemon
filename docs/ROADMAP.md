@@ -1,5 +1,14 @@
 # AgEnD Roadmap
 
+> [!WARNING]
+> **AgEnD is in maintenance mode.** Active development has moved to
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** — a Rust rewrite with
+> native PTY multiplexing, cross-platform support (macOS / Linux / Windows), and a
+> built-in multi-pane TUI. All new features land there.
+>
+> This roadmap captures the planning state of `@suzuke/agend` at v1.12.0 and is
+> retained for historical reference. Future direction is tracked in `agend-terminal`.
+
 > Last updated: 2026-04-06 (v1.12.0)
 > Produced by multi-agent consensus: Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI
 

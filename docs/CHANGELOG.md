@@ -1,5 +1,11 @@
 # Changelog
 
+> [!WARNING]
+> **AgEnD is in maintenance mode.** Active development has moved to
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)**. Future entries in
+> this changelog will cover security fixes and backend CLI compatibility updates
+> only — feature work lands in the new repository.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).

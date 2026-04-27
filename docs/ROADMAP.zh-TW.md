@@ -1,5 +1,14 @@
 # AgEnD 發展藍圖
 
+> [!WARNING]
+> **AgEnD 已進入 maintenance mode**。新功能開發已移至
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** —— 一個以 Rust 重寫的版本,
+> 具備原生 PTY multiplexing、跨平台支援 (macOS / Linux / Windows),以及內建的多 pane TUI。
+> 所有新功能都將在該版本推出。
+>
+> 本藍圖紀錄的是 `@suzuke/agend` 在 v1.12.0 時的規劃狀態,僅作歷史參考。後續方向以
+> `agend-terminal` 為準。
+
 > 最後更新：2026-04-06 (v1.12.0)
 > 由多代理共識產出：Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI
 
