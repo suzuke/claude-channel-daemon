@@ -396,7 +396,20 @@ const broadcast: Handler = (ctx, rawArgs, respond, meta) => {
 
   const sentTo: string[] = [];
   const failed: string[] = [];
+  // #24 follow-up: per-target cost-guard skip. Unlike sendToInstance (which
+  // short-circuits the whole call), broadcast must keep dispatching to other
+  // targets — only the over-limit ones drop out. BroadcastRequestKind already
+  // excludes "report", so no kind-bypass needed here.
+  const costLimited: { target: string; warning: string }[] = [];
   for (const targetName of targetNames) {
+    if (ctx.costGuard?.isLimited(targetName)) {
+      const limitUsd = (ctx.costGuard.getLimitCents() / 100).toFixed(2);
+      costLimited.push({
+        target: targetName,
+        warning: `cost-guard: instance '${targetName}' has reached its daily cost limit ($${limitUsd}). Message not delivered — target is paused.`,
+      });
+      continue;
+    }
     const targetIpc = ctx.instanceIpcClients.get(targetName) ?? ctx.instanceIpcClients.get(ctx.sessionRegistry.get(targetName) ?? "");
     if (!targetIpc) { failed.push(targetName); continue; }
 
@@ -420,7 +433,7 @@ const broadcast: Handler = (ctx, rawArgs, respond, meta) => {
     ctx.eventLog?.logActivity("message", senderLabel, summary, target);
   }
   ctx.queueMirrorMessage?.(`📢 ${senderLabel} → [${sentTo.join(", ")}]: ${message.slice(0, 500)}${message.length > 500 ? " […]" : ""}`);
-  respond({ sent_to: sentTo, failed, count: sentTo.length });
+  respond({ sent_to: sentTo, failed, cost_limited: costLimited, count: sentTo.length });
 };
 
 // ── Teams ────────────────────────────────────────────────────────────────

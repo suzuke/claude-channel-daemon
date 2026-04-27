@@ -182,3 +182,136 @@ describe("Feature #24 — cost-guard pre-check at outbound dispatch", () => {
     });
   });
 });
+
+// ── #24 follow-up: broadcast handler gap ────────────────────────────────────
+//
+// `broadcast` runs its own per-target send loop without funnelling through
+// sendToInstance, so PR #57's gate did not cover it. ts-reviewer flagged the
+// gap on PR #57 (Out-of-scope Observation 1). This block verifies the gate
+// in three states, scoped per ts-lead's follow-up dispatch:
+//   (a) mixed — limited targets warn + skip, others receive
+//   (b) all limited — every target warns, zero IPC sends
+//   (c) all not limited — behaves identically to pre-fix
+//
+// BroadcastRequestKind already excludes "report", so no kind-bypass is needed.
+
+interface MockTargetSet {
+  ipcs: Record<string, MockIpcChannel>;
+  ctx: any; // OutboundContext; uses vitest mocks so cast for brevity
+}
+
+function makeBroadcastCtx(targetNames: string[], costGuard: CostGuardMock | null): MockTargetSet {
+  const ipcs: Record<string, MockIpcChannel> = {};
+  const instanceIpcClients = new Map<string, { send: (msg: unknown) => void }>();
+  // sender's own ipc — broadcast filters it out by name match
+  const senderIpc = mockIpc();
+  ipcs.sender = senderIpc;
+  instanceIpcClients.set("sender", senderIpc.ipc);
+  for (const name of targetNames) {
+    const ch = mockIpc();
+    ipcs[name] = ch;
+    instanceIpcClients.set(name, ch.ipc);
+  }
+  return {
+    ipcs,
+    ctx: {
+      fleetConfig: { instances: Object.fromEntries(["sender", ...targetNames].map(n => [n, { working_directory: `/tmp/${n}` }])) },
+      adapter: null,
+      logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() },
+      routing: { resolve: () => undefined },
+      instanceIpcClients,
+      lifecycle: { daemons: new Map() },
+      sessionRegistry: new Map(),
+      eventLog: null,
+      costGuard,
+      lastActivityMs: () => 0,
+      startInstance: vi.fn(),
+      connectIpcToInstance: vi.fn(),
+      saveFleetConfig: vi.fn(),
+    },
+  };
+}
+
+describe("#24 follow-up — cost-guard pre-check at broadcast dispatch", () => {
+  // Per-target isLimited mock: only the names in `limitedSet` are over budget.
+  function partialCostGuard(limitedSet: Set<string>, limitUsd = 5): CostGuardMock {
+    const limitCents = limitUsd * 100;
+    return {
+      isLimited: vi.fn((name: string) => limitedSet.has(name)),
+      getLimitCents: vi.fn(() => limitCents),
+      getDailyCostCents: vi.fn((name: string) => limitedSet.has(name) ? limitCents + 100 : 0),
+    };
+  }
+
+  it("(a) mixed targets — limited skipped with warning, others delivered", async () => {
+    const cg = partialCostGuard(new Set(["target-b"]));
+    const { ctx, ipcs } = makeBroadcastCtx(["target-a", "target-b", "target-c"], cg);
+    const handler = outboundHandlers.get("broadcast")!;
+    const respond = vi.fn();
+
+    await handler(ctx, { message: "hello fleet", targets: ["target-a", "target-b", "target-c"] }, respond, meta);
+
+    expect(ipcs["target-a"].messages).toHaveLength(1);
+    expect(ipcs["target-b"].messages).toHaveLength(0);
+    expect(ipcs["target-c"].messages).toHaveLength(1);
+
+    expect(respond).toHaveBeenCalledTimes(1);
+    const result = respond.mock.calls[0][0] as {
+      sent_to: string[];
+      failed: string[];
+      cost_limited: { target: string; warning: string }[];
+      count: number;
+    };
+    expect(result.sent_to).toEqual(["target-a", "target-c"]);
+    expect(result.cost_limited).toHaveLength(1);
+    expect(result.cost_limited[0].target).toBe("target-b");
+    expect(result.cost_limited[0].warning).toContain("cost-guard");
+    expect(result.cost_limited[0].warning).toContain("'target-b'");
+    expect(result.cost_limited[0].warning).toContain("$5.00");
+    expect(result.failed).toEqual([]);
+    expect(result.count).toBe(2);
+  });
+
+  it("(b) all targets limited — every target warns, zero IPC sends", async () => {
+    const cg = partialCostGuard(new Set(["target-a", "target-b", "target-c"]));
+    const { ctx, ipcs } = makeBroadcastCtx(["target-a", "target-b", "target-c"], cg);
+    const handler = outboundHandlers.get("broadcast")!;
+    const respond = vi.fn();
+
+    await handler(ctx, { message: "hello fleet", targets: ["target-a", "target-b", "target-c"] }, respond, meta);
+
+    expect(ipcs["target-a"].messages).toHaveLength(0);
+    expect(ipcs["target-b"].messages).toHaveLength(0);
+    expect(ipcs["target-c"].messages).toHaveLength(0);
+
+    const result = respond.mock.calls[0][0] as {
+      sent_to: string[];
+      cost_limited: { target: string }[];
+      count: number;
+    };
+    expect(result.sent_to).toEqual([]);
+    expect(result.cost_limited.map(e => e.target).sort()).toEqual(["target-a", "target-b", "target-c"]);
+    expect(result.count).toBe(0);
+  });
+
+  it("(c) no targets limited — behaves identically to pre-fix (cost_limited empty)", async () => {
+    const cg = partialCostGuard(new Set());
+    const { ctx, ipcs } = makeBroadcastCtx(["target-a", "target-b"], cg);
+    const handler = outboundHandlers.get("broadcast")!;
+    const respond = vi.fn();
+
+    await handler(ctx, { message: "hello fleet", targets: ["target-a", "target-b"] }, respond, meta);
+
+    expect(ipcs["target-a"].messages).toHaveLength(1);
+    expect(ipcs["target-b"].messages).toHaveLength(1);
+
+    const result = respond.mock.calls[0][0] as {
+      sent_to: string[];
+      cost_limited: unknown[];
+      count: number;
+    };
+    expect(result.sent_to).toEqual(["target-a", "target-b"]);
+    expect(result.cost_limited).toEqual([]);
+    expect(result.count).toBe(2);
+  });
+});
