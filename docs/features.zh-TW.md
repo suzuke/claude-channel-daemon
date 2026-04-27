@@ -1,5 +1,13 @@
 # 功能 (Features)
 
+> [!WARNING]
+> **AgEnD 已進入 maintenance mode**。新功能開發已移至
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** —— 一個以 Rust 重寫的版本,
+> 具備原生 PTY multiplexing、跨平台支援 (macOS / Linux / Windows),以及內建的多 pane TUI。
+> 所有新功能都將在該版本推出。
+>
+> 本文件描述 `@suzuke/agend` 的功能範圍,`agend-terminal` 的新功能可能有所差異。
+
 ## Fleet 模式 — 一個機器人，多個專案
 
 每個 Telegram 論壇主題 (Forum Topic) 都映射到一個獨立的 Claude Code session。建立主題、選擇專案目錄，Claude 就會開始工作。刪除主題，實例 (instance) 就會停止。擴展到您的機器所能處理的任意數量的專案。

@@ -1,5 +1,10 @@
 # 更新日誌 (Changelog)
 
+> [!WARNING]
+> **AgEnD 已進入 maintenance mode**。新功能開發已移至
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)**。本日誌之後的新增條目將
+> 僅涵蓋安全修補與後端 CLI 相容性更新 —— 新功能開發以新 repo 為主。
+
 本專案的所有顯著變更都將記錄在此檔案中。
 
 格式基於 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)。

@@ -1,5 +1,13 @@
 # CLI 參考 (CLI Reference)
 
+> [!WARNING]
+> **AgEnD 已進入 maintenance mode**。新功能開發已移至
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** —— 一個以 Rust 重寫的版本,
+> 具備原生 PTY multiplexing、跨平台支援 (macOS / Linux / Windows),以及內建的多 pane TUI。
+> 所有新功能都將在該版本推出。
+>
+> 本文件僅為現有 `@suzuke/agend` 安裝的使用者保留。
+
 ## Telegram 指令 (General 主題)
 
 | 指令 | 描述 |

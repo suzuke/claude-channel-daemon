@@ -1,5 +1,14 @@
 # Plugin Development Guide
 
+> [!WARNING]
+> **AgEnD is in maintenance mode.** Active development has moved to
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** — a Rust rewrite with
+> native PTY multiplexing, cross-platform support (macOS / Linux / Windows), and a
+> built-in multi-pane TUI. All new features land there.
+>
+> This guide remains for plugin authors targeting existing `@suzuke/agend` installs.
+> The plugin protocol in `agend-terminal` may differ.
+
 Build channel adapter plugins for AgEnD. This guide uses the Discord adapter (`@suzuke/agend-plugin-discord`) as a reference implementation.
 
 ## Plugin Architecture

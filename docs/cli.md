@@ -1,5 +1,13 @@
 # CLI Reference
 
+> [!WARNING]
+> **AgEnD is in maintenance mode.** Active development has moved to
+> **[agend-terminal](https://github.com/suzuke/agend-terminal)** — a Rust rewrite with
+> native PTY multiplexing, cross-platform support (macOS / Linux / Windows), and a
+> built-in multi-pane TUI. All new features land there.
+>
+> This document remains for users on existing `@suzuke/agend` installs.
+
 ## Telegram commands (General topic)
 
 | Command | Description |
