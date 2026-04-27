@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: "🚀 New features → agend-terminal (Rust successor)"
+    url: https://github.com/suzuke/agend-terminal/issues/new
+    about: "AgEnD (TS) is in maintenance mode. New features and most non-security issues land in agend-terminal. Blank issues remain open for security reports and critical bugs."
